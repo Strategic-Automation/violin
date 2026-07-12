@@ -1,27 +1,29 @@
 name: violin-guard
-version: "1.2.0"
+version: "1.3.0"
 description: Typed scope guards and an execute-and-record boundary with bounded synchronization windows.
-type: tool
-toolsets:
-  violin_guard:
-    description: Violin engagement guard tools
-app_style: sh
+kind: standalone
 provides_tools:
   - violin_check_command
   - violin_record_ptt
   - violin_record_hypothesis
-  - violin_record_history
   - violin_exec
   - violin_exec_status
   - violin_exec_cancel
+  - violin_sync_done
+  - violin_heartbeat_done
+  - violin_exec_burst
+  - violin_target
+  - violin_status
   - violin_search_exploit
   - violin_nmap
   - violin_httpx
   - violin_nuclei
   - violin_ffuf
-  - violin_sync_done
-  - violin_heartbeat_done
-  - violin_message_tick
-  - violin_exec_burst
-  - violin_target
-  - violin_status
+hooks:
+  - pre_llm_call
+  - on_session_reset
+  - on_session_finalize
+toolsets:
+  violin_guard:
+    description: Violin engagement guard tools
+app_style: sh

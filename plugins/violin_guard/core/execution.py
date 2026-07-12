@@ -1,22 +1,38 @@
-"""Guarded process execution and evidence persistence for Violin tools."""
+"""Guarded process execution, evidence persistence, and receipt registry.
+
+This is the ONLY module in core/ that uses subprocess. All others are pure.
+"""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-import shutil
 import signal
 import subprocess
 import time
 import uuid
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from guard.core import LOCAL_TOOLS, command_leading_tool
+from . import state
+from .phases import Phase, normalize_phase
+from .command import command_leading_tool, LOCAL_TOOLS
 
-from . import utils
+__all__ = [
+    "ExecutionReceipt",
+    "execute",
+    "status",
+    "cancel",
+    "SCHEMA_VERSION",
+    "DEFAULT_TIMEOUT",
+    "MAX_TIMEOUT",
+    "MIN_TIMEOUT",
+    "MAX_OUTPUT_BYTES",
+    "PREVIEW_BYTES",
+]
 
 SCHEMA_VERSION = 2
 DEFAULT_TIMEOUT = 180
@@ -85,12 +101,16 @@ def _command_argv(
         if os.name == "nt":
             return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command]
         return ["/bin/sh", "-lc", command]
+
     if backend != "docker":
         raise ValueError("backend must be local or docker")
+
     if not DOCKER_CONTAINER_RE.fullmatch(container):
         raise ValueError("invalid Docker container name")
+
     if shutil.which("docker") is None:
         raise ValueError("Docker backend unavailable: docker executable not found")
+
     relative = cwd.relative_to(eng_dir).as_posix()
     docker_cwd = "/engagement" if relative == "." else f"/engagement/{relative}"
     return ["docker", "exec", "-i", "-w", docker_cwd, container, "sh", "-lc", command]
@@ -120,32 +140,7 @@ def _preview(path: Path) -> str:
 
 
 def _record_history(eng_dir: Path, command: str, exit_code: int, phase: str, evidence: str) -> None:
-    result = utils.run_guard(
-        "record-history",
-        eng_dir=str(eng_dir),
-        command=command,
-        exit_code=exit_code,
-        phase=phase,
-        evidence=evidence,
-    )
-    if result.returncode != 0:
-        raise RuntimeError((result.stdout + result.stderr).strip() or "history recording failed")
-
-
-def _commit_guard_state(eng_dir: Path, command: str, phase: str) -> int:
-    utils.record_ok_check(str(eng_dir), command, phase)
-    remaining = utils.spend_sync_credit(str(eng_dir))
-    utils.mark_pending_sync(str(eng_dir), command, phase)
-    count = utils.tick_command(str(eng_dir))
-    if count % utils.COMMAND_INTERVAL == 0 and phase.upper().replace("-", "_") not in {
-        "EXPLOITATION",
-        "POST_EXPLOITATION",
-    }:
-        utils.set_heartbeat_pending(
-            str(eng_dir),
-            f"Reached {count} executed target commands. Review engagement files for drift.",
-        )
-    return remaining
+    state.append_history(eng_dir, command, phase, exit_code, evidence)
 
 
 def execute(
@@ -171,8 +166,9 @@ def execute(
     stderr_path = evidence_dir / f"{stem}.stderr.txt"
     manifest_path = evidence_dir / f"{stem}.json"
     registry_path = engagement / "state" / "executions" / f"{execution_id}.json"
+
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    argv = _command_argv(command, backend, workdir, engagement, docker_container)
+
     record: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "execution_id": execution_id,
@@ -185,10 +181,12 @@ def execute(
         "pid": None,
     }
     _atomic_json(registry_path, record)
+
     timed_out = False
     output_limited = False
     cancelled = False
     proc: subprocess.Popen | None = None
+
     try:
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
             popen_kwargs: dict[str, Any] = {
@@ -202,9 +200,13 @@ def execute(
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 popen_kwargs["start_new_session"] = True
+
+            argv = _command_argv(command, backend, workdir, engagement, docker_container)
             proc = subprocess.Popen(argv, **popen_kwargs)
+
             record.update(status="running", pid=proc.pid)
             _atomic_json(registry_path, record)
+
             deadline = time.monotonic() + timeout
             while proc.poll() is None:
                 current = _read_json(registry_path)
@@ -223,6 +225,7 @@ def execute(
                     _terminate_pid(proc.pid)
                     break
                 time.sleep(0.1)
+
             try:
                 exit_code = proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -236,6 +239,7 @@ def execute(
     rel_manifest = manifest_path.relative_to(engagement).as_posix()
     rel_stdout = stdout_path.relative_to(engagement).as_posix()
     rel_stderr = stderr_path.relative_to(engagement).as_posix()
+
     receipt = {
         **record,
         "status": "cancelled"
@@ -258,11 +262,14 @@ def execute(
     }
     _atomic_json(manifest_path, receipt)
     _atomic_json(registry_path, receipt)
+
     _record_history(engagement, command, exit_code, phase, rel_manifest)
+
     if command_leading_tool(command) in LOCAL_TOOLS:
-        remaining = utils.sync_credit_remaining(str(engagement))
+        remaining = state.sync_credit_remaining(str(engagement))
     else:
         remaining = _commit_guard_state(engagement, command, phase)
+
     return {
         **receipt,
         "executed": True,
@@ -271,6 +278,21 @@ def execute(
         "sync_required": remaining <= 0,
         "sync_credit_remaining": remaining,
     }
+
+
+def _commit_guard_state(eng_dir: Path, command: str, phase: str) -> int:
+    state.record_ok_check(str(eng_dir), command, phase)
+    remaining = state.spend_sync_credit(str(eng_dir))
+    state.mark_pending_sync(str(eng_dir), command, phase)
+    count = state.tick_command(str(eng_dir))
+    from .phases import normalize_phase, suppresses_heartbeat
+    phase_enum = normalize_phase(phase)
+    if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
+        state.set_heartbeat_pending(
+            str(eng_dir),
+            f"Reached {count} executed target commands. Review engagement files for drift.",
+        )
+    return remaining
 
 
 def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
@@ -290,11 +312,17 @@ def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
     record = status(str(engagement), execution_id)
     if record.get("status") not in {"starting", "running"}:
         return {**record, "cancel_requested": False, "message": "execution is not running"}
+
     pid = record.get("pid")
     if not isinstance(pid, int) or pid <= 0:
         raise ValueError("running execution has no valid tracked PID")
+
     record["cancel_requested"] = True
     record["cancel_requested_at"] = _utc_now()
     _atomic_json(path, record)
     _terminate_pid(pid)
+
     return {**record, "message": "cancellation requested for tracked process group"}
+
+
+import shutil
