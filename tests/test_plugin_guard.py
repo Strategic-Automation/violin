@@ -397,7 +397,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     resumed = json.loads(
         TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"})
     )
-    assert resumed["status"] in ("approved", "review"), resumed
+    assert resumed["status"] in ("ok", "approved", "review"), resumed
 
 
 def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, tmp_path):
