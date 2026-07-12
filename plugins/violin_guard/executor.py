@@ -1,0 +1,300 @@
+"""Guarded process execution and evidence persistence for Violin tools."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import time
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from guard.core import LOCAL_TOOLS, command_leading_tool
+
+from . import utils
+
+SCHEMA_VERSION = 2
+DEFAULT_TIMEOUT = 180
+MIN_TIMEOUT = 1
+MAX_TIMEOUT = 1800
+MAX_OUTPUT_BYTES = 10 * 1024 * 1024
+PREVIEW_BYTES = 32 * 1024
+DOCKER_CONTAINER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _resolve_engagement(eng_dir: str) -> Path:
+    path = Path(eng_dir).resolve()
+    if not path.is_dir():
+        raise ValueError(f"engagement directory not found: {path}")
+    return path
+
+
+def _resolve_cwd(eng_dir: Path, cwd: str) -> Path:
+    candidate = (eng_dir / (cwd or ".")).resolve()
+    try:
+        candidate.relative_to(eng_dir)
+    except ValueError as exc:
+        raise ValueError("cwd must stay inside the engagement directory") from exc
+    if not candidate.is_dir():
+        raise ValueError(f"execution cwd not found: {candidate}")
+    return candidate
+
+
+def _label(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-.")
+    return (cleaned or "command")[:64]
+
+
+def _timeout(value: Any) -> int:
+    try:
+        parsed = int(value or DEFAULT_TIMEOUT)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("timeout_seconds must be an integer") from exc
+    if not MIN_TIMEOUT <= parsed <= MAX_TIMEOUT:
+        raise ValueError(f"timeout_seconds must be between {MIN_TIMEOUT} and {MAX_TIMEOUT}")
+    return parsed
+
+
+def _command_argv(
+    command: str, backend: str, cwd: Path, eng_dir: Path, container: str
+) -> list[str]:
+    if backend == "local":
+        if os.name == "nt":
+            return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command]
+        return ["/bin/sh", "-lc", command]
+    if backend != "docker":
+        raise ValueError("backend must be local or docker")
+    if not DOCKER_CONTAINER_RE.fullmatch(container):
+        raise ValueError("invalid Docker container name")
+    if shutil.which("docker") is None:
+        raise ValueError("Docker backend unavailable: docker executable not found")
+    relative = cwd.relative_to(eng_dir).as_posix()
+    docker_cwd = "/engagement" if relative == "." else f"/engagement/{relative}"
+    return ["docker", "exec", "-i", "-w", docker_cwd, container, "sh", "-lc", command]
+
+
+def _terminate_pid(pid: int) -> None:
+    if pid <= 0:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(pid, signal.SIGTERM)
+            time.sleep(0.2)
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _preview(path: Path) -> str:
+    with path.open("rb") as handle:
+        return handle.read(PREVIEW_BYTES).decode("utf-8", errors="replace")
+
+
+def _record_history(eng_dir: Path, command: str, exit_code: int, phase: str, evidence: str) -> None:
+    result = utils.run_guard(
+        "record-history",
+        eng_dir=str(eng_dir),
+        command=command,
+        exit_code=exit_code,
+        phase=phase,
+        evidence=evidence,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stdout + result.stderr).strip() or "history recording failed")
+
+
+def _commit_guard_state(eng_dir: Path, command: str, phase: str) -> int:
+    utils.record_ok_check(str(eng_dir), command, phase)
+    remaining = utils.spend_sync_credit(str(eng_dir))
+    utils.mark_pending_sync(str(eng_dir), command, phase)
+    count = utils.tick_command(str(eng_dir))
+    if count % utils.COMMAND_INTERVAL == 0 and phase.upper().replace("-", "_") not in {
+        "EXPLOITATION",
+        "POST_EXPLOITATION",
+    }:
+        utils.set_heartbeat_pending(
+            str(eng_dir),
+            f"Reached {count} executed target commands. Review engagement files for drift.",
+        )
+    return remaining
+
+
+def execute(
+    command: str,
+    *,
+    eng_dir: str,
+    phase: str,
+    backend: str = "local",
+    timeout_seconds: Any = DEFAULT_TIMEOUT,
+    cwd: str = "",
+    label: str = "",
+    docker_container: str = "kali-pentest",
+) -> dict[str, Any]:
+    """Execute one already-authorized command and persist its complete receipt."""
+    engagement = _resolve_engagement(eng_dir)
+    workdir = _resolve_cwd(engagement, cwd)
+    timeout = _timeout(timeout_seconds)
+    execution_id = str(uuid.uuid4())
+    started_at = _utc_now()
+    stem = f"{started_at[:19].replace(':', '')}-{execution_id[:8]}-{_label(label)}"
+    evidence_dir = engagement / "evidence" / "executions"
+    stdout_path = evidence_dir / f"{stem}.stdout.txt"
+    stderr_path = evidence_dir / f"{stem}.stderr.txt"
+    manifest_path = evidence_dir / f"{stem}.json"
+    registry_path = engagement / "state" / "executions" / f"{execution_id}.json"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    argv = _command_argv(command, backend, workdir, engagement, docker_container)
+    record: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "execution_id": execution_id,
+        "status": "starting",
+        "backend": backend,
+        "command": command,
+        "phase": phase,
+        "cwd": str(workdir),
+        "started_at": started_at,
+        "pid": None,
+    }
+    _atomic_json(registry_path, record)
+    timed_out = False
+    output_limited = False
+    cancelled = False
+    proc: subprocess.Popen | None = None
+    try:
+        with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+            popen_kwargs: dict[str, Any] = {
+                "cwd": str(workdir),
+                "stdout": stdout_file,
+                "stderr": stderr_file,
+                "stdin": subprocess.DEVNULL,
+                "shell": False,
+            }
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            else:
+                popen_kwargs["start_new_session"] = True
+            proc = subprocess.Popen(argv, **popen_kwargs)
+            record.update(status="running", pid=proc.pid)
+            _atomic_json(registry_path, record)
+            deadline = time.monotonic() + timeout
+            while proc.poll() is None:
+                current = _read_json(registry_path)
+                if current.get("cancel_requested"):
+                    cancelled = True
+                    _terminate_pid(proc.pid)
+                    break
+                if time.monotonic() >= deadline:
+                    timed_out = True
+                    _terminate_pid(proc.pid)
+                    break
+                stdout_file.flush()
+                stderr_file.flush()
+                if stdout_path.stat().st_size + stderr_path.stat().st_size > MAX_OUTPUT_BYTES:
+                    output_limited = True
+                    _terminate_pid(proc.pid)
+                    break
+                time.sleep(0.1)
+            try:
+                exit_code = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                _terminate_pid(proc.pid)
+                exit_code = proc.wait(timeout=5)
+    except Exception as exc:
+        exit_code = -1
+        stderr_path.write_text(f"executor error: {exc}\n", encoding="utf-8")
+
+    completed_at = _utc_now()
+    rel_manifest = manifest_path.relative_to(engagement).as_posix()
+    rel_stdout = stdout_path.relative_to(engagement).as_posix()
+    rel_stderr = stderr_path.relative_to(engagement).as_posix()
+    receipt = {
+        **record,
+        "status": "cancelled"
+        if cancelled
+        else "timed_out"
+        if timed_out
+        else "output_limited"
+        if output_limited
+        else "completed",
+        "completed_at": completed_at,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "cancelled": cancelled,
+        "output_limited": output_limited,
+        "evidence_paths": {
+            "manifest": rel_manifest,
+            "stdout": rel_stdout,
+            "stderr": rel_stderr,
+        },
+    }
+    _atomic_json(manifest_path, receipt)
+    _atomic_json(registry_path, receipt)
+    _record_history(engagement, command, exit_code, phase, rel_manifest)
+    if command_leading_tool(command) in LOCAL_TOOLS:
+        remaining = utils.sync_credit_remaining(str(engagement))
+    else:
+        remaining = _commit_guard_state(engagement, command, phase)
+    return {
+        **receipt,
+        "executed": True,
+        "stdout_preview": _preview(stdout_path),
+        "stderr_preview": _preview(stderr_path),
+        "sync_required": remaining <= 0,
+        "sync_credit_remaining": remaining,
+    }
+
+
+def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
+    engagement = _resolve_engagement(eng_dir)
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", execution_id):
+        raise ValueError("invalid execution_id")
+    path = engagement / "state" / "executions" / f"{execution_id}.json"
+    record = _read_json(path)
+    if not record:
+        raise ValueError("execution not found")
+    return record
+
+
+def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
+    engagement = _resolve_engagement(eng_dir)
+    path = engagement / "state" / "executions" / f"{execution_id}.json"
+    record = status(str(engagement), execution_id)
+    if record.get("status") not in {"starting", "running"}:
+        return {**record, "cancel_requested": False, "message": "execution is not running"}
+    pid = record.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        raise ValueError("running execution has no valid tracked PID")
+    record["cancel_requested"] = True
+    record["cancel_requested_at"] = _utc_now()
+    _atomic_json(path, record)
+    _terminate_pid(pid)
+    return {**record, "message": "cancellation requested for tracked process group"}

@@ -12,16 +12,18 @@ import re
 import shutil
 from pathlib import Path
 
-from guard.core import CheckResult, ROOT
+import yaml
+
+from guard.core import ROOT, CheckResult
 
 # Map of required file path (relative to eng_dir) -> (template path, post-create command).
 # post_create_cmd None means the template itself is the bootstrap content; otherwise we
 # initialise the file with a one-liner (e.g. history.md needs `# Command History — date`).
 _REPAIR_TARGETS = {
-    Path("scope/scope.yaml"):         ("skills/pentest/templates/scope-template.yaml", None),
-    Path("state/ptt.md"):             ("skills/pentest/templates/ptt.md",             None),
-    Path("hypotheses.md"):            ("skills/pentest/templates/hypothesis-board.md", None),
-    Path("state/history.md"):         (None, "# Command History — repair placeholder\n"),
+    Path("scope/scope.yaml"): ("skills/pentest/templates/scope-template.yaml", None),
+    Path("state/ptt.md"): ("skills/pentest/templates/ptt.md", None),
+    Path("hypotheses.md"): ("skills/pentest/templates/hypothesis-board.md", None),
+    Path("state/history.md"): (None, "# Command History — repair placeholder\n"),
 }
 
 # Host/IP extraction from an engagement directory name of the form
@@ -64,7 +66,6 @@ def init_engagement(eng_dir: Path, host: str | None = None) -> int:
             content = src.read_text(encoding="utf-8")
             if rel == Path("scope/scope.yaml"):
                 # Pre-fill the in-scope target so the scope is guard-clean.
-                import yaml
                 data = yaml.safe_load(content)
                 data["targets"]["ip_addresses"] = [host]
                 data["engagement"]["date"] = _dt.date.today().isoformat()
@@ -73,8 +74,7 @@ def init_engagement(eng_dir: Path, host: str | None = None) -> int:
             # stamp it touched so the bootstrap stale-PTT REVIEW doesn't fire
             # on a brand-new engagement.
             if rel == Path("state/ptt.md"):
-                import re as _re
-                content = _re.sub(
+                content = re.sub(
                     r"\*Last updated:.*\*",
                     f"*Last updated: {_dt.datetime.now().strftime('%Y-%m-%d %H:%M')}*",
                     content,
@@ -103,10 +103,10 @@ def check_skill_loaded(args: argparse.Namespace) -> int:
       - explicit ``--skill-loaded-file`` if provided
       - otherwise ``$ENG_DIR/state/.skill-loaded-<session-id>``
 
-    The marker must be recreated after session boundaries that invalidate
-    in-context knowledge: ``/new``, ``/goal set``, and context compression.
+    The marker must be recreated after workflow boundaries that invalidate
+    in-context knowledge: ``/goal set``, context compression, or explicit
+    state reload in the current session. Do not request ``/new`` for recovery.
     """
-    from guard.core import ROOT
 
     result = CheckResult()
     eng_dir = Path(args.eng_dir or "")
@@ -123,7 +123,9 @@ def check_skill_loaded(args: argparse.Namespace) -> int:
     marker = Path(explicit) if explicit else (eng_dir / "state" / f".skill-loaded-{session_id}")
     try:
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(f"skill-loaded: skills/pentest/SKILL.md\nsession: {session_id}\n", encoding="utf-8")
+        marker.write_text(
+            f"skill-loaded: skills/pentest/SKILL.md\nsession: {session_id}\n", encoding="utf-8"
+        )
     except Exception as exc:  # noqa: BLE001 - filesystem write should be explicit
         result.add_error(f"failed to write skill-loaded marker: {exc}")
         result.print()
@@ -134,27 +136,35 @@ def check_skill_loaded(args: argparse.Namespace) -> int:
 
 
 def check_bootstrap(args: argparse.Namespace) -> int:
-    """Verify engagement bootstrap is complete.
+    """Verify engagement bootstrap is complete (prints the report).
 
-    Required artifacts (all must exist and be non-empty):
+    See :func:`bootstrap_status` for the pure, non-printing variant used by the
+    ``violin_status`` plugin tool.
+    """
+    result = bootstrap_status(args)
+    result.print()
+    if result.errors:
+        return 1
+    if result.warnings:
+        return 2
+    return 0
 
-    - $ENG_DIR/                        directory exists
-    - $ENG_DIR/scope/scope.yaml        scope file present and parseable
-    - $ENG_DIR/state/ptt.md            Pentesting Task Tree present
-    - $ENG_DIR/hypotheses.md           hypothesis board present
-    - $ENG_DIR/state/history.md        command history initialised
 
-    Exit codes:
-      0 = bootstrap complete
-      1 = bootstrap missing (one or more required artifacts absent)
-      2 = bootstrap partial (artifacts present but invalid)
+def bootstrap_status(args: argparse.Namespace) -> CheckResult:
+    """Pure bootstrap check: returns a :class:`CheckResult` without printing.
+
+    Exit codes implied by the result: 0 = complete, 1 = missing (error),
+    2 = partial (warning). Auto-repair is applied only when
+    ``getattr(args, "auto_repair", False)`` is set.
     """
     from guard.record import _ptt_is_stale
 
     result = CheckResult()
     eng_dir_raw = args.eng_dir or ""
     if not eng_dir_raw:
-        result.add_error("BOOTSTRAP REQUIRED: --eng-dir is empty (export ENG_DIR or pass --eng-dir)")
+        result.add_error(
+            "BOOTSTRAP REQUIRED: --eng-dir is empty (export ENG_DIR or pass --eng-dir)"
+        )
     eng_dir = Path(eng_dir_raw)
 
     required = [
@@ -176,33 +186,46 @@ def check_bootstrap(args: argparse.Namespace) -> int:
             # bootstrap with a precise, recoverable error. Skipped for the
             # engagement root itself, which is supposed to be a directory.
             template = (
-                "hypothesis-board.md" if path.name == "hypotheses.md"
-                else "ptt.md" if path.name == "ptt.md"
-                else "history.md" if path.name == "history.md"
+                "hypothesis-board.md"
+                if path.name == "hypotheses.md"
+                else "ptt.md"
+                if path.name == "ptt.md"
+                else "history.md"
+                if path.name == "history.md"
                 else "scope-template.yaml"
             )
             result.add_error(
                 f"BOOTSTRAP CORRUPT: {label} at {path} is a DIRECTORY but must be a FILE. "
-                f"Fix: rm -rf \"{path}\" && cp skills/pentest/templates/{template} \"{path}\""
+                f'Fix: rm -rf "{path}" && cp skills/pentest/templates/{template} "{path}"'
             )
         elif path.is_file() and path.stat().st_size == 0:
             result.add_warning(f"bootstrap artifact is empty: {path}")
 
     if eng_dir_raw and eng_dir.exists() and not (eng_dir / "scope" / "scope.yaml").exists():
-        result.add_info("create the scope with: cp skills/pentest/templates/scope-template.yaml <ENG_DIR>/scope/scope.yaml")
+        result.add_info(
+            "create the scope with: cp skills/pentest/templates/scope-template.yaml <ENG_DIR>/scope/scope.yaml"
+        )
     if eng_dir_raw and eng_dir.exists() and not (eng_dir / "state" / "ptt.md").exists():
-        result.add_info("create the PTT with: cp skills/pentest/templates/ptt.md <ENG_DIR>/state/ptt.md")
+        result.add_info(
+            "create the PTT with: cp skills/pentest/templates/ptt.md <ENG_DIR>/state/ptt.md"
+        )
     if eng_dir_raw and eng_dir.exists() and not (eng_dir / "hypotheses.md").exists():
-        result.add_info("create the hypothesis board with: cp skills/pentest/templates/hypothesis-board.md <ENG_DIR>/hypotheses.md")
+        result.add_info(
+            "create the hypothesis board with: cp skills/pentest/templates/hypothesis-board.md <ENG_DIR>/hypotheses.md"
+        )
     if eng_dir_raw and eng_dir.exists() and not (eng_dir / "state" / "history.md").exists():
-        result.add_info("initialise command history with: echo \"# Command History — $(date +%F)\" > <ENG_DIR>/state/history.md")
+        result.add_info(
+            'initialise command history with: echo "# Command History — $(date +%F)" > <ENG_DIR>/state/history.md'
+        )
 
     # Stale-PTT drift detection at session resume: if every PT-XXX row is still
     # in the pristine [ ] state, the engagement was not touched since bootstrap.
     if eng_dir_raw and eng_dir.exists():
         ptt_check = eng_dir / "state" / "ptt.md"
         if ptt_check.exists() and _ptt_is_stale(ptt_check):
-            result.add_warning("PTT has never been updated (all PT-XXX rows are [ ]); possible drift at session resume")
+            result.add_warning(
+                "PTT has never been updated (all PT-XXX rows are [ ]); possible drift at session resume"
+            )
 
     # Auto-repair pass (only when --auto-repair is passed, so the default check
     # stays strict): heal bootstrap drift. Two classes are healed:
@@ -217,12 +240,7 @@ def check_bootstrap(args: argparse.Namespace) -> int:
 
     if not result.errors and not result.warnings:
         result.add_info(f"bootstrap complete: {eng_dir}")
-    result.print()
-    if result.errors:
-        return 1
-    if result.warnings:
-        return 2
-    return 0
+    return result
 
 
 def _auto_repair_corrupt_artifacts(eng_dir: Path, result: CheckResult) -> CheckResult:
@@ -255,9 +273,7 @@ def _auto_repair_corrupt_artifacts(eng_dir: Path, result: CheckResult) -> CheckR
                     f"from {template_rel or 'inline placeholder'}"
                 )
             except Exception as exc:  # noqa: BLE001
-                new_errors.append(
-                    f"AUTO-REPAIR FAILED for {rel} at {target}: {exc}"
-                )
+                new_errors.append(f"AUTO-REPAIR FAILED for {rel} at {target}: {exc}")
             continue
 
         if not target.exists():
@@ -266,17 +282,19 @@ def _auto_repair_corrupt_artifacts(eng_dir: Path, result: CheckResult) -> CheckR
                 _create_artifact(eng_dir, rel, template_rel, placeholder)
                 new_infos.append(f"AUTO-REPAIR: created missing {target} from template")
             except Exception as exc:  # noqa: BLE001
-                new_errors.append(
-                    f"AUTO-REPAIR FAILED for {rel} at {target}: {exc}"
-                )
+                new_errors.append(f"AUTO-REPAIR FAILED for {rel} at {target}: {exc}")
             continue
 
     # Strip the BOOTSTRAP REQUIRED / CORRUPT errors we just repaired.
     for e in result.errors:
         if "missing engagement directory" in e or any(
             rel.name in e
-            for rel in (Path("scope/scope.yaml"), Path("state/ptt.md"),
-                        Path("hypotheses.md"), Path("state/history.md"))
+            for rel in (
+                Path("scope/scope.yaml"),
+                Path("state/ptt.md"),
+                Path("hypotheses.md"),
+                Path("state/history.md"),
+            )
         ):
             new_infos.append(f"resolved: {e}")
             continue
@@ -287,8 +305,9 @@ def _auto_repair_corrupt_artifacts(eng_dir: Path, result: CheckResult) -> CheckR
     return CheckResult(errors=new_errors, warnings=new_warnings, infos=new_infos)
 
 
-def _create_artifact(eng_dir: Path, rel: Path, template_rel: str | None,
-                     placeholder: str | None) -> None:
+def _create_artifact(
+    eng_dir: Path, rel: Path, template_rel: str | None, placeholder: str | None
+) -> None:
     """Create a single required bootstrap artifact at ``eng_dir / rel``.
 
     Reuses the same logic as ``init_engagement`` so a missing scope lands
@@ -301,7 +320,6 @@ def _create_artifact(eng_dir: Path, rel: Path, template_rel: str | None,
         return
     content = (ROOT / template_rel).read_text(encoding="utf-8")
     if rel == Path("scope/scope.yaml"):
-        import yaml
         data = yaml.safe_load(content)
         data["targets"]["ip_addresses"] = [_derive_host(eng_dir)]
         data["engagement"]["date"] = _dt.date.today().isoformat()

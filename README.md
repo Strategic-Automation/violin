@@ -113,14 +113,14 @@ graph TB
     subgraph "Your Machine"
         HE["Hermes Agent"]
         VI["Violin Profile"]
-        GUARD["violin_guard.py"]
+        GUARD["violin_guard execution + evidence"]
     end
     
     subgraph "Violin Skills"
         SK["SKILL.md"]
         PB["31 Playbooks"]
         REF["8 References"]
-        TEMP["6 Templates"]
+        TEMP["10 Templates"]
     end
     
     subgraph "Hermes Built-in Tools"
@@ -218,7 +218,7 @@ violin/
     ├── SKILL.md            # Orchestrator skill (playbook index, workflow)
     ├── playbooks/          # 31 playbooks (7 phase + 24 vuln-class)
     ├── references/         # 8 reference documents
-    └── templates/          # 6 templates (PTT, hypothesis board, scope, report, methodology gates, transparency boilerplate)
+    └── templates/          # 10 engagement, evidence, and methodology templates
 ```
 
 ---

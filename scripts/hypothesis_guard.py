@@ -15,10 +15,8 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -101,7 +99,9 @@ def record_hypothesis(args: argparse.Namespace) -> int:
         return 1
     if not hypotheses_path.exists():
         result.add_error(f"hypotheses.md not found: {hypotheses_path}")
-        result.add_info("bootstrap with: cp skills/pentest/templates/hypothesis-board.md \"$ENG_DIR/hypotheses.md\"")
+        result.add_info(
+            'bootstrap with: cp skills/pentest/templates/hypothesis-board.md "$ENG_DIR/hypotheses.md"'
+        )
         result.print()
         return 1
 
@@ -128,17 +128,19 @@ def record_hypothesis(args: argparse.Namespace) -> int:
     target_host = (args.target or "").strip()
     if not target_host:
         import re as _re
-        _m = _re.search(r"([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[0-9a-fA-F:]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", eng_dir.name)
+
+        _m = _re.search(
+            r"([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[0-9a-fA-F:]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})",
+            eng_dir.name,
+        )
         target_host = _m.group(1) if _m else "unknown-host"
 
     hypotheses = _parse_hypotheses(hypotheses_path)
     update_id = (args.id or "").strip().upper()
     target_hyp = None
-    target_index = None
-    for idx, hypothesis in enumerate(hypotheses):
+    for _idx, hypothesis in enumerate(hypotheses):
         if hypothesis.id.upper() == update_id:
             target_hyp = hypothesis
-            target_index = idx
             break
 
     fields = {
@@ -191,7 +193,9 @@ def record_hypothesis(args: argparse.Namespace) -> int:
         )
         new_text, subs = pattern.subn(replacement, text)
         if subs != 1:
-            result.add_error(f"failed to update hypothesis block {target_hyp.id}; match count={subs}")
+            result.add_error(
+                f"failed to update hypothesis block {target_hyp.id}; match count={subs}"
+            )
             result.print()
             return 1
         hypotheses_path.write_text(new_text, encoding="utf-8")
@@ -212,7 +216,9 @@ def check_hypothesis(args: argparse.Namespace) -> int:
         return 1
     if not hypotheses_path.exists():
         result.add_error(f"hypotheses.md not found: {hypotheses_path}")
-        result.add_info("bootstrap with: cp skills/pentest/templates/hypothesis-board.md \"$ENG_DIR/hypotheses.md\"")
+        result.add_info(
+            'bootstrap with: cp skills/pentest/templates/hypothesis-board.md "$ENG_DIR/hypotheses.md"'
+        )
         result.print()
         return 1
 
@@ -245,14 +251,16 @@ def check_hypothesis(args: argparse.Namespace) -> int:
         )
         result.add_info(
             "run: python scripts/hypothesis_guard.py record-hypothesis "
-            f"--eng-dir \"$ENG_DIR\" --service {service} --port {port} "
-            "--status researching --title \"<short title>\" --rationale \"<why>\""
+            f'--eng-dir "$ENG_DIR" --service {service} --port {port} '
+            '--status researching --title "<short title>" --rationale "<why>"'
         )
         result.print()
         return 1
 
     if requires_research and all(hypothesis.status != "verified" for hypothesis in verified):
-        result.add_warning(f"hypothesis for {service}:{port} is only researching; verified entry required before exploitation")
+        result.add_warning(
+            f"hypothesis for {service}:{port} is only researching; verified entry required before exploitation"
+        )
 
     result.add_info(
         f"hypothesis ok: {service}:{port} -> "
@@ -266,26 +274,40 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Hypothesis evidence guard")
     subparsers = parser.add_subparsers(dest="command_name", required=True)
 
-    record_parser = subparsers.add_parser("record-hypothesis", help="append or update a hypothesis entry in hypotheses.md")
+    record_parser = subparsers.add_parser(
+        "record-hypothesis", help="append or update a hypothesis entry in hypotheses.md"
+    )
     record_parser.add_argument("--eng-dir", required=True, help="engagement directory")
     record_parser.add_argument("--service", required=True, help="service name (e.g. SMB)")
     record_parser.add_argument("--port", required=True, help="port number (e.g. 445)")
     record_parser.add_argument("--id", default="", help="existing H-XXX id to update in place")
     record_parser.add_argument("--title", default="", help="short hypothesis title")
-    record_parser.add_argument("--status", default="candidate", help="candidate|researching|verified|rejected")
+    record_parser.add_argument(
+        "--status", default="candidate", help="candidate|researching|verified|rejected"
+    )
     record_parser.add_argument("--phase", default="RECON", help="phase tag for this hypothesis")
-    record_parser.add_argument("--target", default="", help="host/IP this hypothesis targets (e.g. 10.1.2.3). If omitted, derived from the engagement dir name. NEVER the literal '<target>'.")
-    record_parser.add_argument("--vuln-class", default="", help="vulnerability class (e.g. CVE-2021-44142)")
+    record_parser.add_argument(
+        "--target",
+        default="",
+        help="host/IP this hypothesis targets (e.g. 10.1.2.3). If omitted, derived from the engagement dir name. NEVER the literal '<target>'.",
+    )
+    record_parser.add_argument(
+        "--vuln-class", default="", help="vulnerability class (e.g. CVE-2021-44142)"
+    )
     record_parser.add_argument("--rationale", default="", help="why this service is interesting")
     record_parser.add_argument("--evidence", default="", help="path to supporting evidence")
     record_parser.add_argument("--updated", default="", help="override updated timestamp")
     record_parser.set_defaults(func=record_hypothesis)
 
-    check_parser = subparsers.add_parser("check-hypothesis", help="verify researched/verified hypotheses exist for a service:port")
+    check_parser = subparsers.add_parser(
+        "check-hypothesis", help="verify researched/verified hypotheses exist for a service:port"
+    )
     check_parser.add_argument("--eng-dir", required=True, help="engagement directory")
     check_parser.add_argument("--service", required=True, help="service name")
     check_parser.add_argument("--port", required=True, help="port number")
-    check_parser.add_argument("--require-research", action="store_true", help="warn when only researching is present")
+    check_parser.add_argument(
+        "--require-research", action="store_true", help="warn when only researching is present"
+    )
     check_parser.set_defaults(func=check_hypothesis)
 
     args = parser.parse_args()

@@ -1,6 +1,6 @@
 name: violin-guard
-version: "1.0.0"
-description: Typed wrappers over violin_guard.py plus a forced check-command gate and a doc-sync gate (violin_exec) that makes updating ptt.md/history.md/hypothesis-board.md mandatory after every target command.
+version: "1.2.0"
+description: Typed scope guards and an execute-and-record boundary with bounded synchronization windows.
 type: tool
 toolsets:
   violin_guard:
@@ -12,6 +12,16 @@ provides_tools:
   - violin_record_hypothesis
   - violin_record_history
   - violin_exec
+  - violin_exec_status
+  - violin_exec_cancel
+  - violin_search_exploit
+  - violin_nmap
+  - violin_httpx
+  - violin_nuclei
+  - violin_ffuf
   - violin_sync_done
   - violin_heartbeat_done
   - violin_message_tick
+  - violin_exec_burst
+  - violin_target
+  - violin_status

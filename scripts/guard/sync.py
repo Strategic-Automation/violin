@@ -8,7 +8,7 @@ enforcement is identical no matter which entry point the LLM uses.
 State files live under ``<eng_dir>/state/``:
   .violin_last_check.json     - last approved command (continuity)
   .violin_pending_sync.json   - a command was approved but its artifacts
-                                (ptt.md / history.md / hypothesis-board.md)
+                                (state/ptt.md / state/history.md / hypotheses.md)
                                 have not yet been verified fresh
   .violin_heartbeat.json      - command + message counters
   .violin_heartbeat_pending.json - a periodic coarse review is due
@@ -18,18 +18,27 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Cadence. A doc-sync gate fires after *every* approved target command; a
 # heartbeat (full engagement-file review) fires every COMMAND_INTERVAL commands
-# or every MESSAGE_INTERVAL messages.
-COMMAND_INTERVAL = 5
-MESSAGE_INTERVAL = 10
+# or every MESSAGE_INTERVAL messages. Raised from the old 5/10 (issue 2/3) so
+# active exploitation — iterating 5-6 payload variants to find the right exfil —
+# isn't interrupted mid-flow. EXPLOITATION / POST_EXPLOITATION additionally
+# suppress the heartbeat gate entirely (see heartbeat_suppressed).
+COMMAND_INTERVAL = 20
+MESSAGE_INTERVAL = 30
 
 # How many times the exact same command may be re-issued before check-command
 # hard-blocks it and forces the LLM to stop retrying and do research instead.
 RETRY_LIMIT = 3
+
+# Phases where the periodic heartbeat re-read gate is suppressed. The agent is
+# iterating payloads; a forced full re-read of engagement files mid-flow wastes
+# the limited tool-call budget. Recon / vuln-research / reporting keep cadence.
+HEARTBEAT_SUPPRESS_PHASES = {"EXPLOITATION", "POST_EXPLOITATION"}
 
 # A pending-sync lock older than this many hours is treated as stale — almost
 # certainly a leftover from a *prior* session that approved a command, ran it,
@@ -37,6 +46,13 @@ RETRY_LIMIT = 3
 # brand-new session is never wedged by a stale lock (root-cause fix, issue 3).
 # 12h comfortably spans an active session while expiring next-day leftovers.
 PENDING_SYNC_TTL_HOURS = 12
+
+# A *proactively* shorter TTL (issue 3 + mem0): if a pending lock's command
+# string already appears in history.md (command ran + recorded, only the
+# explicit sync-done was missed), auto-clear it once it passes this window
+# instead of waiting a full 12h. Drops locks left by a session that died
+# mid-flow without wedging the next one.
+PROACTIVE_SYNC_TTL_HOURS = 2
 
 
 # --------------------------------------------------------------------------- #
@@ -68,11 +84,15 @@ def _heartbeat_pending_path(eng_dir: str) -> Path:
 # last approved command (continuity)
 # --------------------------------------------------------------------------- #
 def record_ok_check(eng_dir: str, command: str, phase: str) -> None:
-    _last_check_path(eng_dir).write_text(json.dumps({
-        "command": command,
-        "phase": phase,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }))
+    _last_check_path(eng_dir).write_text(
+        json.dumps(
+            {
+                "command": command,
+                "phase": phase,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
 
 
 def last_ok_check(eng_dir: str) -> dict | None:
@@ -80,7 +100,7 @@ def last_ok_check(eng_dir: str) -> dict | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return None
 
@@ -90,17 +110,83 @@ def last_ok_check(eng_dir: str) -> dict | None:
 # --------------------------------------------------------------------------- #
 def mark_pending_sync(eng_dir: str, command: str, phase: str) -> None:
     """Called after a command is approved & returned to the operator."""
-    _pending_sync_path(eng_dir).write_text(json.dumps({
-        "command": command,
-        "phase": phase,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }))
+    _pending_sync_path(eng_dir).write_text(
+        json.dumps(
+            {
+                "command": command,
+                "phase": phase,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
 
 
 def clear_pending_sync(eng_dir: str) -> None:
     p = _pending_sync_path(eng_dir)
     if p.exists():
         p.unlink()
+    # Reset the sync-credit window so the next approved command starts a fresh
+    # batch (the agent just reconciled, so the window is refilled).
+    _reset_sync_credit(eng_dir)
+
+
+# --- Sync-credit sliding window (issue 1) ---------------------------------
+# Each approved *target-touching* command spends one credit. The doc-sync gate
+# only BLOCKS once the credit hits 0, so the agent may dispatch a batch of
+# DEFAULT_SYNC_CREDIT commands, record artifacts once at batch end, then call
+# sync-done a single time — instead of the old per-command 3-call tax. The
+# window is a hard trust bound: it cannot be bypassed by simply never syncing.
+DEFAULT_SYNC_CREDIT = 5
+
+# Burst mode is explicitly pre-approved as one unit, so it may exceed the
+# normal five-command sync window for exploit/race sequences. Keep it bounded:
+# unbounded command files bypass the trust window and can create huge tool
+# responses even though full output is already persisted as evidence.
+MAX_BURST_COMMANDS = 20
+
+
+def _sync_credit_path(eng_dir: str) -> Path:
+    return state_dir(eng_dir) / ".violin_sync_credit.json"
+
+
+def _reset_sync_credit(eng_dir: str) -> None:
+    _sync_credit_path(eng_dir).write_text(
+        json.dumps(
+            {
+                "remaining": DEFAULT_SYNC_CREDIT,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
+
+
+def sync_credit_remaining(eng_dir: str) -> int:
+    """Credits left in the current doc-sync batch window (issue 1)."""
+    p = _sync_credit_path(eng_dir)
+    if not p.exists():
+        # No window yet -> a full window is available.
+        _reset_sync_credit(eng_dir)
+        return DEFAULT_SYNC_CREDIT
+    try:
+        rec = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+        return int(rec.get("remaining", DEFAULT_SYNC_CREDIT))
+    except Exception:
+        _reset_sync_credit(eng_dir)
+        return DEFAULT_SYNC_CREDIT
+
+
+def spend_sync_credit(eng_dir: str) -> int:
+    """Decrement the window by one and return the new remaining count."""
+    rem = max(0, sync_credit_remaining(eng_dir) - 1)
+    _sync_credit_path(eng_dir).write_text(
+        json.dumps(
+            {
+                "remaining": rem,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
+    return rem
 
 
 def _pending_ts(rec: dict) -> float:
@@ -111,7 +197,7 @@ def _pending_ts(rec: dict) -> float:
     try:
         parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         return parsed.timestamp()
     except Exception:
         return -1.0
@@ -158,13 +244,11 @@ def has_pending_sync(eng_dir: str) -> dict | None:
     if not p.exists():
         return None
     try:
-        rec = json.loads(p.read_text())
+        rec = json.loads(p.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         # Unreadable lock is treated as stale -> clear and unblock.
-        try:
+        with suppress(OSError):
             p.unlink()
-        except OSError:
-            pass
         return None
     hist = Path(eng_dir) / "state" / "history.md"
     if not hist.exists():
@@ -172,22 +256,49 @@ def has_pending_sync(eng_dir: str) -> dict | None:
         # engagement tree -> the pending command was released but never
         # executed. The lock is a leftover (the incident case) and would
         # otherwise wedge every later session. Clear it.
-        try:
+        with suppress(OSError):
             p.unlink()
-        except OSError:
-            pass
         return None
     # TTL auto-expire: a lock older than PENDING_SYNC_TTL_HOURS is a leftover
-    # from a prior session (command recorded in history but sync-done never
-    # called). Expire it so a fresh session is not wedged.
-    age = datetime.now(timezone.utc).timestamp() - _pending_ts(rec)
+    # from a prior work-block (command recorded in history but sync-done never
+    # called). Expire it so current-session recovery is not wedged.
+    age = datetime.now(UTC).timestamp() - _pending_ts(rec)
     if _pending_ts(rec) > 0 and age > PENDING_SYNC_TTL_HOURS * 3600:
-        try:
+        with suppress(OSError):
             p.unlink()
-        except OSError:
-            pass
         return None
+    # Proactive stale-lock auto-clear (issue 3 + mem0): a lock that is NOT yet
+    # at the 12h hard-TTL but still looks stale — the pending command string is
+    # already present in history.md (i.e. the command ran and was recorded) yet
+    # sync-done was never called — is auto-cleared once it passes a much shorter
+    # 2h TTL. This drops locks left by a prior session that died mid-flow (out-
+    # bound callback dropped, box reset) without waiting a full day, while a
+    # still-warm current-session lock (just approved, not yet run) is preserved.
+    if _pending_ts(rec) > 0 and age > PROACTIVE_SYNC_TTL_HOURS * 3600:
+        hist = Path(eng_dir) / "state" / "history.md"
+        if hist.exists():
+            try:
+                text = hist.read_text(encoding="utf-8")
+                pend_cmd = (rec or {}).get("command", "")
+                if pend_cmd and pend_cmd.strip() in text:
+                    # command already recorded -> doc-sync effectively done,
+                    # only the explicit sync-done was missed -> clear it.
+                    p.unlink()
+                    return None
+            except OSError:
+                pass
     return rec
+
+
+def heartbeat_suppressed(phase: str) -> bool:
+    """True when the periodic heartbeat re-read gate is suppressed for ``phase``.
+
+    Exploitation / post-exploitation iterate payloads; a forced full re-read of
+    engagement files mid-flow wastes the limited tool-call budget (issue 2), so
+    the heartbeat gate is suppressed there. Callers should still run the safety
+    gate (scope, patterns, freshness) — only the periodic *re-read* is skipped.
+    """
+    return (phase or "").upper() in HEARTBEAT_SUPPRESS_PHASES
 
 
 def artifacts_are_fresh(eng_dir: str, pending: dict) -> bool:
@@ -220,7 +331,7 @@ def artifacts_are_fresh(eng_dir: str, pending: dict) -> bool:
         try:
             parsed = _dt.fromisoformat(s.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = parsed.replace(tzinfo=UTC)
             return parsed.timestamp()
         except Exception:
             pass
@@ -229,7 +340,7 @@ def artifacts_are_fresh(eng_dir: str, pending: dict) -> bool:
         for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"):
             try:
                 parsed = _dt.strptime(s2, fmt)
-                return parsed.replace(tzinfo=timezone.utc).timestamp()
+                return parsed.replace(tzinfo=UTC).timestamp()
             except Exception:
                 continue
         # 3) Unparseable / placeholder stamp (e.g. "<YYYY-MM-DD HH:MM>") is
@@ -239,8 +350,10 @@ def artifacts_are_fresh(eng_dir: str, pending: dict) -> bool:
     # Strip markdown wrapping (*, **, - ) from a "*Last updated: ...*" style line
     # and return the bare label (lower) + value, or (None, None) if not a
     # "last updated"/"updated" field.
-    _FIELD_RE = re.compile(r"^\s*(?:[-*]\s*)?\**\s*(last updated|updated)\s*[:*]\s*\**\s*(.*?)\s*\**\s*$",
-                           re.IGNORECASE)
+    _FIELD_RE = re.compile(
+        r"^\s*(?:[-*]\s*)?\**\s*(last updated|updated)\s*[:*]\s*\**\s*(.*?)\s*\**\s*$",
+        re.IGNORECASE,
+    )
 
     d = Path(eng_dir)
     pending_ts = _ts(pending.get("ts", ""))
@@ -249,11 +362,20 @@ def artifacts_are_fresh(eng_dir: str, pending: dict) -> bool:
     # resolution. Comparing directly would make a same-minute update look
     # stale, so we floor the pending ts to the minute for the freshness check.
     pending_min = pending_ts - (pending_ts % 60)
+
     # 1) history continuity
+    def _norm_command_text(text: str) -> str:
+        return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
     hist = d / "state" / "history.md"
-    if not (hist.exists() and pending.get("command", "") in hist.read_text(encoding="utf-8", errors="ignore")):
+    pending_command = _norm_command_text(pending.get("command", ""))
+    if not (
+        hist.exists()
+        and pending_command
+        and pending_command in _norm_command_text(hist.read_text(encoding="utf-8", errors="ignore"))
+    ):
         return False
-    # 2) ptt freshness  (deployed at state/ptt.md)
+
     ptt = d / "state" / "ptt.md"
     if ptt.exists():
         freshest = 0.0
@@ -289,7 +411,7 @@ def _read_counts(eng_dir: str) -> dict:
     p = _heartbeat_count_path(eng_dir)
     if p.exists():
         try:
-            return json.loads(p.read_text())
+            return json.loads(p.read_text(encoding="utf-8", errors="replace"))
         except Exception:
             pass
     return {"command_count": 0, "message_count": 0}
@@ -312,11 +434,26 @@ def tick_message(eng_dir: str) -> int:
 
 
 def set_heartbeat_pending(eng_dir: str, reason: str) -> None:
-    _heartbeat_pending_path(eng_dir).write_text(json.dumps({
-        "reason": reason,
-        "skill_review_required": True,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }))
+    # Suppress the heartbeat re-read gate during exploitation / post-exploitation
+    # (issue 2): the agent is iterating payloads and a forced full re-read of
+    # engagement files mid-flow wastes the limited tool-call budget. The safety
+    # gate (scope / patterns / freshness) still runs; only the periodic *re-read*
+    # signal is skipped.
+    phase = ""
+    m = re.search(r"phase[=:]?\s*([A-Za-z_]+)", reason)
+    if m:
+        phase = m.group(1).upper().replace("-", "_")
+    if heartbeat_suppressed(phase):
+        return
+    _heartbeat_pending_path(eng_dir).write_text(
+        json.dumps(
+            {
+                "reason": reason,
+                "skill_review_required": True,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
 
 
 def has_heartbeat_pending(eng_dir: str) -> dict | None:
@@ -324,7 +461,7 @@ def has_heartbeat_pending(eng_dir: str) -> dict | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        return json.loads(p.read_text(encoding="utf-8", errors="replace"))
     except Exception:
         return None
 

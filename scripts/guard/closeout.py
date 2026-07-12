@@ -47,17 +47,37 @@ TIER_RE = re.compile(r"\b(L3|L4)\b")
 # housekeeping — never blocked by the close-out gate, so the agent can create
 # the very file the gate requires without deadlocking.
 _REPORT_TOKENS = (
-    "report.md", "retrospective.md", "phase-summary.md",
-    "report-template", "coverage-matrix", "retrospective",
+    "report.md",
+    "retrospective.md",
+    "phase-summary.md",
+    "report-template",
+    "coverage-matrix",
+    "retrospective",
 )
 _WRITE_OPS = (
-    "write_file", "record-ptt", "record-hypothesis", "record-history",
-    "tee ", "cat >", "cat >>", "echo >", "echo >>", "printf >",
-    "sed -i", "vim ", "nano ",
+    "write_file",
+    "record-ptt",
+    "record-hypothesis",
+    "record-history",
+    "tee ",
+    "cat >",
+    "cat >>",
+    "echo >",
+    "echo >>",
+    "printf >",
+    "sed -i",
+    "vim ",
+    "nano ",
 )
 _SAFE_META = (
-    "violin_guard.py", "hypothesis_guard.py", "sync-done", "heartbeat-done",
-    "message-tick", "check-command", "check-closeout", "check-bootstrap",
+    "violin_guard.py",
+    "hypothesis_guard.py",
+    "sync-done",
+    "heartbeat-done",
+    "message-tick",
+    "check-command",
+    "check-closeout",
+    "check-bootstrap",
 )
 
 
@@ -89,10 +109,7 @@ def _report_ok(eng_dir: Path) -> bool:
 
 
 def _retro_ok(eng_dir: Path) -> bool:
-    for rel in RETRO_CANDIDATES:
-        if _exists_nonempty(eng_dir, rel, 30):
-            return True
-    return False
+    return any(_exists_nonempty(eng_dir, rel, 30) for rel in RETRO_CANDIDATES)
 
 
 def _phase_summary_ok(eng_dir: Path) -> bool:
@@ -125,7 +142,7 @@ def _research_log_ok(hyp_path: Path) -> bool:
     m = re.search(r"##\s+Research Log", text)
     if not m:
         return False
-    tail = text[m.end():]
+    tail = text[m.end() :]
     nxt = re.search(r"\n##\s+", tail)
     section = tail[: nxt.start()] if nxt else tail
     return bool(re.search(r"RES-\d+", section))
@@ -141,9 +158,7 @@ def _is_permitted(command: str) -> bool:
         return True
     if re.search(r">\s*\S*\.md(\b|$)", c):
         return True
-    if any(meta in c for meta in _SAFE_META):
-        return True
-    return False
+    return bool(any(meta in c for meta in _SAFE_META))
 
 
 def check_closeout(eng_dir: str | Path, phase: str, command: str = "") -> CheckResult:
@@ -198,7 +213,9 @@ def check_closeout(eng_dir: str | Path, phase: str, command: str = "") -> CheckR
             )
         if not _retro_ok(eng):
             if permitted:
-                result.add_info("retrospective-production command accepted; re-run check-command after saving")
+                result.add_info(
+                    "retrospective-production command accepted; re-run check-command after saving"
+                )
             else:
                 result.add_error(
                     "close-out gate: retrospective.md not produced — RETROSPECTIVE is "

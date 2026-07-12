@@ -69,7 +69,7 @@ RECORD_HISTORY_SCHEMA = {
 }
 
 EXEC_SCHEMA = {
-    "description": "FORCED-GATE execution path. Re-runs check-command internally; refuses to return an executable command if the gate BLOCKs OR if a prior command's artifacts (ptt.md/history.md/hypothesis-board.md) are not yet updated. Use this instead of raw terminal for any target-touching command.",
+    "description": "Authorize, execute, and record one target command. Hard BLOCK and sync_required never create a process; review-tier commands require approval unless Hermes yolo mode is active. Use violin_exec_burst for exploit/race batches; never raw terminal for targets.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -79,6 +79,10 @@ EXEC_SCHEMA = {
             "command": {"type": "string", "description": "Exact on-target command"},
             "session_id": {"type": "string"},
             "skill_loaded_file": {"type": "string"},
+            "backend": {"type": "string", "enum": ["local", "docker"], "default": "local"},
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+            "cwd": {"type": "string", "description": "Engagement-relative working directory"},
+            "label": {"type": "string"},
         },
         "required": ["eng_dir", "scope", "phase", "command"],
         "additionalProperties": False,
@@ -86,7 +90,7 @@ EXEC_SCHEMA = {
 }
 
 SYNC_DONE_SCHEMA = {
-    "description": "Call AFTER updating ptt.md / state/history.md / hypothesis-board.md for the last approved command. Verifies the artifacts are fresh, then unlocks the next violin_exec call. Mandatory before the next target command.",
+    "description": "Call after reconciling the pending command: state/history.md contains the command, state/ptt.md Last updated is fresh, and hypotheses.md Updated is fresh for vuln-research/exploitation. Verifies artifacts and unlocks the next violin_exec. If it still reports stale, fix the listed artifact; do not retry target commands.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -98,7 +102,7 @@ SYNC_DONE_SCHEMA = {
 }
 
 HEARTBEAT_DONE_SCHEMA = {
-    "description": "Call AFTER reviewing the engagement files (scope.yaml / ptt.md / hypotheses.md / history.md) on the periodic cadence (every 5 target commands, or 10 messages if violin_message_tick is used). Clears the heartbeat-pending lock so violin_exec may release the next command. Mandatory once a heartbeat review is due.",
+    "description": "Call AFTER heartbeat review: re-read skills/pentest/SKILL.md and review scope.yaml / state/ptt.md / hypotheses.md / state/history.md. Cadence is 20 target commands or 30 message ticks; exploitation/post-exploitation suppresses heartbeat. Clears heartbeat lock so violin_exec may release the next command.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -110,7 +114,7 @@ HEARTBEAT_DONE_SCHEMA = {
 }
 
 MESSAGE_TICK_SCHEMA = {
-    "description": "LLM-opt-in message counter. Call ONCE per assistant message during an engagement. Every 10 messages it sets a heartbeat-pending lock (reinforcing the 5-command gate) so the next violin_exec requires violin_heartbeat_done. Returns the running message count.",
+    "description": "LLM-opt-in message counter. Call once per assistant message during an engagement. Every 30 messages it sets heartbeat-pending so the next violin_exec requires violin_heartbeat_done. Returns the running message count.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -121,3 +125,189 @@ MESSAGE_TICK_SCHEMA = {
     },
 }
 
+EXEC_BURST_SCHEMA = {
+    "name": "violin_exec_burst",
+    "description": "Single-approval burst gate: PRE-APPROVE a batch of target-touching commands. Prefer commands=[...] inline; commands_file remains supported for newline-delimited command files. The guard runs the FULL safety gate (scope, skill-load, PTT/hypothesis freshness, dangerous/Tier-3 patterns, out-of-scope rejection) on every command in the batch, but amortises the per-command doc-sync tax to a SINGLE sync-done after the whole batch. Use for recon batches and exploit/race batches; for vhosts without /etc/hosts, target the IP and include Host headers (e.g. gobuster -u http://IP -H 'Host: name.htb'). Returns APPROVED/REVIEW/DENIED for the batch; the LAST command arms the normal sync lock so one sync-done unlocks the next call.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "commands": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "inline newline-free commands, PRE-APPROVED AS A BATCH by the operator; preferred over commands_file",
+            },
+            "commands_file": {
+                "type": "string",
+                "description": "optional path to a newline-delimited file of commands",
+            },
+            "scope": {"type": "string", "description": "path to scope.yaml"},
+            "phase": {
+                "type": "string",
+                "description": "engagement phase: recon|vuln-research|exploitation|post-exploitation",
+            },
+            "eng_dir": {
+                "type": "string",
+                "description": "engagement dir; enables one-time sync-lock arming on the last command",
+            },
+            "session_id": {
+                "type": "string",
+                "description": "session/goal label for skill-load gating",
+            },
+            "skill_loaded_file": {"type": "string", "description": "skill-load marker path"},
+            "label": {"type": "string", "description": "optional batch label for logging"},
+            "backend": {"type": "string", "enum": ["local", "docker"], "default": "local"},
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+            "cwd": {"type": "string", "description": "Engagement-relative working directory"},
+            "continue_on_error": {"type": "boolean", "default": False},
+        },
+        "required": ["scope", "phase"],
+    },
+}
+
+EXEC_STATUS_SCHEMA = {
+    "description": "Read the receipt for an execution owned by this engagement.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {"type": "string"},
+            "execution_id": {"type": "string"},
+        },
+        "required": ["eng_dir", "execution_id"],
+        "additionalProperties": False,
+    },
+}
+
+EXEC_CANCEL_SCHEMA = {
+    "description": "Cancel only the exact tracked process group for a running execution.",
+    "parameters": EXEC_STATUS_SCHEMA["parameters"],
+}
+
+SEARCH_EXPLOIT_SCHEMA = {
+    "description": "Search the local ExploitDB index without downloading or executing candidates.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "product": {"type": "string"},
+            "version": {"type": "string"},
+            "service": {"type": "string"},
+            "cve": {"type": "string"},
+        },
+        "additionalProperties": False,
+    },
+}
+
+_ADAPTER_COMMON = {
+    "eng_dir": {"type": "string"},
+    "scope": {"type": "string"},
+    "phase": {"type": "string"},
+    "target": {"type": "string"},
+    "session_id": {"type": "string"},
+    "skill_loaded_file": {"type": "string"},
+    "backend": {"type": "string", "enum": ["local", "docker"], "default": "local"},
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+    "cwd": {"type": "string"},
+    "label": {"type": "string"},
+    "extra_args": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
+}
+
+NMAP_SCHEMA = {
+    "description": "Run a typed, scope-checked nmap scan through violin_exec.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            **_ADAPTER_COMMON,
+            "scan_type": {"type": "string", "enum": ["-sV", "-sC", "-sCV", "-sn", "-Pn"]},
+            "ports": {"type": "string"},
+        },
+        "required": ["eng_dir", "scope", "phase", "target"],
+        "additionalProperties": False,
+    },
+}
+
+HTTPX_SCHEMA = {
+    "description": "Run typed HTTP probing through violin_exec.",
+    "parameters": {
+        "type": "object",
+        "properties": _ADAPTER_COMMON,
+        "required": ["eng_dir", "scope", "phase", "target"],
+        "additionalProperties": False,
+    },
+}
+
+NUCLEI_SCHEMA = {
+    "description": "Run a typed nuclei scan through violin_exec; scanner output remains unconfirmed evidence.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            **_ADAPTER_COMMON,
+            "templates": {"type": "string"},
+            "severity": {"type": "string"},
+        },
+        "required": ["eng_dir", "scope", "phase", "target"],
+        "additionalProperties": False,
+    },
+}
+
+FFUF_SCHEMA = {
+    "description": "Run typed ffuf content discovery through violin_exec.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            **_ADAPTER_COMMON,
+            "url": {"type": "string"},
+            "wordlist": {"type": "string"},
+            "headers": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["eng_dir", "scope", "phase", "url", "wordlist"],
+        "additionalProperties": False,
+    },
+}
+
+TARGET_SCHEMA = {
+    "name": "violin_target",
+    "description": "Resolve the canonical in-scope target for the engagement from scope.yaml (kills hardcoded-IP fragility: a box reset just edits scope.yaml, not every command in history). Query by --host (in-scope IP/CIDR) or --role (named role from scope.yaml targets.roles, e.g. 'web'). Returns the ip/url/host field. The agent should run THIS to get the target, then interpolate the result into the actual command instead of hardcoding an IP.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {
+                "type": "string",
+                "description": "engagement dir (required; target resolution is engagement-scoped)",
+            },
+            "scope": {
+                "type": "string",
+                "description": "explicit scope.yaml path (else $ENG_DIR/scope/scope.yaml)",
+            },
+            "host": {"type": "string", "description": "in-scope IP/CIDR to resolve"},
+            "role": {
+                "type": "string",
+                "description": "named role from scope.yaml targets.roles (e.g. web)",
+            },
+            "field": {
+                "type": "string",
+                "enum": ["ip", "url", "host"],
+                "description": "what to print (default ip)",
+            },
+        },
+        "required": ["eng_dir"],
+    },
+}
+
+STATUS_SCHEMA = {
+    "name": "violin_status",
+    "description": "One-shot engagement health read: bootstrap completeness, skill-load freshness, pending doc-sync, heartbeat-pending, sync credit remaining, and command/message counts. Consolidates violin_check_bootstrap + violin_check_skill_loaded + violin_sync_done + violin_message_tick into a single read-only call so the agent can poll engagement state without burning four tool calls. Mutates no state.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {
+                "type": "string",
+                "description": "engagement dir ($ENG_DIR / $VIOLIN_ENG_ROOT env also honoured)",
+            },
+            "skill_loaded_file": {
+                "type": "string",
+                "description": "explicit skill-load marker path (else $ENG_DIR/.skill-loaded)",
+            },
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+}
