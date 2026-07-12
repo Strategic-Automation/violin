@@ -277,7 +277,7 @@ TARGET_SCHEMA = {
 
 STATUS_SCHEMA = {
     "name": "violin_status",
-    "description": "One-shot engagement health read: bootstrap completeness, skill-load freshness, pending doc-sync, heartbeat-pending, sync credit remaining, and command/message counts. Consolidates violin_check_bootstrap + violin_check_skill_loaded + violin_sync_done + violin_message_tick into a single read-only call so the agent can poll engagement state without burning four tool calls. Mutates no state.",
+    "description": "One-shot engagement health read: bootstrap completeness, skill-load freshness, pending doc-sync, heartbeat-pending, sync credit remaining, and command/message counts. Mutates no state.",
     "parameters": {
         "type": "object",
         "properties": {
