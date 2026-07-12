@@ -218,11 +218,17 @@ def validate_hypothesis_record(
     return errors
 
 
-def update_hypothesis(path: Path, **fields: Any) -> Hypothesis:
+def update_hypothesis(
+    path: Path, in_scope_hosts: set[str] | None = None, **fields: Any
+) -> Hypothesis:
     """Update a hypothesis in the file by ID (creates if missing).
 
     Audit P1-hyp: the record is scope/phase validated before any write. If
     validation fails, no file is touched and ``ValueError`` is raised.
+
+    ``in_scope_hosts`` (a host set, or ``None`` to skip the scope check) is
+    threaded into ``validate_hypothesis_record`` so an out-of-scope target is
+    rejected fail-closed instead of being written to the board.
     """
     # Build the candidate record so we can validate before mutating the board.
     temp = Hypothesis(
@@ -238,7 +244,7 @@ def update_hypothesis(path: Path, **fields: Any) -> Hypothesis:
         evidence=(fields.get("evidence") or "").strip(),
         updated=(fields.get("updated") or "").strip(),
     )
-    errors = validate_hypothesis_record(temp.to_dict())
+    errors = validate_hypothesis_record(temp.to_dict(), in_scope_hosts=in_scope_hosts)
     if errors:
         raise ValueError("; ".join(errors))
 
