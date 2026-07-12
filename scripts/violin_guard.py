@@ -42,7 +42,16 @@ def cmd_check_bootstrap(args: argparse.Namespace) -> int:
 
 
 def cmd_init_engagement(args: argparse.Namespace) -> int:
-    return bootstrap.init_engagement(args.eng_dir, host=args.host)
+    return bootstrap.init_engagement(args.eng_dir, host=args.host, ctf=args.ctf, session_id=args.session_id)
+
+
+def cmd_validate_scope(args: argparse.Namespace) -> int:
+    result = command.validate_scope(Path(args.scope))
+    code = result.exit_code()
+    label = "OK" if code == 0 else "REVIEW" if code == 2 else "BLOCK"
+    messages = result.errors or result.warnings or result.infos or ["scope valid"]
+    print(f"{label}: {messages[0]}")
+    return code
 
 
 def cmd_check_skill_loaded(args: argparse.Namespace) -> int:
@@ -114,10 +123,11 @@ def cmd_message_tick(args: argparse.Namespace) -> int:
 def cmd_eng_root(args: argparse.Namespace) -> int:
     from plugins.violin_guard.core import state
 
-    eng_root = state._eng_dir(args.eng_dir) if args.eng_dir else state._eng_dir("")
+    eng_dir = args.eng_dir_option or args.eng_dir
+    eng_root = state._eng_dir(eng_dir) if eng_dir else state._eng_dir("")
     print(f"ENG_ROOT={eng_root}")
-    if args.eng_dir:
-        resolved = state._eng_dir(args.eng_dir)
+    if eng_dir:
+        resolved = state._eng_dir(eng_dir)
         print(f"resolved={resolved}")
     return 0
 
@@ -154,6 +164,8 @@ def main() -> int:
     p = sub.add_parser("init-engagement", help="Create guard-clean engagement")
     p.add_argument("eng_dir")
     p.add_argument("--host", default="")
+    p.add_argument("--ctf", action="store_true", help="Create an HTB/CTF-ready scope and PTT")
+    p.add_argument("--session-id", default="", help="Mark this session skill-loaded for CTF bootstrap")
     p.set_defaults(func=cmd_init_engagement)
 
     # check-skill-loaded
@@ -197,7 +209,12 @@ def main() -> int:
     # eng-root
     p = sub.add_parser("eng-root", help="Print canonical engagement root")
     p.add_argument("eng_dir", nargs="?")
+    p.add_argument("--eng-dir", dest="eng_dir_option")
     p.set_defaults(func=cmd_eng_root)
+
+    p = sub.add_parser("validate-scope", help="Validate scope.yaml")
+    p.add_argument("--scope", required=True)
+    p.set_defaults(func=cmd_validate_scope)
 
     p = sub.add_parser("check-release", help="Run release checks")
     p.set_defaults(func=cmd_check_release)

@@ -85,6 +85,8 @@ def _create_artifact(
     rel: Path,
     template_rel: str | None,
     placeholder: str | None,
+    host: str | None = None,
+    ctf: bool = False,
 ) -> None:
     target = eng_dir / rel
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -96,7 +98,7 @@ def _create_artifact(
     content = src.read_text(encoding="utf-8")
     if rel == Path("scope/scope.yaml"):
         data = yaml.safe_load(content)
-        data["targets"]["ip_addresses"] = [_derive_host(eng_dir)]
+        data["targets"]["ip_addresses"] = [host or _derive_host(eng_dir)]
         data["engagement"]["date"] = date.today().isoformat()
         content = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
     if rel == Path("state/ptt.md"):
@@ -105,10 +107,50 @@ def _create_artifact(
             f"*Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
             content,
         )
+        if ctf:
+            content = _ctf_ptt(host or _derive_host(eng_dir))
     target.write_text(content, encoding="utf-8")
 
 
-def init_engagement(eng_dir: str | Path, host: str | None = None) -> int:
+def _ctf_ptt(host: str) -> str:
+    today = date.today().isoformat()
+    return f"""# CTF Task Tree — {host} {today}
+
+*Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
+
+## Phase: RECON
+| ID | Status | Task | Evidence / Notes |
+|----|--------|------|------------------|
+| PT-CTF-001 | [~] | Enumerate services and attack surface | evidence/recon/ |
+
+## Phase: EXPLOITATION
+| ID | Status | Task | Evidence / Notes |
+|----|--------|------|------------------|
+| PT-CTF-002 | [ ] | Validate an in-scope foothold | evidence/exploitation/ |
+
+## Phase: PRIVESC
+| ID | Status | Task | Evidence / Notes |
+|----|--------|------|------------------|
+| PT-CTF-003 | [ ] | Enumerate and validate privilege escalation | evidence/exploitation/ |
+
+## Phase: FLAGS
+| ID | Status | Task | Evidence / Notes |
+|----|--------|------|------------------|
+| PT-CTF-004 | [ ] | Capture user.txt and root.txt | evidence/flags/ |
+"""
+
+
+def _ctf_scope(host: str) -> dict:
+    return {
+        "targets": {"ip_addresses": [host], "in_scope_urls": []},
+        "authorized_parties": ["lab owner (user)"],
+        "rules_of_engagement": {"allowed_actions": ["host/port discovery", "banner grabbing", "version detection", "vulnerability scanning", "exploit validation (in-scope, non-destructive)", "privilege escalation", "flag capture (user.txt, root.txt)"], "forbidden_actions": []},
+        "authorisation": {"confirmed": True, "confirmed_by": "user (HTB lab owner)"},
+        "engagement": {"name": f"CTF {host}", "date": date.today().isoformat(), "type": "ctf", "mode": "standard-pentest", "depth": "black-box", "focus_areas": ["recon", "exploitation", "privilege-escalation", "flag-capture"]},
+    }
+
+
+def init_engagement(eng_dir: str | Path, host: str | None = None, *, ctf: bool = False, session_id: str = "") -> int:
     """Create a complete, guard-clean engagement directory from templates."""
     eng_dir = Path(eng_dir)
     result = BootstrapResult()
@@ -119,8 +161,17 @@ def init_engagement(eng_dir: str | Path, host: str | None = None) -> int:
         target = eng_dir / rel
         if target.exists():
             continue
-        _create_artifact(eng_dir, rel, template_rel, placeholder)
+        _create_artifact(eng_dir, rel, template_rel, placeholder, host, ctf)
         result.add_info(f"created {rel}")
+
+    if ctf:
+        scope_path = eng_dir / "scope" / "scope.yaml"
+        scope_path.write_text(yaml.safe_dump(_ctf_scope(host), sort_keys=False), encoding="utf-8")
+        result.add_info("wrote CTF scope")
+        if session_id:
+            marker = eng_dir / "state" / f".skill-loaded-{session_id}"
+            marker.write_text("skill-loaded: ctf bootstrap\n", encoding="utf-8")
+            result.add_info(f"marked skill loaded for session {session_id}")
 
     if result.errors or result.warnings:
         result.add_error("init-engagement produced an incomplete or non-compliant engagement")
