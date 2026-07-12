@@ -207,6 +207,38 @@ def test_fresh_history_allows_first_command(tmp_path):
     assert any("recorded after it runs" in info for info in result.infos)
 
 
+def test_first_command_does_not_require_preemptive_ptt_progress(tmp_path):
+    """A pristine PTT is valid until the executor records the first command."""
+    skill_file = tmp_path / ".skill-loaded-ts"
+    eng = _init_e2e(tmp_path, skill_file)
+    ptt = eng / "state" / "ptt.md"
+    ptt.write_text(
+        ptt.read_text(encoding="utf-8").replace("| PT-001 | [~] |", "| PT-001 | [ ] |"),
+        encoding="utf-8",
+    )
+
+    args = SimpleNamespace(
+        command="nmap -sV 10.10.10.10",
+        phase="recon",
+        eng_dir=str(eng),
+        scope=str(eng / "scope" / "scope.yaml"),
+        skill_loaded_file=str(skill_file),
+        session_id="ts",
+    )
+    first = _check_command_core(args)
+
+    assert not first.errors
+    assert any("first command may run" in info for info in first.infos)
+
+    (eng / "state" / "history.md").write_text(
+        "# Command History\n- [2026-07-12T09:00:00Z] [RECON] exit=0 `nmap -sV 10.10.10.10`\n",
+        encoding="utf-8",
+    )
+    second = _check_command_core(args)
+
+    assert any("PTT is stale" in error for error in second.errors)
+
+
 def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
     """Skill-load gate: check-command BLOCKs when the SKILL.md marker is absent,
     and handle_exec honours that BLOCK (status 'denied')."""

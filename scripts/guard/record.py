@@ -380,7 +380,7 @@ def record_history(args: argparse.Namespace) -> int:
     return 0
 
 
-def _ptt_staleness_guard(ptt_path: Path) -> CheckResult:
+def _ptt_staleness_guard(ptt_path: Path, history_path: Path | None = None) -> CheckResult:
     result = CheckResult()
     if not ptt_path.exists() or not ptt_path.is_file():
         result.add_error(f"PTT missing: {ptt_path}")
@@ -389,6 +389,19 @@ def _ptt_staleness_guard(ptt_path: Path) -> CheckResult:
         )
         return result
     if _ptt_is_stale(ptt_path):
+        # On a fresh engagement, the first command necessarily runs before the
+        # executor can append its history record. Requiring a PTT transition at
+        # this point creates a bootstrap deadlock: the task must look started
+        # before any work has actually happened. Keep the exception narrow: as
+        # soon as history contains a recorded command, normal PTT enforcement
+        # resumes.
+        if history_path is not None and history_path.is_file():
+            history = history_path.read_text(encoding="utf-8")
+            if not re.findall(r"`([^`]+)`", history):
+                result.add_info(
+                    "PTT is pristine; the first command may run before task progress is recorded"
+                )
+                return result
         result.add_error("PTT is stale: no PT-XXX row has moved past [ ]; update before advancing")
         result.add_info(
             'run: python scripts/violin_guard.py record-ptt --eng-dir "$ENG_DIR" --id <PT-XXX> --status [~] --note "<batch result>"'

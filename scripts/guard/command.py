@@ -192,7 +192,10 @@ def _check_command_core(args: argparse.Namespace) -> CheckResult:
             skill_result = check_skill_load_gate(skill_loaded_file, mandatory=False)
             merge_result(result, skill_result, prefix="skill guard")
 
-        ptt_result = _ptt_staleness_guard(eng_dir_path / "state" / "ptt.md")
+        ptt_result = _ptt_staleness_guard(
+            eng_dir_path / "state" / "ptt.md",
+            eng_dir_path / "state" / "history.md",
+        )
         merge_result(result, ptt_result, prefix="ptt guard")
 
         # Freshness guard: PTT "Last updated" + phase desync
