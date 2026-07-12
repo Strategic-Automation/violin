@@ -17,3 +17,6 @@ engagements/
 
 # Empty Codex agent context directory
 .agents/
+
+# local-only promotion kit (not for distribution)
+PROMOTION.md

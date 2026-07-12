@@ -123,6 +123,557 @@ if [ -n "$stale_in_templates" ]; then
 fi
 
 # =============================================================================
+# 3.5 Bootstrap Enforcement — guard hard-blocks unbooted target interaction
+# =============================================================================
+header "3.5 Bootstrap Enforcement"
+
+SMOKE_ENG="engagements/_smoke-bootstrap-$$"
+rm -rf "$SMOKE_ENG"
+
+# (a) Unbooted: check-bootstrap must exit 1 with BOOTSTRAP REQUIRED
+set +e
+unbooted_output=$(python3 scripts/violin_guard.py check-bootstrap --eng-dir "$SMOKE_ENG" 2>&1)
+unbooted_exit=$?
+set -e
+if [ "$unbooted_exit" -eq 1 ] && echo "$unbooted_output" | grep -q "BOOTSTRAP REQUIRED"; then
+  pass "Unbooted check-bootstrap exits 1 with 'BOOTSTRAP REQUIRED'"
+else
+  fail "Unbooted check-bootstrap did not behave as expected (exit=$unbooted_exit)"
+fi
+
+# (b) Unbooted: check-command with missing scope must exit 1
+set +e
+unbooted_cmd=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_ENG/no-scope.yaml" --phase recon --command "curl http://10.129.245.218" 2>&1)
+unbooted_cmd_exit=$?
+set -e
+if [ "$unbooted_cmd_exit" -eq 1 ] && echo "$unbooted_cmd" | grep -q "BOOTSTRAP REQUIRED"; then
+  pass "check-command with missing scope exits 1 with 'BOOTSTRAP REQUIRED'"
+else
+  fail "check-command with missing scope did not block (exit=$unbooted_cmd_exit)"
+fi
+
+# (c) Bootstrapped: check-bootstrap must exit 0
+mkdir -p "$SMOKE_ENG"/{scope,state,evidence}
+cp skills/pentest/templates/ptt.md "$SMOKE_ENG/state/ptt.md"
+# Update a PTT row so stale-PTT detection doesn't fire
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_ENG" --id PT-001 --status "[x]" --note "smoke bootstrap" >/dev/null 2>&1
+cp skills/pentest/templates/hypothesis-board.md "$SMOKE_ENG/hypotheses.md"
+echo "# Command History — smoke" > "$SMOKE_ENG/state/history.md"
+cat > "$SMOKE_ENG/scope/scope.yaml" <<'YAML'
+engagement:
+  client: Smoke
+  tester: smoke
+  date: '2026-07-07'
+  duration: '1h'
+targets:
+  domains: [nimbus.htb]
+  ip_addresses: [10.129.245.218]
+  app_type: webapp
+mode: active-recon
+depth: black-box
+rules_of_engagement:
+  max_requests_per_second: 5
+  forbidden_actions: [credential-stuffing, social-engineering, persistence, stealth-evasion, malware-delivery, destructive-payloads]
+authorisation:
+  confirmed: true
+  confirmed_by: smoke
+  confirmed_at: '2026-07-07T00:00:00Z'
+YAML
+
+set +e
+booted_output=$(python3 scripts/violin_guard.py check-bootstrap --eng-dir "$SMOKE_ENG" 2>&1)
+booted_exit=$?
+set -e
+if [ "$booted_exit" -eq 0 ] && echo "$booted_output" | grep -q "bootstrap complete"; then
+  pass "Bootstrapped check-bootstrap exits 0"
+else
+  fail "Bootstrapped check-bootstrap did not exit 0 (exit=$booted_exit)"
+fi
+
+# (d) Bootstrapped in-scope: check-command must exit 0
+set +e
+inscope_output=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_ENG/scope/scope.yaml" --phase recon --command "curl http://10.129.245.218" 2>&1)
+inscope_exit=$?
+set -e
+if [ "$inscope_exit" -eq 0 ]; then
+  pass "Bootstrapped in-scope command allowed"
+else
+  fail "Bootstrapped in-scope command blocked (exit=$inscope_exit)"
+fi
+
+# (e) Bootstrapped out-of-scope: check-command must exit 1
+set +e
+outofscope_output=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_ENG/scope/scope.yaml" --phase recon --command "curl http://other.example.com" 2>&1)
+outofscope_exit=$?
+set -e
+if [ "$outofscope_exit" -eq 1 ] && echo "$outofscope_output" | grep -q "outside approved scope"; then
+  pass "Bootstrapped out-of-scope command blocked"
+else
+  fail "Bootstrapped out-of-scope command not blocked (exit=$outofscope_exit)"
+fi
+
+# Cleanup
+rm -rf "$SMOKE_ENG"
+
+# =============================================================================
+# 3.6 PTT / History Guard Enforcement
+# =============================================================================
+header "3.6 PTT & History Guard Enforcement"
+
+SMOKE_GUARD="engagements/_smoke-guard-$$"
+mkdir -p "$SMOKE_GUARD"/{scope,state,evidence}
+cp skills/pentest/templates/ptt.md "$SMOKE_GUARD/state/ptt.md"
+echo "# Command History — smoke" > "$SMOKE_GUARD/state/history.md"
+cat > "$SMOKE_GUARD/scope/scope.yaml" <<'YAML'
+engagement:
+  client: Guard-Smoke
+  tester: smoke
+  date: '2026-07-07'
+  duration: '1h'
+targets:
+  domains: [nimbus.htb]
+  ip_addresses: [10.129.245.218]
+  app_type: webapp
+mode: active-recon
+depth: black-box
+rules_of_engagement:
+  max_requests_per_second: 5
+  forbidden_actions: [credential-stuffing]
+authorisation:
+  confirmed: true
+  confirmed_by: smoke
+  confirmed_at: '2026-07-07T00:00:00Z'
+YAML
+
+# (a) record-ptt updates a PTT row and exits 0
+set +e
+ptt_out=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-001 --status "[x]" --note "smoke test passed" 2>&1)
+ptt_exit=$?
+set -e
+if [ "$ptt_exit" -eq 0 ] && echo "$ptt_out" | grep -q "PT-001"; then
+  pass "record-ptt updates PT-001 row and exits 0"
+else
+  fail "record-ptt failed (exit=$ptt_exit): $ptt_out"
+fi
+
+# (b) Verify the PTT row actually changed on disk
+if grep -q 'PT-001.*\[x\]' "$SMOKE_GUARD/state/ptt.md" 2>/dev/null; then
+  pass "PT-001 row shows [x] on disk"
+else
+  fail "PT-001 row did not update on disk"
+fi
+
+# (c) record-ptt with invalid status exits 1
+set +e
+bad_ptt=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-001 --status INVALID 2>&1 || true)
+bad_ptt_exit=$?
+set -e
+if [ "$bad_ptt_exit" -eq 1 ] || echo "$bad_ptt" | grep -qi "invalid"; then
+  pass "record-ptt rejects invalid status marker"
+else
+  fail "record-ptt did not reject invalid status (exit=$bad_ptt_exit)"
+fi
+
+# (d) record-ptt with non-existent PT id exits 1
+set +e
+bad_id=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-999 --status "[~]" 2>&1)
+bad_id_exit=$?
+set -e
+if [ "$bad_id_exit" -eq 1 ] && echo "$bad_id" | grep -qi "not found"; then
+  pass "record-ptt rejects non-existent PT id"
+else
+  fail "record-ptt did not reject bad PT id (exit=$bad_id_exit)"
+fi
+
+# (e) record-history appends a line and exits 0
+set +e
+hist_out=$(python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_GUARD" --command "nmap -sV 10.129.245.218" --exit-code 0 --phase RECON 2>&1)
+hist_exit=$?
+set -e
+if [ "$hist_exit" -eq 0 ]; then
+  pass "record-history appends entry and exits 0"
+else
+  fail "record-history failed (exit=$hist_exit): $hist_out"
+fi
+
+# (f) history.md has the new entry on disk
+if grep -q 'RECON' "$SMOKE_GUARD/state/history.md" 2>/dev/null; then
+  pass "history.md contains the RECON entry"
+else
+  fail "history.md did not receive the recorded entry"
+fi
+
+# (g) record-history with empty command exits 1
+set +e
+empty_hist=$(python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_GUARD" --command "" --exit-code 0 2>&1)
+empty_hist_exit=$?
+set -e
+if [ "$empty_hist_exit" -eq 1 ] && echo "$empty_hist" | grep -qi "required"; then
+  pass "record-history rejects empty --command"
+else
+  fail "record-history did not reject empty command (exit=$empty_hist_exit)"
+fi
+
+# (h) Stale-PTT detection: check-bootstrap warns when all rows are pristine
+# Use a SEPARATE fresh engagement (test (a) already updated PT-001 in $SMOKE_GUARD)
+STALE_ENG="engagements/_smoke-stale-$$"
+mkdir -p "$STALE_ENG"/{scope,state,evidence}
+cp skills/pentest/templates/ptt.md "$STALE_ENG/state/ptt.md"
+cp skills/pentest/templates/hypothesis-board.md "$STALE_ENG/hypotheses.md"
+echo "# Command History — stale" > "$STALE_ENG/state/history.md"
+echo "test: ok" > "$STALE_ENG/scope/scope.yaml"
+set +e
+stale_out=$(python3 scripts/violin_guard.py check-bootstrap --eng-dir "$STALE_ENG" 2>&1)
+stale_exit=$?
+set -e
+rm -rf "$STALE_ENG"
+if [ "$stale_exit" -eq 2 ] && echo "$stale_out" | grep -qi "never been updated"; then
+  pass "Stale PTT detection warns on pristine PTT (exit 2)"
+else
+  fail "Stale-PTT detection unexpected (exit=$stale_exit): $stale_out"
+fi
+
+# (i) record-history without a pre-existing history.md does not create one and exits 1
+rm -f "$SMOKE_GUARD/state/history.md"
+set +e
+nohist_out=$(python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_GUARD" --command "test" --exit-code 0 2>&1)
+nohist_exit=$?
+set -e
+if [ "$nohist_exit" -eq 1 ] && echo "$nohist_out" | grep -qi "not found"; then
+  pass "record-history errors when history.md is missing"
+else
+  fail "record-history did not error on missing history.md (exit=$nohist_exit)"
+fi
+
+# Cleanup
+rm -rf "$SMOKE_GUARD"
+
+# =============================================================================
+# 3.7 Freshness & Mandatory Skill-Load Gates
+# =============================================================================
+header "3.7 Freshness & Mandatory Skill-Load Gates"
+
+SMOKE_FRESH="engagements/_smoke-fresh-$$"
+mkdir -p "$SMOKE_FRESH"/{scope,state,evidence/vuln-research}
+cp skills/pentest/templates/ptt.md "$SMOKE_FRESH/state/ptt.md"
+cp skills/pentest/templates/hypothesis-board.md "$SMOKE_FRESH/hypotheses.md"
+# Replace placeholder hypothesis with a valid one so the hypothesis guard passes
+cat > "$SMOKE_FRESH/hypotheses.md" <<'MD'
+# Hypothesis Board
+
+## Active Theories
+
+### H-001: web RCE
+- **Status:** researching
+- **Phase:** RECON
+- **Target:** 10.129.45.113
+- **Vuln class:** RCE
+- **Rationale:** testing
+- **Evidence:** evidence/recon/active/
+- **Next step:** confirm
+- **Linked findings:** none
+- **Updated:** $(date '+%Y-%m-%d %H:%M')
+MD
+echo "# Command History — fresh" > "$SMOKE_FRESH/state/history.md"
+python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_FRESH" --command "nmap 10.129.45.113" --exit-code 0 --phase RECON >/dev/null 2>&1
+# PTT "Last updated" set to now
+sed -i "s|<YYYY-MM-DD HH:MM>|$(date '+%Y-%m-%d %H:%M')|" "$SMOKE_FRESH/state/ptt.md"
+# Mark one RECON row done so desync detection has a baseline
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_FRESH" --id PT-016 --status "[x]" --note "nmap done" >/dev/null 2>&1
+# Findings file present (non-empty) once vuln-research underway
+echo "## Findings" > "$SMOKE_FRESH/evidence/vuln-research/findings.md"
+# Skill-load marker for session 'fresh'
+touch "$SMOKE_FRESH/state/.skill-loaded-fresh"
+cat > "$SMOKE_FRESH/scope/scope.yaml" <<'YAML'
+engagement:
+  client: Fresh-Smoke
+  tester: smoke
+  date: '2026-07-08'
+  duration: '1h'
+targets:
+  domains: [fresh.htb]
+  ip_addresses: [10.129.45.113]
+  app_type: webapp
+mode: active-recon
+depth: black-box
+rules_of_engagement:
+  max_requests_per_second: 5
+  forbidden_actions: [credential-stuffing]
+authorisation:
+  confirmed: true
+  confirmed_by: smoke
+  confirmed_at: '2026-07-08T00:00:00Z'
+YAML
+
+# (a) Target-touching command WITH skill marker + --session-id passes (exit 0)
+set +e
+fresh_ok=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_FRESH/scope/scope.yaml" --eng-dir "$SMOKE_FRESH" --session-id fresh --phase recon --command "nmap 10.129.45.113" 2>&1)
+fresh_ok_exit=$?
+set -e
+if [ "$fresh_ok_exit" -ne 1 ]; then
+  pass "Fresh engagement: target command passes skill gate with marker + --session-id (REVIEW warnings allowed)"
+else
+  fail "Fresh engagement: target command unexpectedly blocked (exit=$fresh_ok_exit): $fresh_ok"
+fi
+
+# Clear the doc-sync gate so the next test hits the skill-load gate, not the sync gate
+python3 scripts/violin_guard.py sync-done --eng-dir "$SMOKE_FRESH" >/dev/null 2>&1
+
+# (b) Target-touching command WITHOUT --session-id/--skill-loaded-file is BLOCKED (Gap #1 fix)
+set +e
+fresh_noskill=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_FRESH/scope/scope.yaml" --eng-dir "$SMOKE_FRESH" --phase recon --command "nmap 10.129.45.113" 2>&1)
+fresh_noskill_exit=$?
+set -e
+if [ "$fresh_noskill_exit" -eq 1 ] && echo "$fresh_noskill" | grep -q "skill load gate"; then
+  pass "Gap #1 fix: target command blocked when skill-load marker missing/omitted"
+else
+  fail "Gap #1 fix: missing skill-load gate did not block (exit=$fresh_noskill_exit): $fresh_noskill"
+fi
+
+# (c) Stale PTT (no 'Last updated') raises REVIEW (exit 2, Gap #2)
+SMOKE_STALEPTT="engagements/_smoke-staleptt-$$"
+mkdir -p "$SMOKE_STALEPTT"/{scope,state,evidence}
+cp skills/pentest/templates/ptt.md "$SMOKE_STALEPTT/state/ptt.md"
+# remove the Last updated line entirely
+sed -i '/Last updated/d' "$SMOKE_STALEPTT/state/ptt.md"
+cp skills/pentest/templates/hypothesis-board.md "$SMOKE_STALEPTT/hypotheses.md"
+# Overwrite with an active (researching) hypothesis so the hypothesis guard passes;
+# the stale signal we test is the PTT missing 'Last updated', not the hypothesis guard.
+cat > "$SMOKE_STALEPTT/hypotheses.md" <<'MD'
+# Hypothesis Board
+
+## Active Theories
+
+### H-001: stale ptt test
+- **Status:** researching
+- **Phase:** EXPLOITATION
+- **Target:** 10.129.45.113
+- **Vuln class:** RCE
+- **Rationale:** test
+- **Evidence:** x
+- **Next step:** confirm
+- **Linked findings:** none
+- **Updated:** 2026-07-08 00:00
+MD
+echo "# Command History" > "$SMOKE_STALEPTT/state/history.md"
+python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_STALEPTT" --command "curl 10.129.45.113" --exit-code 0 --phase EXPLOITATION >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEPTT" --id PT-040 --status "[~]" --note "exploiting" >/dev/null 2>&1
+touch "$SMOKE_STALEPTT/state/.skill-loaded-stale"
+cat > "$SMOKE_STALEPTT/scope/scope.yaml" <<'YAML'
+engagement:
+  client: StalePTT
+  tester: smoke
+  date: '2026-07-08'
+  duration: '1h'
+targets:
+  ip_addresses: [10.129.45.113]
+mode: active-recon
+depth: black-box
+rules_of_engagement:
+  max_requests_per_second: 5
+  forbidden_actions: [credential-stuffing]
+authorisation:
+  confirmed: true
+  confirmed_by: smoke
+  confirmed_at: '2026-07-08T00:00:00Z'
+YAML
+set +e
+stale_ptt_out=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_STALEPTT/scope/scope.yaml" --eng-dir "$SMOKE_STALEPTT" --session-id stale --phase exploitation --command "curl 10.129.45.113" 2>&1)
+stale_ptt_exit=$?
+set -e
+rm -rf "$SMOKE_STALEPTT"
+if [ "$stale_ptt_exit" -eq 2 ] && echo "$stale_ptt_out" | grep -q "Last updated"; then
+  pass "Gap #2 fix: stale/missing PTT 'Last updated' raises REVIEW"
+else
+  fail "Gap #2 fix: stale PTT not flagged (exit=$stale_ptt_exit): $stale_ptt_out"
+fi
+
+# (d) Stale hypotheses (Candidate linking FIND-) raises REVIEW (exit 2, Gap #3)
+SMOKE_STALEHYP="engagements/_smoke-stalehyp-$$"
+mkdir -p "$SMOKE_STALEHYP"/{scope,state,evidence}
+cp skills/pentest/templates/ptt.md "$SMOKE_STALEHYP/state/ptt.md"
+sed -i "s|<YYYY-MM-DD HH:MM>|$(date '+%Y-%m-%d %H:%M')|" "$SMOKE_STALEHYP/state/ptt.md"
+# Inject a Candidate hypothesis that already links a finding (contradiction)
+cat > "$SMOKE_STALEHYP/hypotheses.md" <<'MD'
+# Hypothesis Board
+
+## Active Theories
+
+### H-001: stale candidate
+- **Status:** Candidate
+- **Phase:** EXPLOITATION
+- **Target:** 10.129.45.113
+- **Vuln class:** RCE
+- **Rationale:** test
+- **Evidence:** x
+- **Next step:** promote
+- **Linked findings:** FIND-001
+- **Updated:** 2026-07-08 00:00
+MD
+echo "# Command History" > "$SMOKE_STALEHYP/state/history.md"
+python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_STALEHYP" --command "curl 10.129.45.113" --exit-code 0 --phase EXPLOITATION >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEHYP" --id PT-040 --status "[~]" --note "exploiting" >/dev/null 2>&1
+touch "$SMOKE_STALEHYP/state/.skill-loaded-sh"
+cat > "$SMOKE_STALEHYP/scope/scope.yaml" <<'YAML'
+engagement:
+  client: StaleHyp
+  tester: smoke
+  date: '2026-07-08'
+  duration: '1h'
+targets:
+  ip_addresses: [10.129.45.113]
+mode: active-recon
+depth: black-box
+rules_of_engagement:
+  max_requests_per_second: 5
+  forbidden_actions: [credential-stuffing]
+authorisation:
+  confirmed: true
+  confirmed_by: smoke
+  confirmed_at: '2026-07-08T00:00:00Z'
+YAML
+set +e
+stale_hyp_out=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_STALEHYP/scope/scope.yaml" --eng-dir "$SMOKE_STALEHYP" --session-id sh --phase exploitation --command "curl 10.129.45.113" 2>&1)
+stale_hyp_exit=$?
+set -e
+rm -rf "$SMOKE_STALEHYP"
+if [ "$stale_hyp_exit" -eq 2 ] && echo "$stale_hyp_out" | grep -q "Candidate but already links"; then
+  pass "Gap #3 fix: Candidate hypothesis linking a finding raises REVIEW"
+else
+  fail "Gap #3 fix: stale hypothesis not flagged (exit=$stale_hyp_exit): $stale_hyp_out"
+fi
+
+# Cleanup
+rm -rf "$SMOKE_FRESH"
+
+# =============================================================================
+# 3.8 Plugin Gate Lifecycle — violin_exec (check-command + doc-sync) & violin_sync_done
+# =============================================================================
+header "3.8 Plugin Gate Lifecycle (violin_exec + violin_sync_done)"
+
+GATES_DIR="engagements/_smoke-gates-$$"
+mkdir -p "$GATES_DIR"/{scope,state,evidence}
+cp skills/pentest/templates/ptt.md "$GATES_DIR/state/ptt.md"
+sed -i "s|<YYYY-MM-DD HH:MM>|$(date '+%Y-%m-%d %H:%M')|" "$GATES_DIR/state/ptt.md"
+cp skills/pentest/templates/hypothesis-board.md "$GATES_DIR/hypotheses.md"
+# Seed an active hypothesis so the hypothesis guard passes on fresh engagement.
+cat > "$GATES_DIR/hypotheses.md" <<'MD'
+# Hypothesis Board
+
+## Active Theories
+
+### H-001: initial recon
+- **Status:** verified
+- **Phase:** RECON
+- **Target:** 10.129.45.113
+- **Vuln class:** recon
+- **Rationale:** establishing baseline
+- **Evidence:** evidence/recon/active/
+- **Next step:** confirm
+- **Linked findings:** none
+- **Updated:** $(date '+%Y-%m-%d %H:%M')
+MD
+echo "# Command History" > "$GATES_DIR/state/history.md"
+touch "$GATES_DIR/state/.skill-loaded-gate"
+cat > "$GATES_DIR/scope/scope.yaml" <<'YAML'
+engagement:
+  client: GateSmoke
+  tester: smoke
+  date: '2026-07-08'
+  duration: '1h'
+targets:
+  ip_addresses: [10.129.45.113]
+mode: active-recon
+depth: black-box
+rules_of_engagement:
+  max_requests_per_second: 5
+  forbidden_actions: [credential-stuffing]
+authorisation:
+  confirmed: true
+  confirmed_by: smoke
+  confirmed_at: '2026-07-08T00:00:00Z'
+YAML
+
+# Seed a valid PTT row (moved past [ ]) — do NOT pre-record the history command,
+# because the first exec should be a fresh command (no duplicate warning).
+# The record-history happens AFTER the first exec in the real workflow.
+python3 scripts/violin_guard.py record-ptt --eng-dir "$GATES_DIR" --id PT-001 --status "[x]" --note "bootstrap" >/dev/null 2>&1
+# Pre-seed a DIFFERENT command in history so the history guard doesn't fire "no recorded commands" REVIEW
+python3 scripts/violin_guard.py record-history --eng-dir "$GATES_DIR" --command "curl http://10.129.45.113" --exit-code 0 --phase RECON >/dev/null 2>&1
+# Note: first exec will be a different command (nmap -sV) so no duplicate warning
+
+# Drive the plugin handlers directly (the layer that wraps the guard scripts).
+# This asserts the full lifecycle: fresh exec -> approved -> pending sync locks
+# the next exec -> sync_done clears -> next exec approved.
+python3 - "$GATES_DIR" <<'PY'
+import sys, json, os
+from datetime import datetime
+eng_dir = sys.argv[1]
+repo = os.getcwd()
+import importlib.util
+pkg_spec = importlib.util.spec_from_file_location("vgpkg", os.path.join(repo, "plugins/violin_guard/__init__.py"))
+pkg = importlib.util.module_from_spec(pkg_spec)
+pkg.__path__ = [os.path.join(repo, "plugins/violin_guard")]
+pkg.__package__ = "vgpkg"
+sys.modules["vgpkg"] = pkg
+def load_sub(name, path):
+    spec = importlib.util.spec_from_file_location(f"vgpkg.{name}", path)
+    m = importlib.util.module_from_spec(spec); m.__package__ = "vgpkg"
+    sys.modules[f"vgpkg.{name}"] = m; spec.loader.exec_module(m); return m
+tools = load_sub("tools", os.path.join(repo, "plugins/violin_guard/tools.py"))
+
+def st(handler, **kw):
+    return json.loads(handler(kw))["status"]
+
+now = datetime.now().strftime("%Y-%m-%d %H:%M")
+base = dict(eng_dir=eng_dir, scope=f"{eng_dir}/scope/scope.yaml",
+            phase="recon", command="nmap -sV 10.129.45.113",  # Different from any pre-recorded
+            skill_loaded_file=f"{eng_dir}/state/.skill-loaded-gate")
+
+# Step 1: fresh engagement -> exec must be APPROVED (no pending sync)
+# Uses a DISTINCT command from any pre-recorded history
+s1 = st(tools.handle_exec, **base)
+assert s1 == "approved", f"step1 expected approved, got {s1}"
+print("    ok: fresh violin_exec -> approved")
+
+# Step 2: next exec without violin_sync_done -> SYNC_REQUIRED (doc-sync gate)
+s2 = st(tools.handle_exec, **base)
+assert s2 == "sync_required", f"step2 expected sync_required, got {s2}"
+print("    ok: second violin_exec before sync -> sync_required")
+
+# Step 3: LLM updates artifacts, then violin_sync_done -> OK (freshness verified)
+with open(f"{eng_dir}/state/history.md", "a") as f:
+    f.write(f"\n- nmap -sV 10.129.45.113 (exit 0) [{now}]\n")
+pt = f"{eng_dir}/state/ptt.md"
+t = open(pt).read()
+open(pt, "w").write(t.replace("Last updated:", f"Last updated: {now}") if "Last updated:" in t else t)
+s3 = st(tools.handle_sync_done, eng_dir=eng_dir)
+assert s3 == "ok", f"step3 expected ok, got {s3}"
+print("    ok: violin_sync_done after artifact update -> ok")
+
+# Step 4: exec after sync -> APPROVED again (use a DIFFERENT command from step 1/2)
+base2 = dict(base, command="gobuster dir -u http://10.129.45.113 -w wordlist.txt")
+s4 = st(tools.handle_exec, **base2)
+assert s4 == "approved", f"step4 expected approved, got {s4}"
+print("    ok: violin_exec after sync -> approved")
+
+# Step 5: hypothesis recording via plugin routes to hypothesis_guard.py
+s5 = st(tools.handle_record_hypothesis, eng_dir=eng_dir, service="SMB",
+        port="445", title="anon access", status="researching")
+assert s5 == "ok", f"step5 expected ok, got {s5}"
+print("    ok: violin_record_hypothesis -> ok (routed to hypothesis_guard.py)")
+print("GATES_OK")
+PY
+gates_exit=$?
+if [ "$gates_exit" -eq 0 ]; then
+  pass "3.8 Plugin gate lifecycle: exec->sync_required->sync_done->exec + hypothesis routing all correct"
+else
+  fail "3.8 Plugin gate lifecycle failed (see python output above)"
+fi
+
+rm -rf "$GATES_DIR"
+
+# =============================================================================
 # 4. Playbook Section Coverage
 # =============================================================================
 header "4. Playbook Section Coverage"
@@ -225,7 +776,15 @@ else
 
   # ── Install ──
   echo "    Installing profile as '$SMOKE_PROFILE'..."
-  if hermes profile install "$REPO_ROOT" --name "$SMOKE_PROFILE" -y 2>&1; then
+  # Under Windows git-bash, REPO_ROOT is a /c/... path that Python's pathlib
+  # mangles into \c\... — convert to a native Windows path so `hermes` (Python)
+  # resolves distribution.yaml at the repo root. No-op on native Linux/Kali.
+  if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* ]]; then
+    INSTALL_SRC="$(cygpath -w "$REPO_ROOT" 2>/dev/null || echo "$REPO_ROOT")"
+  else
+    INSTALL_SRC="$REPO_ROOT"
+  fi
+  if hermes profile install "$INSTALL_SRC" --name "$SMOKE_PROFILE" -y 2>&1; then
     pass "Profile installed: $SMOKE_PROFILE"
   else
     fail "Profile install failed"

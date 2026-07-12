@@ -1,0 +1,17 @@
+name: violin-guard
+version: "1.0.0"
+description: Typed wrappers over violin_guard.py plus a forced check-command gate and a doc-sync gate (violin_exec) that makes updating ptt.md/history.md/hypothesis-board.md mandatory after every target command.
+type: tool
+toolsets:
+  violin_guard:
+    description: Violin engagement guard tools
+app_style: sh
+provides_tools:
+  - violin_check_command
+  - violin_record_ptt
+  - violin_record_hypothesis
+  - violin_record_history
+  - violin_exec
+  - violin_sync_done
+  - violin_heartbeat_done
+  - violin_message_tick

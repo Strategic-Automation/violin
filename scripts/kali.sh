@@ -13,7 +13,7 @@
 #
 # The container mounts /engagements -> ./engagements/ in the Violin repo,
 # so evidence and output files written to /engagements/ are accessible
-# from the host at C:\Users\Hello\repos\violin\engagements\.
+# from the host at <violin-repo-root>/engagements/.
 #
 # If the container isn't running, starts it automatically.
 

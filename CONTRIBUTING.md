@@ -6,7 +6,7 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
 
 ### Reporting Bugs
 
-1. Check the [issues](https://github.com/Dan-StrategicAutomation/violin/issues) for duplicates
+1. Check the [issues](https://github.com/Strategic-Automation/violin/issues) for duplicates
 2. Include: Violin version, Hermes version, OS/platform, steps to reproduce, and any guard output
 3. Use the bug report template if available
 

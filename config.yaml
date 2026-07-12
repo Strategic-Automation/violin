@@ -1,6 +1,8 @@
-# Model/provider: Violin inherits the user's normal Hermes provider/model by
-# default. Users may add a profile-local model section here if they intentionally
-# want Violin to use a different Hermes-supported provider.
+# Model/provider: Inherits the normal Hermes default by default.
+# Override here to pin Violin to a specific model/provider.
+model:
+  default: deepseek/deepseek-v4-flash
+  provider: openrouter
 
 agent:
   max_turns: 60
@@ -168,3 +170,12 @@ platform_toolsets:
     - clarify
     - delegation
     - vision
+    - violin_guard
+
+plugins:
+  enabled:
+    - violin-guard
+
+known_plugin_toolsets:
+  cli:
+    - violin_guard

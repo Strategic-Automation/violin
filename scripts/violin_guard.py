@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Lightweight Violin scope, command, and release guard.
+"""Violin lightweight safety and release guard — CLI entrypoint.
+
+The actual command implementations live in the `guard` package
+(`scripts/guard/`). This module only owns argument parsing and dispatch, so
+the guard logic stays in focused, individually-testable modules.
 
 Exit codes:
   0 = allowed / valid
@@ -10,408 +14,216 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import ipaddress
-import re
-import shlex
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
 
-try:
-    import yaml
-except ImportError:  # pragma: no cover - exercised only on missing dependency
-    yaml = None
+# Make the scripts/ directory importable so `guard` and `hypothesis_guard` resolve,
+# regardless of the caller's working directory.
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
+from guard.bootstrap import check_bootstrap, check_skill_loaded, init_engagement  # noqa: E402
+from guard.command import check_command  # noqa: E402
+from guard.closeout import check_closeout  # noqa: E402
+from guard.record import record_ptt, record_history, VALID_STATUSES  # noqa: E402
+from guard.release import check_release  # noqa: E402
+from guard.scope import validate_scope  # noqa: E402
+# Single source of truth for the doc-sync + heartbeat + stuck-loop state machine.
+from guard import sync as sync_state  # noqa: E402
+# Single source of truth for the canonical engagement root + resolver. Every
+# subcommand that takes --eng-dir now resolves through here so the skill and
+# the plugin converge on the same absolute tree (root-cause fix).
+from guard.core import ENG_ROOT, resolve_eng_dir  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
-PHASES = {"SCOPING", "RECON", "VULN_RESEARCH", "EXPLOITATION", "REPORTING", "RETROSPECTIVE"}
-
-TARGET_TOOLS = {
-    "amass",
-    "arjun",
-    "commix",
-    "curl",
-    "dalfox",
-    "dig",
-    "dirb",
-    "dirsearch",
-    "ffuf",
-    "feroxbuster",
-    "gobuster",
-    "host",
-    "httpx",
-    "hydra",
-    "masscan",
-    "nmap",
-    "nikto",
-    "nslookup",
-    "nuclei",
-    "sqlmap",
-    "subfinder",
-    "testssl",
-    "whatweb",
-    "wpscan",
-    "xsstrike",
-    "zap-baseline.py",
-}
-
-DANGEROUS_PATTERNS = [
-    (r"\bsqlmap\b.*\s--dump\b", "sqlmap data dumping is blocked by default"),
-    (r"\bsqlmap\b.*\s--os-shell\b", "sqlmap OS shell is blocked"),
-    (r"\bsqlmap\b.*\s--file-(read|write)\b", "sqlmap file read/write is blocked by default"),
-    (r"\bDROP\s+(TABLE|DATABASE)\b", "destructive SQL payload is blocked"),
-    (r"\brm\s+-rf\s+(/|\*)", "destructive filesystem deletion is blocked"),
-    (r"\bmkfs(\.|\\s|$)", "filesystem formatting is blocked"),
-    (r"\bdd\s+if=.*\s+of=/dev/", "raw device writes are blocked"),
-    (r"\bnc\s+.*\s-e\s+", "reverse shell payload is blocked"),
-    (r"\bbash\s+-i\b", "interactive reverse shell pattern is blocked"),
-    (r"/dev/tcp/[^/\s]+/\d+", "reverse shell TCP redirection pattern is blocked"),
-    (r"\b(meterpreter|msfvenom)\b", "payload generation or meterpreter requires explicit review"),
-]
-
-TIER3_PATTERNS = [
-    (r"\b(hydra|medusa|patator|hashcat|john)\b", "credential attack or cracking tool requires RoE carve-out"),
-    (r"\b(masscan|zmap)\b", "high-volume scanning requires phase approval and rate limits"),
-    (r"\b--rate\s+[1-9]\d{2,}\b", "high request rate requires approval"),
-    (r"\b--threads\s+[5-9]\d*\b", "high concurrency requires approval"),
-    (r"\b--forms\b|\b--crawl\b", "broad authenticated crawling requires approval"),
-]
-
-METADATA_TARGETS = {
-    "169.254.169.254",
-    "100.100.100.200",
-    "metadata.google.internal",
-    "fd00:ec2::254",
-}
+# Importable marker so the plugin and the CLI share identical enforcement logic.
+__all__ = ["main", "check_command_enforced"]
 
 
-@dataclass
-class CheckResult:
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    infos: list[str] = field(default_factory=list)
+def check_command_enforced(args: argparse.Namespace) -> int:
+    """check-command WITH doc-sync / heartbeat / stuck-loop enforcement.
 
-    def add_error(self, message: str) -> None:
-        self.errors.append(message)
+    This is the path the LLM must use for every target-touching command. It:
 
-    def add_warning(self, message: str) -> None:
-        self.warnings.append(message)
+      1) BLOCKS if a prior approved command's artifacts (ptt.md / history.md /
+         hypothesis-board.md) have not been synced yet (caller must run the
+         command, update the artifacts, then call ``sync-done``).
+      2) BLOCKS if a periodic coarse review (heartbeat) is pending — the LLM
+         must re-read SKILL.md and review the engagement files, then call
+         ``heartbeat-done``.
+      3) Runs the normal safety gate (scope, skill-load, PTT/hypothesis
+         freshness, dangerous/tier3 patterns). BLOCK => block.
+      4) On allow: marks a pending-sync, ticks the command counter, and sets a
+         heartbeat lock if the cadence interval was hit.
 
-    def add_info(self, message: str) -> None:
-        self.infos.append(message)
+    The raw ``check_command`` function still exists for non-engagement /
+    pre-bootstrap use; the enforced wrapper is what makes doc completion
+    mandatory rather than advisory.
+    """
+    eng_dir = args.eng_dir or ""
+    phase = (args.phase or "").lower()
+    command = args.command or ""
 
-    def exit_code(self) -> int:
-        if self.errors:
+    if eng_dir:
+        # 1) doc-sync gate
+        pending = sync_state.has_pending_sync(eng_dir)
+        if pending is not None:
+            print("BLOCK: prior command's artifacts not synced yet.")
+            print(f"  pending_command: {pending.get('command')}")
+            print("  ACTION: run the command, update ptt.md 'Last updated:' + state/history.md"
+                  " (+ hypothesis-board.md 'Updated:' in vuln-research/exploitation), then call:"
+                  " violin_guard.py sync-done --eng-dir \"$ENG_DIR\"")
             return 1
-        if self.warnings:
-            return 2
-        return 0
+        # 2) heartbeat gate
+        hb = sync_state.has_heartbeat_pending(eng_dir)
+        if hb is not None:
+            print("BLOCK: periodic engagement-file review (heartbeat) is pending.")
+            print(f"  reason: {hb.get('reason')}")
+            print("  ACTION: re-read skills/pentest/SKILL.md (drift guard + vuln playbooks),"
+                  " review scope.yaml / ptt.md / hypotheses.md / history.md for drift, then call:"
+                  " violin_guard.py heartbeat-done --eng-dir \"$ENG_DIR\"")
+            return 1
+        # Anti-stuck: re-issuing the exact same command past the limit is the
+        # classic "stuck retrying" anti-pattern. Force research instead.
+        if sync_state.repeat_count(eng_dir, command) >= sync_state.RETRY_LIMIT:
+            print(f"BLOCK: command repeated {sync_state.RETRY_LIMIT}+ times without progress.")
+            print("  ACTION: stop retrying. Record the observation as a hypothesis or note, run a"
+                  " different command, or web_search / web_extract for the service's CVEs & exploits"
+                  " before re-attempting. Document the change in ptt.md.")
+            return 1
 
-    def print(self) -> None:
-        for message in self.errors:
-            print(f"BLOCK: {message}")
-        for message in self.warnings:
-            print(f"REVIEW: {message}")
-        for message in self.infos:
-            print(f"OK: {message}")
+    # 3) safety gate
+    rc = check_command(args)
 
-
-def load_yaml(path: Path) -> Any:
-    if yaml is None:
-        raise RuntimeError("PyYAML is required. Install with: python -m pip install pyyaml")
-    with path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
-
-
-def as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def normalize_host(value: str) -> str:
-    return value.strip().strip("[]").strip(".").lower()
-
-
-def host_from_url(value: str) -> str | None:
-    parsed = urlparse(value if "://" in value else f"//{value}")
-    return normalize_host(parsed.hostname or "")
-
-
-def get_targets(scope: dict[str, Any]) -> tuple[set[str], set[str], list[ipaddress._BaseNetwork], set[str]]:
-    targets = scope.get("targets", {}) or {}
-    domains = {normalize_host(str(item)) for item in as_list(targets.get("domains")) if str(item).strip()}
-    ip_addresses = {normalize_host(str(item)) for item in as_list(targets.get("ip_addresses")) if str(item).strip()}
-    networks: list[ipaddress._BaseNetwork] = []
-    for item in as_list(targets.get("cidrs")):
-        try:
-            networks.append(ipaddress.ip_network(str(item), strict=False))
-        except ValueError:
-            continue
-    url_hosts = {host_from_url(str(item)) for item in as_list(targets.get("urls")) if str(item).strip()}
-    return domains, ip_addresses, networks, {host for host in url_hosts if host}
+    # 4) on allow/review, arm the next-call gates.
+    # A REVIEW (rc=2) means "allowed but record this" (e.g. history-not-yet-
+    # recorded) — the command still ran, so the LLM MUST sync its artifacts
+    # before the next one. Only a hard BLOCK (rc=1) must NOT arm the gate.
+    if rc in (0, 2) and eng_dir:
+        sync_state.record_ok_check(eng_dir, command, phase)
+        sync_state.mark_pending_sync(eng_dir, command, phase)
+        count = sync_state.tick_command(eng_dir)
+        if count % sync_state.COMMAND_INTERVAL == 0:
+            sync_state.set_heartbeat_pending(
+                eng_dir,
+                f"Reached {count} approved target commands (interval {sync_state.COMMAND_INTERVAL})."
+                " Review engagement files for drift before continuing.",
+            )
+    return rc
 
 
-def get_exclusions(scope: dict[str, Any]) -> tuple[set[str], set[str], list[ipaddress._BaseNetwork], set[str]]:
-    exclusions = scope.get("exclusions", {}) or {}
-    domains = {normalize_host(str(item)) for item in as_list(exclusions.get("domains")) if str(item).strip()}
-    ip_addresses = {normalize_host(str(item)) for item in as_list(exclusions.get("ip_addresses")) if str(item).strip()}
-    networks: list[ipaddress._BaseNetwork] = []
-    for item in as_list(exclusions.get("cidrs")):
-        try:
-            networks.append(ipaddress.ip_network(str(item), strict=False))
-        except ValueError:
-            continue
-    url_hosts = {host_from_url(str(item)) for item in as_list(exclusions.get("urls")) if str(item).strip()}
-    return domains, ip_addresses, networks, {host for host in url_hosts if host}
+def cmd_check_closeout(args: argparse.Namespace) -> int:
+    """Hard gate: verify mandatory REPORTING/RETROSPECTIVE artifacts exist.
 
-
-def domain_matches(host: str, domains: set[str]) -> bool:
-    host = normalize_host(host)
-    return any(host == domain or host.endswith(f".{domain}") for domain in domains)
-
-
-def ip_matches(host: str, addresses: set[str], networks: list[ipaddress._BaseNetwork]) -> bool:
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return host in addresses or any(ip in network for network in networks)
-
-
-def is_scoped_host(host: str, scope: dict[str, Any]) -> bool:
-    domains, ips, networks, url_hosts = get_targets(scope)
-    return domain_matches(host, domains | url_hosts) or ip_matches(host, ips, networks)
-
-
-def is_excluded_host(host: str, scope: dict[str, Any]) -> bool:
-    domains, ips, networks, url_hosts = get_exclusions(scope)
-    return domain_matches(host, domains | url_hosts) or ip_matches(host, ips, networks)
-
-
-def validate_scope_data(scope: dict[str, Any]) -> CheckResult:
-    result = CheckResult()
-    engagement = scope.get("engagement", {}) or {}
-    targets = scope.get("targets", {}) or {}
-    roe = scope.get("rules_of_engagement", {}) or {}
-    auth = scope.get("authorisation", {}) or {}
-
-    for field_name in ("client", "tester", "date", "duration"):
-        if not str(engagement.get(field_name, "")).strip():
-            result.add_error(f"engagement.{field_name} is required")
-
-    target_values = []
-    for key in ("domains", "ip_addresses", "cidrs", "urls"):
-        target_values.extend(as_list(targets.get(key)))
-    if not any(str(item).strip() for item in target_values):
-        result.add_error("at least one target domain, IP, CIDR, or URL is required")
-
-    if str(targets.get("app_type", "")).strip() == "":
-        result.add_warning("targets.app_type is empty")
-
-    if scope.get("mode") not in {"passive-recon", "active-recon", "standard-pentest", "exploit-validation"}:
-        result.add_error("mode must be passive-recon, active-recon, standard-pentest, or exploit-validation")
-
-    if scope.get("depth") not in {"black-box", "grey-box", "white-box"}:
-        result.add_error("depth must be black-box, grey-box, or white-box")
-
-    try:
-        rate_limit = int(roe.get("max_requests_per_second", 0))
-        if rate_limit <= 0:
-            result.add_error("rules_of_engagement.max_requests_per_second must be positive")
-        elif rate_limit > 20:
-            result.add_warning("rate limit above 20 req/s requires explicit client approval")
-    except (TypeError, ValueError):
-        result.add_error("rules_of_engagement.max_requests_per_second must be an integer")
-
-    forbidden = set(as_list(roe.get("forbidden_actions")))
-    default_forbidden = {
-        "credential-stuffing",
-        "social-engineering",
-        "persistence",
-        "stealth-evasion",
-        "malware-delivery",
-        "destructive-payloads",
-    }
-    missing_forbidden = sorted(default_forbidden - forbidden)
-    if missing_forbidden:
-        result.add_warning(f"default forbidden actions missing: {', '.join(missing_forbidden)}")
-
-    if auth.get("confirmed") is not True:
-        result.add_error("authorisation.confirmed must be true before target interaction")
-    if not str(auth.get("confirmed_by", "")).strip():
-        result.add_error("authorisation.confirmed_by is required")
-    if not str(auth.get("confirmed_at", "")).strip():
-        result.add_error("authorisation.confirmed_at is required")
-
-    if not result.errors and not result.warnings:
-        result.add_info("scope is valid")
-    return result
-
-
-def validate_scope(args: argparse.Namespace) -> int:
-    result = validate_scope_data(load_yaml(Path(args.scope)))
-    result.print()
-    return result.exit_code()
-
-
-def command_tokens(command: str) -> list[str]:
-    try:
-        return shlex.split(command, posix=False)
-    except ValueError:
-        return command.split()
-
-
-def extract_hosts(command: str) -> set[str]:
-    hosts: set[str] = set()
-    for url in re.findall(r"https?://[^\s'\"<>]+", command, flags=re.IGNORECASE):
-        host = host_from_url(url)
-        if host:
-            hosts.add(host)
-    hosts.update(normalize_host(item) for item in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", command))
-    for host in re.findall(r"\b[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}\b", command):
-        normalized = normalize_host(host)
-        if not normalized.endswith((".txt", ".md", ".yaml", ".yml", ".json", ".py", ".sh", ".ps1")):
-            hosts.add(normalized)
-    return hosts
-
-
-def has_allowed_carveout(scope: dict[str, Any], *needles: str) -> bool:
-    allowed = " ".join(str(item).lower() for item in as_list((scope.get("rules_of_engagement") or {}).get("allowed_actions")))
-    return any(needle in allowed for needle in needles)
-
-
-def check_command(args: argparse.Namespace) -> int:
-    scope = load_yaml(Path(args.scope))
-    result = CheckResult()
-    phase = args.phase.upper().replace("-", "_")
-    command = args.command.strip()
-    lowered = command.lower()
-
-    if phase not in PHASES:
-        result.add_error(f"unknown phase: {args.phase}")
-
-    scope_result = validate_scope_data(scope)
-    if scope_result.errors:
-        result.errors.extend(f"scope invalid: {error}" for error in scope_result.errors)
-
-    for pattern, reason in DANGEROUS_PATTERNS:
-        if re.search(pattern, lowered, flags=re.IGNORECASE):
-            result.add_error(reason)
-
-    for pattern, reason in TIER3_PATTERNS:
-        if re.search(pattern, lowered, flags=re.IGNORECASE):
-            if "credential" in reason and has_allowed_carveout(scope, "credential", "brute", "password"):
-                result.add_warning(f"{reason}; RoE carve-out found, require explicit per-command approval")
-            else:
-                result.add_warning(reason)
-
-    tokens = command_tokens(command)
-    tool = Path(tokens[0]).name.lower() if tokens else ""
-    hosts = extract_hosts(command)
-
-    if tool and tool not in TARGET_TOOLS and hosts:
-        result.add_warning(f"command uses unclassified tool '{tool}' against detected target(s)")
-
-    if tool in TARGET_TOOLS and not hosts:
-        result.add_warning("target-touching tool used but no target was detected; ask for review")
-
-    for host in sorted(hosts):
-        if host in METADATA_TARGETS and not has_allowed_carveout(scope, "metadata", "ssrf"):
-            result.add_error(f"cloud metadata target is not scoped by default: {host}")
-        elif is_excluded_host(host, scope):
-            result.add_error(f"target is explicitly excluded: {host}")
-        elif not is_scoped_host(host, scope):
-            result.add_error(f"target is outside approved scope: {host}")
-
-    if phase in {"SCOPING", "REPORTING", "RETROSPECTIVE"} and (hosts or tool in TARGET_TOOLS):
-        result.add_error(f"target interaction is not allowed during {phase}")
-
-    if phase in {"RECON", "VULN_RESEARCH"} and any(term in lowered for term in ("--os-pwn", "--risk=3", "reverse shell")):
-        result.add_error(f"exploit-style command is not allowed during {phase}")
-
-    if not result.errors and not result.warnings:
-        result.add_info("command is allowed by current lightweight guard")
-    result.print()
-    return result.exit_code()
-
-
-def local_markdown_links(path: Path, text: str) -> list[str]:
-    refs = set(re.findall(r"`([^`]+\.md)`", text))
-    refs.update(match for match in re.findall(r"\]\(([^)]+\.md)\)", text) if "://" not in match)
-    return sorted(refs)
-
-
-def resolve_reference(base: Path, ref: str) -> Path:
-    cleaned = ref.strip().split("#", 1)[0]
-    if "$" in cleaned or "<" in cleaned:
-        return Path()
-    if cleaned.startswith("/"):
-        return ROOT / cleaned.lstrip("/")
-    if cleaned.startswith("skills/") or cleaned in {"README.md", "SOUL.md", "PLAN.md", ".hermes.md"}:
-        return ROOT / cleaned
-    if cleaned.startswith(("playbooks/", "references/")):
-        skill_root = ROOT / "skills/pentest"
-        if base.is_relative_to(skill_root):
-            return base.parent / cleaned
-        return skill_root / cleaned
-    if cleaned.startswith("templates/"):
-        return ROOT / "skills/pentest" / cleaned
-    return base.parent / cleaned
-
-
-def check_release(_: argparse.Namespace) -> int:
-    result = CheckResult()
-    for yaml_path in ("distribution.yaml", "config.yaml", "skills/pentest/templates/scope-template.yaml"):
-        try:
-            load_yaml(ROOT / yaml_path)
-            result.add_info(f"YAML valid: {yaml_path}")
-        except Exception as exc:  # noqa: BLE001 - report any validation failure
-            result.add_error(f"YAML invalid: {yaml_path}: {exc}")
-
-    distribution = load_yaml(ROOT / "distribution.yaml")
-    for item in as_list(distribution.get("distribution_owned")):
-        if not (ROOT / str(item)).exists():
-            result.add_error(f"distribution_owned path missing: {item}")
-
-    playbooks = sorted((ROOT / "skills/pentest/playbooks").glob("*.md"))
-    if len(playbooks) != 31:
-        result.add_error(f"expected 31 playbooks, found {len(playbooks)}")
+    Returns exit 1 (denied — NOT auto-approved under --yolo) when a mandated
+    artifact is missing for the given phase. Pass --command for the
+    artifact-producing command so it is exempted (no deadlock).
+    """
+    res = check_closeout(args.eng_dir, args.phase, args.command or "")
+    if res.errors or res.warnings:
+        res.print()
     else:
-        result.add_info("31 playbooks present")
+        print("OK: close-out artifacts satisfied.")
+    return res.exit_code()
 
-    phase_playbooks = {"scoping", "recon", "vuln-research", "exploitation", "reporting", "tools", "post-exploitation"}
-    for playbook in playbooks:
-        text = playbook.read_text(encoding="utf-8")
-        if playbook.stem not in phase_playbooks:
-            for section in ("## Evidence", "## Stop", "## Blocked"):
-                if section not in text:
-                    result.add_error(f"{playbook.relative_to(ROOT)} missing {section}")
-        if re.search(r"\./evidence\b|\./report\b", text):
-            result.add_error(f"{playbook.relative_to(ROOT)} contains stale ./evidence or ./report path")
 
-    for md_path in [ROOT / "README.md", ROOT / "SOUL.md", ROOT / ".hermes.md", ROOT / "skills/pentest/SKILL.md", *playbooks]:
-        text = md_path.read_text(encoding="utf-8")
-        for ref in local_markdown_links(md_path, text):
-            resolved = resolve_reference(md_path, ref)
-            if str(resolved) == ".":
-                continue
-            if not resolved.exists():
-                result.add_error(f"{md_path.relative_to(ROOT)} references missing markdown file: {ref}")
+def cmd_sync_done(args: argparse.Namespace) -> int:
+    """Verify the prior command's artifacts are fresh; clear the sync lock."""
+    eng_dir = args.eng_dir or ""
+    pending = sync_state.has_pending_sync(eng_dir)
+    if pending is None:
+        print("OK: nothing pending — artifacts already in sync.")
+        return 0
+    if sync_state.artifacts_are_fresh(eng_dir, pending):
+        sync_state.clear_pending_sync(eng_dir)
+        print("OK: artifacts verified fresh. Next target command allowed.")
+        return 0
+    
+    # Provide actionable guidance on what specifically is stale
+    pending_ts = pending.get("ts", "")
+    pending_cmd = pending.get("command", "")
+    pending_phase = pending.get("phase", "")
+    print("REVIEW: artifacts not yet updated to the prior command's timestamp.")
+    print(f"  pending_command: {pending_cmd}")
+    print(f"  pending_phase: {pending_phase}")
+    print(f"  pending_ts: {pending_ts}")
+    print()
+    print("  ACTION REQUIRED: Update ALL of the following after running the command:")
+    print("    1) ptt.md (state/ptt.md): Update the relevant PT-XXX row status AND")
+    print("       bump the '*Last updated: YYYY-MM-DD HH:MM UTC*' footer")
+    print("    2) history.md (state/history.md): record-history with the EXACT command string")
+    print("    3) hypotheses.md (top-level, for vuln-research/exploitation phases):")
+    print("       Update the 'Updated: YYYY-MM-DD HH:MM' field for active hypotheses")
+    print()
+    print("  Example workflow after running a command:")
+    print("    python scripts/violin_guard.py record-history --eng-dir \"$ENG_DIR\" \\")
+    print("      --command \"<exact command>\" --exit-code <N> --phase <PHASE>")
+    print("    python scripts/violin_guard.py record-ptt --eng-dir \"$ENG_DIR\" \\")
+    print("      --id PT-XXX --status \"[~]\" --note \"<result summary>\"")
+    print("    python scripts/violin_guard.py sync-done --eng-dir \"$ENG_DIR\"")
+    return 2
 
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    if "fully autonomous" in readme.lower():
-        result.add_error("README still claims fully autonomous operation")
-    if "supervised agentic" not in readme.lower():
-        result.add_warning("README does not use supervised agentic positioning")
 
-    if not (ROOT / "scripts/smoke-test.ps1").exists():
-        result.add_error("Windows smoke test missing: scripts/smoke-test.ps1")
+def cmd_sync_clear(args: argparse.Namespace) -> int:
+    """Force-clear a pending-sync lock regardless of artifact freshness.
 
-    if not result.errors and not result.warnings:
-        result.add_info("release check passed")
-    result.print()
-    return result.exit_code()
+    Session-start reconciliation: a prior session may have approved a command,
+    run it, recorded history, but exited before calling ``sync-done``. That
+    leftover lock would otherwise BLOCK the first command of the new session
+    (root-cause fix, issue 3). ``sync-clear`` drops it unconditionally.
+    """
+    eng_dir = args.eng_dir or ""
+    cleared = sync_state.force_clear_pending_sync(eng_dir)
+    if cleared:
+        print("OK: pending-sync lock force-cleared.")
+    else:
+        print("OK: no pending-sync lock to clear.")
+    return 0
+
+
+def cmd_heartbeat_done(args: argparse.Namespace) -> int:
+    """Clear the pending heartbeat review lock (LLM self-attests the review)."""
+    eng_dir = args.eng_dir or ""
+    hb = sync_state.has_heartbeat_pending(eng_dir)
+    if hb is None:
+        print("OK: no heartbeat review pending.")
+        return 0
+    sync_state.clear_heartbeat_pending(eng_dir)
+    print("OK: heartbeat review cleared. Re-read of pentest SKILL.md and engagement-file"
+          " review complete — target commands allowed.")
+    return 0
+
+
+def cmd_message_tick(args: argparse.Namespace) -> int:
+    """LLM-opt-in: tick the message counter; set a heartbeat lock on interval."""
+    eng_dir = args.eng_dir or ""
+    count = sync_state.tick_message(eng_dir)
+    if count % sync_state.MESSAGE_INTERVAL == 0:
+        sync_state.set_heartbeat_pending(
+            eng_dir,
+            f"Reached {count} messages (interval {sync_state.MESSAGE_INTERVAL})."
+            " Review engagement files for drift before continuing.",
+        )
+        print(f"OK: message_count={count}; heartbeat triggered — next command requires heartbeat-done.")
+        return 2
+    print(f"OK: message_count={count}.")
+    return 0
+
+
+def cmd_eng_root(args: argparse.Namespace) -> int:
+    """Print the canonical engagement root and resolve an eng_dir to absolute.
+
+    The skill/scoping bootstrap calls this to obtain an ABSOLUTE ENG_DIR that
+    the violin-guard plugin will resolve identically. When --eng-dir is given, prints the
+    resolved absolute path; otherwise prints just ENG_ROOT.
+    """
+    if args.eng_dir:
+        resolved = resolve_eng_dir(args.eng_dir)
+        print(f"ENG_ROOT={ENG_ROOT}")
+        print(f"ENG_DIR={resolved}")
+    else:
+        print(f"ENG_ROOT={ENG_ROOT}")
+    return 0
 
 
 def main() -> int:
@@ -422,16 +234,103 @@ def main() -> int:
     scope_parser.add_argument("--scope", required=True)
     scope_parser.set_defaults(func=validate_scope)
 
-    command_parser = subparsers.add_parser("check-command", help="check a target-touching terminal command")
+    command_parser = subparsers.add_parser("check-command", help="check a target-touching terminal command (enforced: blocks until prior artifacts synced + periodic review done)")
     command_parser.add_argument("--scope", required=True)
     command_parser.add_argument("--phase", required=True)
     command_parser.add_argument("--command", required=True)
-    command_parser.set_defaults(func=check_command)
+    command_parser.add_argument("--eng-dir", default="", help="engagement directory; enables doc-sync/heartbeat/stuck-loop enforcement")
+    command_parser.add_argument("--skill-loaded-file", default="", help="skill-load marker path; when set, missing marker blocks the command")
+    command_parser.add_argument("--session-id", default="", help="current session or goal label; when set, --skill-loaded-file must encode the same session id")
+    command_parser.set_defaults(func=check_command_enforced)
+
+    closeout_parser = subparsers.add_parser(
+        "check-closeout",
+        help="hard gate: verify mandatory REPORTING/RETROSPECTIVE artifacts exist "
+             "(report.md, retrospective.md, phase-summary.md, CVSS:3.1, Research Log). "
+             "Missing artifacts BLOCK even under --yolo.",
+    )
+    closeout_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    closeout_parser.add_argument("--phase", required=True, help="REPORTING or RETROSPECTIVE")
+    closeout_parser.add_argument("--command", default="", help="artifact-producing command (exempts the gate)")
+    closeout_parser.set_defaults(func=cmd_check_closeout)
+
+    sync_parser = subparsers.add_parser("sync-done", help="call AFTER updating ptt.md/history.md/hypothesis-board.md for the last approved command; verifies freshness and unlocks the next command")
+    sync_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    sync_parser.set_defaults(func=cmd_sync_done)
+
+    sync_clear_parser = subparsers.add_parser(
+        "sync-clear",
+        help="force-clear a stale pending-sync lock (use at session start to drop a "
+             "leftover lock from a prior session that died before sync-done)",
+    )
+    sync_clear_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    sync_clear_parser.set_defaults(func=cmd_sync_clear)
+
+    heartbeat_parser = subparsers.add_parser("heartbeat-done", help="call AFTER re-reading SKILL.md + reviewing engagement files on the cadence; clears the heartbeat lock")
+    heartbeat_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    heartbeat_parser.set_defaults(func=cmd_heartbeat_done)
+
+    tick_parser = subparsers.add_parser("message-tick", help="LLM-opt-in: call once per assistant message; sets a heartbeat lock every MESSAGE_INTERVAL messages")
+    tick_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    tick_parser.set_defaults(func=cmd_message_tick)
+
+    eng_root_parser = subparsers.add_parser(
+        "eng-root",
+        help="print the canonical engagement root (ENG_ROOT) and resolve a given "
+             "engagement directory to its absolute path under it; used by the "
+             "skill/scoping bootstrap to build an ABSOLUTE ENG_DIR that matches "
+             "the plugin (root-cause fix for divergent engagement trees)",
+    )
+    eng_root_parser.add_argument(
+        "--eng-dir", default="",
+        help="optional engagement dir to resolve (e.g. '10.129.46.56-2026-07-08' "
+             "or 'engagements/10.129.46.56-2026-07-08'); if omitted, prints ENG_ROOT",
+    )
+    eng_root_parser.set_defaults(func=cmd_eng_root)
+
+    bootstrap_parser = subparsers.add_parser("check-bootstrap", help="verify engagement bootstrap is complete (scope, PTT, hypothesis board, history exist)")
+    bootstrap_parser.add_argument("--eng-dir", default="", help="engagement directory (ENG_DIR); pass explicitly or export as env var")
+    bootstrap_parser.add_argument("--auto-repair", action="store_true", help="if a required bootstrap artifact is a directory (LLM bootstrap drift), remove it and re-create from the canonical template")
+    bootstrap_parser.set_defaults(func=check_bootstrap)
+
+    init_parser = subparsers.add_parser("init-engagement", help="auto-create a complete, guard-clean engagement directory from templates")
+    init_parser.add_argument("--eng-dir", required=True, help="engagement directory to create (name should contain the host, e.g. engagements/10.129.45.228-2026-07-08)")
+    init_parser.add_argument("--host", default="", help="target host/IP to pre-fill in scope.yaml; if omitted, derived from --eng-dir name")
+    init_parser.set_defaults(func=lambda a: init_engagement(a.eng_dir, host=a.host))
 
     release_parser = subparsers.add_parser("check-release", help="validate release readiness")
     release_parser.set_defaults(func=check_release)
 
+    ptt_parser = subparsers.add_parser("record-ptt", help="update a PT-XXX row in the PTT")
+    ptt_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    ptt_parser.add_argument("--id", required=True, help="PT-XXX id (e.g. PT-016)")
+    ptt_parser.add_argument("--status", required=True, choices=sorted(VALID_STATUSES), help="new status marker")
+    ptt_parser.add_argument("--note", default="", help="one-line note appended to Evidence column")
+    ptt_parser.set_defaults(func=record_ptt)
+
+    skill_parser = subparsers.add_parser("check-skill-loaded", help="mark SKILL.md as read for the current session/work-block")
+    skill_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    skill_parser.add_argument("--session-id", required=True, help="session or goal label, used in marker filename")
+    skill_parser.add_argument("--skill-loaded-file", default="", help="write marker to explicit path; default: $ENG_DIR/state/.skill-loaded-<session-id>")
+    skill_parser.set_defaults(func=check_skill_loaded)
+
+    history_parser = subparsers.add_parser("record-history", help="append a timestamped entry to history.md")
+    history_parser.add_argument("--eng-dir", required=True, help="engagement directory")
+    history_parser.add_argument("--command", required=True, help="shell command that was just run")
+    history_parser.add_argument("--exit-code", required=True, type=int, help="exit code of the command")
+    history_parser.add_argument("--phase", default="UNKNOWN", help="phase tag (default: UNKNOWN)")
+    history_parser.add_argument("--evidence", default="", help="evidence path under $ENG_DIR/evidence/")
+    history_parser.set_defaults(func=record_history)
+
     args = parser.parse_args()
+
+    # ROOT-CAUSE FIX (issue 1): resolve every --eng-dir through a single source
+    # of truth so the skill's relative "engagements/..." form and an absolute
+    # path both land on the same canonical tree under ENG_ROOT. Subcommands that
+    # take --eng-dir read args.eng_dir AFTER this point.
+    if getattr(args, "eng_dir", None):
+        args.eng_dir = resolve_eng_dir(args.eng_dir)
+
     try:
         return args.func(args)
     except Exception as exc:  # noqa: BLE001 - CLI should fail clearly
