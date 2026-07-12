@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Hermes Agent Docs
+    url: https://hermes-agent.nousresearch.com/docs/
+    about: Hermes Agent documentation and guides
+  - name: Hermes Agent Discord
+    url: https://discord.gg/NousResearch
+    about: Community support for Hermes and Hermes profiles

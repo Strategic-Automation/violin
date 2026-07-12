@@ -1,0 +1,33 @@
+name: lint
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+jobs:
+  yaml-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate all YAML
+        run: |
+          pip install pyyaml
+          python -c "
+          import yaml, sys, glob
+          files = glob.glob('**/*.yaml', recursive=True) + glob.glob('**/*.yml', recursive=True)
+          errors = []
+          for f in files:
+              try:
+                  yaml.safe_load(open(f))
+              except Exception as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors:
+                  print(f'YAML ERROR: {e}')
+              sys.exit(1)
+          else:
+              print(f'All {len(files)} YAML files valid')
+          "

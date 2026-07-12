@@ -1,0 +1,170 @@
+# Model/provider: Violin inherits the user's normal Hermes provider/model by
+# default. Users may add a profile-local model section here if they intentionally
+# want Violin to use a different Hermes-supported provider.
+
+agent:
+  max_turns: 60
+  service_tier: normal
+  verbose: false
+  reasoning_effort: medium
+  tool_use_enforcement: true
+  disabled_toolsets:
+    - kanban
+
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: true
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 3
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 5
+    same_tool_failure: 8
+    idempotent_no_progress: 5
+
+compression:
+  enabled: true
+  threshold: 0.25
+  target_ratio: 0.30
+  protect_last_n: 20
+  protect_first_n: 8
+
+prompt_caching:
+  cache_ttl: 5m
+
+# Auxiliary tasks (vision, compression, web_extract, etc.) inherit the user's
+# global Hermes provider configuration. No profile-local auxiliary overrides.
+
+display:
+  compact: false
+  personality: concise
+  busy_input_mode: interrupt
+  show_reasoning: false
+  streaming: true
+  skin: default
+  interim_assistant_messages: true
+  tool_progress: minimal
+  long_running_notifications: true
+  busy_ack_detail: true
+  background_process_notifications: all
+
+privacy:
+  redact_pii: true
+
+memory:
+  # Violin engagements are isolated per project/conversation. Do not load or
+  # write global Hermes MEMORY.md / USER.md data.
+  memory_enabled: false
+  user_profile_enabled: false
+  memory_char_limit: 2200
+  user_char_limit: 1375
+  nudge_interval: 15
+  flush_min_turns: 8
+
+skills:
+  disabled:
+    - airtable
+    - architecture-diagram
+    - arxiv
+    - ascii-art
+    - ascii-video
+    - baoyu-infographic
+    - blogwatcher
+    - claude-code
+    - claude-design
+    - codebase-inspection
+    - codex
+    - comfyui
+    - computer-use
+    - design-md
+    - dogfood
+    - excalidraw
+    - gif-search
+    - github-auth
+    - github-code-review
+    - github-issues
+    - github-pr-workflow
+    - github-repo-management
+    - google-workspace
+    - heartmula
+    - hermes-agent
+    - hermes-agent-skill-authoring
+    - hermes-profile-distributions
+    - himalaya
+    - huggingface-hub
+    - humanizer
+    - jupyter-live-kernel
+    - llama-cpp
+    - llm-wiki
+    - manim-video
+    - maps
+    - nano-pdf
+    - node-inspect-debugger
+    - notion
+    - obsidian
+    - ocr-and-documents
+    - opencode
+    - openhue
+    - p5js
+    - petdex
+    - plan
+    - polymarket
+    - popular-web-designs
+    - powerpoint
+    - pretext
+    - requesting-code-review
+    - segment-anything-model
+    - simplify-code
+    - sketch
+    - songsee
+    - songwriting-and-ai-music
+    - spike
+    - systematic-debugging
+    - teams-meeting-pipeline
+    - test-driven-development
+    - touchdesigner-mcp
+    - weights-and-biases
+    - youtube-content
+    - yuanbao
+
+approvals:
+  mode: manual
+  deny:
+    - "*rm -rf /*"
+    - "*mkfs*"
+    - "*dd if=* of=/dev/*"
+    - "*:(){ :|& };:*"
+    - "*chmod -R 777 /*"
+    - "*curl*|*sh*"
+    - "*wget*|*sh*"
+
+security:
+  redact_secrets: true
+
+updates:
+  pre_update_backup: false
+  backup_keep: 5
+  non_interactive_local_changes: stash
+
+_config_version: 33
+
+session_reset:
+  mode: both
+  idle_minutes: 1440
+  at_hour: 4
+
+group_sessions_per_user: true
+
+platform_toolsets:
+  cli:
+    - terminal
+    - web
+    - browser
+    - file
+    - code_execution
+    - skills
+    - todo
+    - clarify
+    - delegation
+    - vision

@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.hermes/plans/
+.hermes/sessions/
+
+# Local engagement workspaces can contain tokens, credentials, raw evidence,
+# reports, and client data. Keep them out of the distributable profile repo.
+engagements/
+
+# Empty Codex agent context directory
+.agents/

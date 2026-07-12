@@ -1,0 +1,71 @@
+name: Bug Report
+description: File a bug report to help improve Violin
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+  - type: input
+    id: version
+    attributes:
+      label: Violin version
+      description: What version of Violin are you running? (from distribution.yaml)
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: hermes-version
+    attributes:
+      label: Hermes version
+      description: What version of Hermes? (run `hermes --version`)
+      placeholder: "0.18.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: What OS/environment are you running Violin on?
+      options:
+        - Kali Linux (native)
+        - Parrot OS (native)
+        - Kali Docker container
+        - WSL2
+        - macOS
+        - Windows (Git Bash)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: What happened? What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Install Violin via `hermes profile install ...`
+        2. Start a session with `hermes -p violin`
+        3. Run a pentest against X
+        4. See error: ...
+    validations:
+      required: true
+  - type: textarea
+    id: guard-output
+    attributes:
+      label: Guard output (if applicable)
+      description: Paste any output from `violin_guard.py check-release` or `check-command`
+      render: shell
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Paste any relevant Hermes logs or error messages
+      render: shell

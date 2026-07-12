@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest a new playbook, vulnerability class, or enhancement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature for Violin!
+  - type: dropdown
+    id: type
+    attributes:
+      label: Feature type
+      options:
+        - New per-vulnerability-class playbook
+        - New phase playbook
+        - New reference document
+        - Tool/script enhancement
+        - Workflow improvement
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature description
+      description: What would you like Violin to do?
+    validations:
+      required: true
+  - type: textarea
+    id: methodology
+    attributes:
+      label: Methodology reference
+      description: Link to the relevant OWASP, PTES, CWE, or NIST standard
+      placeholder: "https://owasp.org/Top10/A03_2021-Injection/"
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: How would this feature be used in an authorised pentest?
+    validations:
+      required: true
