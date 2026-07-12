@@ -4,11 +4,10 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Make `violin_guard` resolvable
 _PLUGIN_ROOT = ROOT / "plugins" / "violin_guard"
@@ -51,7 +50,7 @@ sys.modules["vgpkg"] = pkg
 TOOLS = _load_sub("tools", _PLUGIN / "tools.py")
 
 # Import core modules from the new location
-from plugins.violin_guard.core import bootstrap, command, hypotheses, ptt, state, phases, execution
+from plugins.violin_guard.core import bootstrap, command, execution, hypotheses, state
 
 
 def _cp(code, out="", err=""):
@@ -84,6 +83,7 @@ def _fake_target_executor(monkeypatch):
         remaining = state.spend_sync_credit(str(engagement))
         # Mirror real execution: tick command counter, mark pending sync, set heartbeat if interval reached
         from plugins.violin_guard.core.phases import normalize_phase, suppresses_heartbeat
+
         count = state.tick_command(str(engagement))
         state.mark_pending_sync(str(engagement), command, phase)
         phase_enum = normalize_phase(phase)
@@ -113,6 +113,7 @@ def _fake_target_executor(monkeypatch):
 
     # Patch the execution module that vgpkg.tools imports (vgpkg.core.execution)
     import sys
+
     if "vgpkg.core.execution" in sys.modules:
         monkeypatch.setattr(sys.modules["vgpkg.core.execution"], "execute", fake_execute)
     monkeypatch.setattr(execution, "execute", fake_execute)
@@ -261,7 +262,9 @@ def test_first_command_requires_an_active_ptt_task(tmp_path):
     )
     first = command.check_command(args)
 
-    assert any("exactly one" in error.lower() or "active task" in error.lower() for error in first.errors)
+    assert any(
+        "exactly one" in error.lower() or "active task" in error.lower() for error in first.errors
+    )
 
 
 def test_multiple_active_ptt_tasks_block_target_execution(tmp_path):
@@ -282,7 +285,9 @@ def test_multiple_active_ptt_tasks_block_target_execution(tmp_path):
             session_id="ts",
         )
     )
-    assert any("exactly one" in error.lower() or "active task" in error.lower() for error in result.errors)
+    assert any(
+        "exactly one" in error.lower() or "active task" in error.lower() for error in result.errors
+    )
 
 
 def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
@@ -321,7 +326,9 @@ def test_init_engagement_creates_compliant_artifacts(tmp_path):
     # scope.yaml present and parses clean (no REVIEW on required fields)
     scope = yaml.safe_load((eng / "scope" / "scope.yaml").read_text(encoding="utf-8"))
     assert scope["targets"]["ip_addresses"] == ["10.129.45.228"]
-    assert command.validate_scope(eng / "scope" / "scope.yaml").exit_code() == 0, "filled scope must be guard-clean"
+    assert command.validate_scope(eng / "scope" / "scope.yaml").exit_code() == 0, (
+        "filled scope must be guard-clean"
+    )
 
     # bootstrap reports complete (exit 0) or REVIEW-only (pristine PTT is
     # legitimate on a brand-new engagement — no task touched yet).
@@ -344,7 +351,7 @@ def test_auto_repair_creates_missing_artifacts(tmp_path):
     # Artifacts now exist and scope is guard-clean
     for rel in ("scope/scope.yaml", "state/ptt.md", "hypotheses.md", "state/history.md"):
         assert (eng / rel).exists(), f"auto-repair should create {rel}"
-    scope = yaml.safe_load((eng / "scope" / "scope.yaml").read_text(encoding="utf-8"))
+    yaml.safe_load((eng / "scope" / "scope.yaml").read_text(encoding="utf-8"))
     assert command.validate_scope(eng / "scope" / "scope.yaml").exit_code() == 0
 
 
@@ -366,9 +373,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     ptt_before = ptt_path.read_text(encoding="utf-8")
     first = json.loads(TOOLS.handle_exec(args))
     assert first["status"] in ("ok", "approved", "review"), first
-    assert "`nmap -sV 10.10.10.10`" in (eng / "state" / "history.md").read_text(
-        encoding="utf-8"
-    )
+    assert "`nmap -sV 10.10.10.10`" in (eng / "state" / "history.md").read_text(encoding="utf-8")
     assert ptt_path.read_text(encoding="utf-8") == ptt_before
 
     window = state.DEFAULT_SYNC_CREDIT
@@ -377,26 +382,37 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
         out = json.loads(TOOLS.handle_exec({**args, "command": command_val}))
         assert out["status"] in ("ok", "approved", "review"), out
 
-    blocked = json.loads(
-        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"})
-    )
+    blocked = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"}))
     assert blocked["status"] == "sync_required", blocked
     assert ptt_path.read_text(encoding="utf-8") == ptt_before
+
+    # The self-certify guard requires the review note to carry the batch_id
+    # returned by the last executed command (proves this review belongs to
+    # this batch). Capture it from the pending-sync state.
+    from plugins.violin_guard.core import state as _state
+
+    pending = _state.get_pending_sync(str(eng))
+    assert pending, "a batch must be pending before review"
+    batch_id = pending.get("batch_id")
+    assert batch_id, "pending batch must carry a batch_id"
 
     history_text = (eng / "state" / "history.md").read_text(encoding="utf-8")
     assert history_text.count("exit=0 `nmap") == window
 
     reviewed = json.loads(
         TOOLS.handle_record_ptt(
-            {"eng_dir": str(eng), "id": "PT-001", "status": "[~]", "note": "batch reviewed"}
+            {
+                "eng_dir": str(eng),
+                "id": "PT-001",
+                "status": "[~]",
+                "note": f"batch reviewed (batch_id {batch_id})",
+            }
         )
     )
     assert reviewed["status"] == "ok", reviewed
     synced = json.loads(TOOLS.handle_sync_done({"eng_dir": str(eng)}))
     assert synced["status"] == "ok", synced
-    resumed = json.loads(
-        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"})
-    )
+    resumed = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"}))
     assert resumed["status"] in ("ok", "approved", "review"), resumed
 
 
@@ -413,8 +429,6 @@ def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, 
         encoding="utf-8",
     )
     # Create a real hypothesis (not in comment) for exploitation phase
-    from plugins.violin_guard.core import hypotheses
-    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
     hypotheses.update_hypothesis(
         eng / "hypotheses.md",
         id="001",

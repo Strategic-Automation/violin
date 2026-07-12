@@ -29,6 +29,6 @@ jobs:
       - name: Run tests
         run: uv run pytest -q -p no:cacheprovider
       - name: Run guard plugin tests explicitly
-        run: uv run pytest -q tests/test_plugin_guard.py -p no:cacheprovider
+        run: uv run pytest -q tests/guard/test_plugin_guard.py -p no:cacheprovider
       - name: Validate release
         run: uv run python scripts/violin_guard.py check-release

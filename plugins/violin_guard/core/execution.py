@@ -8,21 +8,20 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import time
 import uuid
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from . import state
-from .phases import Phase, normalize_phase
-from .command import command_leading_tool, LOCAL_TOOLS
+from .command import LOCAL_TOOLS, command_leading_tool
+from .phases import normalize_phase
 
 __all__ = [
-    "ExecutionReceipt",
     "execute",
     "status",
     "cancel",
@@ -285,7 +284,8 @@ def _commit_guard_state(eng_dir: Path, command: str, phase: str) -> int:
     remaining = state.spend_sync_credit(str(eng_dir))
     state.mark_pending_sync(str(eng_dir), command, phase)
     count = state.tick_command(str(eng_dir))
-    from .phases import normalize_phase, suppresses_heartbeat
+    from .phases import suppresses_heartbeat
+
     phase_enum = normalize_phase(phase)
     if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
         state.set_heartbeat_pending(
@@ -323,6 +323,3 @@ def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
     _terminate_pid(pid)
 
     return {**record, "message": "cancellation requested for tracked process group"}
-
-
-import shutil

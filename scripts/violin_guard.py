@@ -14,7 +14,6 @@ if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
 
 from plugins.violin_guard.core import bootstrap, command, state
-from plugins.violin_guard.core.phases import normalize_phase
 
 
 def _print_result(result) -> int:
@@ -42,7 +41,9 @@ def cmd_check_bootstrap(args: argparse.Namespace) -> int:
 
 
 def cmd_init_engagement(args: argparse.Namespace) -> int:
-    return bootstrap.init_engagement(args.eng_dir, host=args.host, ctf=args.ctf, session_id=args.session_id)
+    return bootstrap.init_engagement(
+        args.eng_dir, host=args.host, ctf=args.ctf, session_id=args.session_id
+    )
 
 
 def cmd_validate_scope(args: argparse.Namespace) -> int:
@@ -80,7 +81,10 @@ def cmd_record_ptt(args: argparse.Namespace) -> int:
 
 def cmd_sync_done(args: argparse.Namespace) -> int:
     from plugins.violin_guard.core.service import handle_sync_done
-    out=json.loads(handle_sync_done(vars(args))); print(out); return 0 if out["status"]=="ok" else 1
+
+    out = json.loads(handle_sync_done(vars(args)))
+    print(out)
+    return 0 if out["status"] == "ok" else 1
 
 
 def cmd_heartbeat_done(args: argparse.Namespace) -> int:
@@ -92,9 +96,9 @@ def cmd_heartbeat_done(args: argparse.Namespace) -> int:
 def cmd_message_tick(args: argparse.Namespace) -> int:
     """Handle message tick - increment counter and check heartbeat gate."""
     from plugins.violin_guard.core.state import (
-        tick_message,
-        has_heartbeat_pending,
         get_heartbeat_reason,
+        has_heartbeat_pending,
+        tick_message,
     )
 
     eng_dir = args.eng_dir
@@ -109,6 +113,7 @@ def cmd_message_tick(args: argparse.Namespace) -> int:
     # Check if heartbeat should be triggered now (every MESSAGE_INTERVAL messages)
     if count % 30 == 0:
         from plugins.violin_guard.core.state import set_heartbeat_pending
+
         set_heartbeat_pending(
             eng_dir,
             f"Reached {count} LLM messages. Review engagement files for drift.",
@@ -131,13 +136,84 @@ def cmd_eng_root(args: argparse.Namespace) -> int:
         print(f"resolved={resolved}")
     return 0
 
+
 def cmd_check_release(args) -> int:
     from plugins.violin_guard.core.release import check_release
+
     result = check_release()
-    for item in result.errors: print(f"ERROR: {item}")
-    for item in result.warnings: print(f"WARN: {item}")
-    for item in result.infos: print(f"OK: {item}")
+    for item in result.errors:
+        print(f"ERROR: {item}")
+    for item in result.warnings:
+        print(f"WARN: {item}")
+    for item in result.infos:
+        print(f"OK: {item}")
     return result.exit_code()
+
+
+def cmd_search_exploit(args: argparse.Namespace) -> int:
+    from plugins.violin_guard.core.adapters import search_exploit
+
+    result = search_exploit(
+        {
+            "product": args.product,
+            "version": args.version,
+            "service": args.service,
+            "cve": args.cve,
+        }
+    )
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("available") else 1
+
+
+def cmd_target(args: argparse.Namespace) -> int:
+    from plugins.violin_guard.core.service import handle_target
+
+    out = json.loads(
+        handle_target(
+            {
+                "eng_dir": args.eng_dir,
+                "scope": args.scope or "",
+                "host": args.host or "",
+                "role": args.role or "",
+                "field": args.field or "ip",
+            }
+        )
+    )
+    if out.get("status") != "ok":
+        print(out.get("error", "target resolution failed"))
+        return 1
+    print(out.get("value", ""))
+    return 0
+
+
+def cmd_exec_burst(args: argparse.Namespace) -> int:
+    from plugins.violin_guard.core.service import handle_exec_burst
+
+    out = json.loads(
+        handle_exec_burst(
+            {
+                "eng_dir": args.eng_dir,
+                "scope": args.scope,
+                "phase": args.phase,
+                "commands": [],
+                "commands_file": args.commands_file or "",
+                "session_id": args.session_id or "",
+                "skill_loaded_file": args.skill_loaded_file or "",
+                "label": args.label or "",
+                "continue_on_error": args.continue_on_error,
+            }
+        )
+    )
+    status = out.get("status")
+    if status == "denied":
+        print("BURST VERDICT: DENIED")
+    else:
+        print(f"BURST VERDICT: {status.upper()}")
+    for r in out.get("results", []):
+        idx = r.get("index", "?")
+        cmd = r.get("command", "")
+        print(f"[{idx}] {cmd}")
+    return 0 if status not in ("denied", "error", "execution_failed") else 1
 
 
 def main() -> int:
@@ -165,7 +241,9 @@ def main() -> int:
     p.add_argument("eng_dir")
     p.add_argument("--host", default="")
     p.add_argument("--ctf", action="store_true", help="Create an HTB/CTF-ready scope and PTT")
-    p.add_argument("--session-id", default="", help="Mark this session skill-loaded for CTF bootstrap")
+    p.add_argument(
+        "--session-id", default="", help="Mark this session skill-loaded for CTF bootstrap"
+    )
     p.set_defaults(func=cmd_init_engagement)
 
     # check-skill-loaded
@@ -218,6 +296,35 @@ def main() -> int:
 
     p = sub.add_parser("check-release", help="Run release checks")
     p.set_defaults(func=cmd_check_release)
+
+    # search-exploit
+    p = sub.add_parser("search-exploit", help="Search local ExploitDB (read-only)")
+    p.add_argument("--product", default="")
+    p.add_argument("--version", default="")
+    p.add_argument("--service", default="")
+    p.add_argument("--cve", default="")
+    p.set_defaults(func=cmd_search_exploit)
+
+    # target
+    p = sub.add_parser("target", help="Resolve in-scope target from scope.yaml")
+    p.add_argument("--eng-dir", required=True)
+    p.add_argument("--scope", default="")
+    p.add_argument("--host", default="")
+    p.add_argument("--role", default="")
+    p.add_argument("--field", default="ip", choices=["ip", "url", "host"])
+    p.set_defaults(func=cmd_target)
+
+    # exec-burst
+    p = sub.add_parser("exec-burst", help="Single-approval bounded command batch")
+    p.add_argument("--eng-dir", required=True)
+    p.add_argument("--scope", required=True)
+    p.add_argument("--phase", required=True)
+    p.add_argument("--commands-file", default="")
+    p.add_argument("--session-id", default="")
+    p.add_argument("--skill-loaded-file", default="")
+    p.add_argument("--label", default="")
+    p.add_argument("--continue-on-error", action="store_true")
+    p.set_defaults(func=cmd_exec_burst)
 
     args = parser.parse_args()
     return args.func(args)

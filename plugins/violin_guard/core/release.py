@@ -1,14 +1,23 @@
 """Release gate checks for the Violin plugin.
 
-Pure functions — no subprocess. Called by CLI check-release.
+The checker is a REAL gate: it runs an isolated plugin import, compares the
+manifest's provides_tools against the tools actually registered, and (unless
+disabled) shells out to ruff and pytest. Failures surface as errors and cause
+a non-zero exit code — so CI cannot pass a broken tree.
+
+Heavy checks (ruff/pytest) are gated behind VIOLIN_CHECK_RELEASE_SKIP_HEAVY=1
+(default: run them).
 """
 
 from __future__ import annotations
 
+import importlib.util
+import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 __all__ = [
     "ReleaseCheckResult",
@@ -95,17 +104,20 @@ def resolve_reference(source: Path, reference: str) -> Path:
 
 
 def check_release() -> ReleaseCheckResult:
-    """Run all release gate checks."""
+    """Run all release gate checks. This is a REAL gate — failures add errors
+    and cause a non-zero exit code (see CLI cmd_check_release)."""
     result = ReleaseCheckResult()
     root = _plugin_root()
 
-    # 1. plugin.yaml version bumped
+    # 1. plugin.yaml version
     plugin_yaml = root / "plugin.yaml"
+    provides_tools: list[str] = []
     if plugin_yaml.exists():
         import yaml
+
         data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
         version = data.get("version", "0.0.0")
-        # Check if version looks like a proper semver
+        provides_tools = list(data.get("provides_tools", []) or [])
         if not re.match(r"^\d+\.\d+\.\d+", version):
             result.add_error(f"plugin.yaml version '{version}' is not a valid semver")
         else:
@@ -113,52 +125,112 @@ def check_release() -> ReleaseCheckResult:
     else:
         result.add_error("plugin.yaml not found")
 
-    # 2. CHANGELOG.md updated
+    # 2. CHANGELOG.md
     changelog = root.parents[1] / "CHANGELOG.md"
     if changelog.exists():
         result.add_info("CHANGELOG.md present")
     else:
         result.add_warning("CHANGELOG.md not found")
 
-    # Runtime diagnostics are intentionally emitted by the CLI; they are not
-    # release errors.  Static linting belongs in the CI lint workflow.
+    # 3. Isolated plugin import (catches broken module-level code / imports).
+    try:
+        sys.path.insert(0, str(root.parents[1]))
+        spec = importlib.util.spec_from_file_location(
+            "violin_guard_release_check", root / "__init__.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        result.add_info("isolated plugin import OK")
+    except Exception as exc:  # noqa: BLE001
+        result.add_error(f"plugin import failed: {type(exc).__name__}: {exc}")
+        mod = None
 
-    # 4. provides_tools matches registered tools
-    # This would require importing the plugin, which we can't do in pure check
-    result.add_info("run isolated plugin import test to verify provides_tools")
+    # 3b. Manifest vs registered tools.
+    if mod is not None:
+        registered = sorted(getattr(mod, "REGISTERED_TOOLS", []) or [])
+        if not registered:
+            result.add_warning("plugin exposes no REGISTERED_TOOLS list")
+        elif sorted(provides_tools) != registered:
+            result.add_error(
+                "provides_tools mismatch: manifest="
+                f"{sorted(provides_tools)} registered={registered}"
+            )
+        else:
+            result.add_info("provides_tools matches registered tools")
 
-    # 5. Tests exist
+    # 4. Heavy checks (ruff + pytest), opt-out via env.
+    if os.environ.get("VIOLIN_CHECK_RELEASE_SKIP_HEAVY") != "1":
+        repo_root = str(root.parents[1])
+        try:
+            ruff = subprocess.run(
+                [sys.executable, "-m", "ruff", "check", "."],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            if ruff.returncode != 0:
+                result.add_error(
+                    "ruff check failed:\n" + (ruff.stdout or ruff.stderr).strip()[:2000]
+                )
+            else:
+                result.add_info("ruff check passed")
+        except FileNotFoundError:
+            result.add_warning("ruff not installed; skipped")
+        try:
+            pytest = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+            )
+            if pytest.returncode != 0:
+                result.add_error(
+                    "test suite failed:\n" + (pytest.stdout or pytest.stderr).strip()[:2000]
+                )
+            else:
+                result.add_info("test suite passed")
+        except FileNotFoundError:
+            result.add_warning("pytest not installed; skipped")
+    else:
+        result.add_info("heavy checks skipped (VIOLIN_CHECK_RELEASE_SKIP_HEAVY=1)")
+
+    # 5. Tests directory
     tests_dir = root.parents[1] / "tests"
     if tests_dir.exists():
         result.add_info(f"tests directory found: {tests_dir}")
     else:
         result.add_warning("tests directory not found")
 
-    # 6. Skill documentation must match the shipped guard surface.
+    # 6. Skill documentation staleness scan (corrected forbidden set).
     profile_root = root.parents[1]
     skills_root = profile_root / "skills"
+    # 'violin_record_history' is RE-REGISTERED in __init__.py, so it is no
+    # longer a stale reference; 'violin_message_tick' is genuinely absent.
     forbidden = {
         "scripts/guard/": "removed legacy guard package",
         "hypothesis_guard.py": "removed hypothesis wrapper",
         "session_search": "unavailable session-search tool",
-        "violin_record_history": "removed model-visible history tool",
         "violin_message_tick": "removed model-visible message tool",
         "violin_guard.py close": "nonexistent close subcommand",
         "check-closeout": "nonexistent closeout subcommand",
         "sync-clear": "nonexistent sync-clear subcommand",
         "validate_scope_data": "private legacy scope validator",
     }
-    docs = [*skills_root.rglob("*.md"), *skills_root.rglob("*.yaml")]
-    for doc in docs:
-        text = doc.read_text(encoding="utf-8")
-        for token, reason in forbidden.items():
-            if token in text:
-                result.add_error(
-                    f"stale skill reference in {doc.relative_to(profile_root)}: "
-                    f"{token!r} ({reason})"
-                )
-    if not any("stale skill reference" in error for error in result.errors):
-        result.add_info("skill documentation matches the current guard surface")
+    if skills_root.exists():
+        docs = [*skills_root.rglob("*.md"), *skills_root.rglob("*.yaml")]
+        for doc in docs:
+            try:
+                text = doc.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            for token, reason in forbidden.items():
+                if token in text:
+                    result.add_error(
+                        f"stale skill reference in {doc.relative_to(profile_root)}: "
+                        f"{token!r} ({reason})"
+                    )
+        if not any("stale skill reference" in e for e in result.errors):
+            result.add_info("skill documentation matches the current guard surface")
 
     return result
 
@@ -217,6 +289,7 @@ def validate_plugin_structure() -> StructureResult:
     plugin_yaml = root / "plugin.yaml"
     if plugin_yaml.exists():
         import yaml
+
         try:
             data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
             for key in ("name", "version", "description", "provides_tools"):

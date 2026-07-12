@@ -1,12 +1,14 @@
 """Phase enumeration and phase-gate logic.
 
+Phases: SCOPING, RECON, VULN_RESEARCH, EXPLOITATION, POST_EXPLOITATION,
+PRIVESC, FLAGS, REPORTING, RETROSPECTIVE.
+
 Pure functions — no subprocess.
 """
 
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
 
 __all__ = [
     "Phase",
@@ -24,6 +26,8 @@ class Phase(str, Enum):
     VULN_RESEARCH = "VULN_RESEARCH"
     EXPLOITATION = "EXPLOITATION"
     POST_EXPLOITATION = "POST_EXPLOITATION"
+    PRIVESC = "PRIVESC"
+    FLAGS = "FLAGS"
     REPORTING = "REPORTING"
     RETROSPECTIVE = "RETROSPECTIVE"
 
@@ -34,6 +38,10 @@ _ALIASES = {
     "vuln_research": Phase.VULN_RESEARCH,
     "post-exploitation": Phase.POST_EXPLOITATION,
     "post_exploitation": Phase.POST_EXPLOITATION,
+    "privesc": Phase.PRIVESC,
+    "private-esc": Phase.PRIVESC,
+    "flag": Phase.FLAGS,
+    "capture-flags": Phase.FLAGS,
 }
 
 
@@ -53,12 +61,18 @@ def normalize_phase(s: str) -> Phase:
 
 def requires_hypothesis(phase: Phase) -> bool:
     """Return True if the phase requires active hypotheses."""
-    return phase in (Phase.VULN_RESEARCH, Phase.EXPLOITATION, Phase.POST_EXPLOITATION)
+    return phase in (
+        Phase.VULN_RESEARCH,
+        Phase.EXPLOITATION,
+        Phase.POST_EXPLOITATION,
+        Phase.PRIVESC,
+        Phase.FLAGS,
+    )
 
 
 def suppresses_heartbeat(phase: Phase) -> bool:
     """Return True if heartbeat is suppressed in this phase."""
-    return phase in (Phase.EXPLOITATION, Phase.POST_EXPLOITATION)
+    return phase in (Phase.EXPLOITATION, Phase.POST_EXPLOITATION, Phase.PRIVESC, Phase.FLAGS)
 
 
 # Allowed transitions: from_phase -> set of allowed to_phases
@@ -66,8 +80,21 @@ ALLOWED_TRANSITIONS: dict[Phase, set[Phase]] = {
     Phase.SCOPING: {Phase.RECON},
     Phase.RECON: {Phase.VULN_RESEARCH, Phase.SCOPING},
     Phase.VULN_RESEARCH: {Phase.EXPLOITATION, Phase.RECON, Phase.SCOPING},
-    Phase.EXPLOITATION: {Phase.POST_EXPLOITATION, Phase.VULN_RESEARCH, Phase.REPORTING},
-    Phase.POST_EXPLOITATION: {Phase.REPORTING, Phase.EXPLOITATION},
+    Phase.EXPLOITATION: {
+        Phase.POST_EXPLOITATION,
+        Phase.PRIVESC,
+        Phase.FLAGS,
+        Phase.VULN_RESEARCH,
+        Phase.REPORTING,
+    },
+    Phase.POST_EXPLOITATION: {
+        Phase.PRIVESC,
+        Phase.FLAGS,
+        Phase.EXPLOITATION,
+        Phase.REPORTING,
+    },
+    Phase.PRIVESC: {Phase.FLAGS, Phase.REPORTING, Phase.RETROSPECTIVE, Phase.EXPLOITATION},
+    Phase.FLAGS: {Phase.REPORTING, Phase.RETROSPECTIVE, Phase.PRIVESC},
     Phase.REPORTING: {Phase.RETROSPECTIVE},
     Phase.RETROSPECTIVE: set(),
 }

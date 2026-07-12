@@ -1,18 +1,25 @@
 """Shared state machine — doc-sync, heartbeat, retry detection, last-check recording.
 
-Pure functions with atomic file operations. No subprocess calls (except CLI bridge at end).
+Pure functions with atomic, cross-process-locked file operations. No subprocess calls.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
-import os
-import subprocess
-import sys
-import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+try:  # POSIX
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+try:  # Windows
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None
 
 from .phases import Phase
 
@@ -43,12 +50,67 @@ def _state_dir(eng_dir: str | Path) -> Path:
     return p
 
 
+def _lock_file(path: Path):
+    """Acquire an exclusive advisory lock for the duration of a ``with`` block.
+
+    Uses ``fcntl`` on POSIX and ``msvcrt`` on Windows. The lock is held on the
+    target file's directory lockfile (named ``<file>.lock``) so concurrent
+    processes serialise writes without racing on the temp swap.
+    """
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    fh = None
+    try:
+        fh = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115 - closed in finally
+    except OSError:
+        return contextlib.nullcontext()
+    if fcntl is not None:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            # Blocking fallback: wait for the lock to free.
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    elif msvcrt is not None:
+        # msvcrt has no non-blocking mode; retry briefly.
+        deadline = time.monotonic() + 5.0
+        while True:
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
+    return _FileLock(fh)
+
+
+class _FileLock:
+    def __init__(self, fh):
+        self._fh = fh
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        if self._fh is None:
+            return False
+        try:
+            if fcntl is not None:
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                with contextlib.suppress(OSError):
+                    msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+        finally:
+            self._fh.close()
+        return False
+
+
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    """Atomic JSON write using tmp + os.replace."""
+    """Atomic JSON write using tmp + os.replace, guarded by an advisory lock."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    with _lock_file(path):
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -93,10 +155,13 @@ def mark_pending_sync(
     if old.get("command") and not commands:
         commands = [{"command": old["command"], "phase": old.get("phase", phase)}]
     commands.append({"command": command, "phase": phase})
-    data["pending"] = {"batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
-                        "commands": commands, "phase": phase,
-                        "created_at": old.get("created_at") or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                        "ptt_reviewed": bool(old.get("ptt_reviewed", False))}
+    data["pending"] = {
+        "batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
+        "commands": commands,
+        "phase": phase,
+        "created_at": old.get("created_at") or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "ptt_reviewed": bool(old.get("ptt_reviewed", False)),
+    }
     _atomic_write(path, data)
 
 
@@ -117,19 +182,43 @@ def get_pending_sync(eng_dir: str | Path) -> dict | None:
     data = _read_json(_sync_path(eng_dir))
     return data.get("pending")
 
-def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
-    path = _sync_path(eng_dir); data = _read_json(path); pending = data.get("pending")
-    if not pending: raise ValueError("no pending execution batch")
-    pending["ptt_reviewed"] = True; pending["ptt_task_id"] = task_id
-    pending["ptt_note"] = note.strip(); pending["ptt_reviewed_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    data["pending"] = pending; _atomic_write(path, data)
 
-def append_history(eng_dir: str | Path, command: str, phase: str, exit_code: int, receipt_path: str = "") -> None:
-    path = _eng_dir(eng_dir) / "state" / "history.md"; path.parent.mkdir(parents=True, exist_ok=True)
+def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
+    path = _sync_path(eng_dir)
+    data = _read_json(path)
+    pending = data.get("pending")
+    if not pending:
+        raise ValueError("no pending execution batch")
+    pending["ptt_reviewed"] = True
+    pending["ptt_task_id"] = task_id
+    pending["ptt_note"] = note.strip()
+    pending["ptt_reviewed_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    data["pending"] = pending
+    _atomic_write(path, data)
+
+
+def append_history(
+    eng_dir: str | Path, command: str, phase: str, exit_code: int, receipt_path: str = ""
+) -> None:
+    path = _eng_dir(eng_dir) / "state" / "history.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     line = f"- {stamp} | phase={phase} | exit_code={exit_code} | command={command}"
-    if receipt_path: line += f" | receipt={receipt_path}"
-    with path.open("a", encoding="utf-8") as handle: handle.write(line + "\n")
+    if receipt_path:
+        line += f" | receipt={receipt_path}"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+def history_contains(eng_dir: str | Path, command: str) -> bool:
+    """Return True if ``command`` already appears in the engagement history.
+
+    Used by the self-certify guard to prove a batch finished before review.
+    """
+    hist = _eng_dir(eng_dir) / "state" / "history.md"
+    if not hist.exists():
+        return False
+    return command in hist.read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
@@ -254,13 +343,10 @@ def artifacts_are_fresh(eng_dir: str | Path) -> bool:
         _eng_dir(eng_dir) / "hypotheses.md",
         _eng_dir(eng_dir) / "state" / "history.md",
     ]
-    for p in paths:
-        if not p.exists():
-            return False
-    return True
+    return all(p.exists() for p in paths)
 
 
-def suppresses_heartbeat(phase: "Phase") -> bool:
+def suppresses_heartbeat(phase: Phase) -> bool:
     """Return True for phases that suppress heartbeat (EXPLOITATION, POST_EXPLOITATION)."""
     return phase in (Phase.EXPLOITATION, Phase.POST_EXPLOITATION)
 
@@ -290,73 +376,7 @@ __all__ = [
     "artifacts_are_fresh",
     "suppresses_heartbeat",
     "LOCAL_TOOLS",
-    "append_history", "mark_ptt_reviewed",
+    "append_history",
+    "mark_ptt_reviewed",
+    "history_contains",
 ]
-
-
-# --------------------------------------------------------------------------- #
-# CLI bridge — compatibility with existing tools.py
-# --------------------------------------------------------------------------- #
-
-
-def _run_guard_impl(script: Path, subcommand: str, kwargs: dict) -> subprocess.CompletedProcess:
-    """Invoke a guard CLI script with the given arguments."""
-    cmd = [sys.executable, str(script), subcommand]
-    for key, val in kwargs.items():
-        if val is None or val == "":
-            continue
-        flag = "--" + key.replace("_", "-")
-        cmd.append(flag)
-        if isinstance(val, bool):
-            if not val:
-                cmd.pop()
-            continue
-        cmd.append(str(val))
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
-    )
-
-
-def run_guard(subcommand: str, **kwargs) -> subprocess.CompletedProcess:
-    """Invoke `violin_guard.py <subcommand>` with the given CLI flags.
-
-    kwargs are mapped to `--kebab-case` flags; None/empty values are skipped.
-    Testable: monkeypatch `subprocess.run` in tests.
-    """
-    _PLUGIN_DIR = Path(__file__).resolve().parent.parent  # plugins/violin_guard
-    _PROFILE_HOME = _PLUGIN_DIR.parent.parent  # repo root
-    _GUARD_SCRIPT = _PROFILE_HOME / "scripts" / "violin_guard.py"
-    return _run_guard_impl(_GUARD_SCRIPT, subcommand, kwargs)
-
-
-def run_hypothesis_guard(subcommand: str, **kwargs) -> subprocess.CompletedProcess:
-    """Invoke `hypothesis_guard.py <subcommand>` (record/check-hypothesis)."""
-    _PLUGIN_DIR = Path(__file__).resolve().parent.parent  # plugins/violin_guard
-    _PROFILE_HOME = _PLUGIN_DIR.parent.parent  # repo root
-    _HYPOTHESIS_GUARD_SCRIPT = _PROFILE_HOME / "scripts" / "hypothesis_guard.py"
-    return _run_guard_impl(_HYPOTHESIS_GUARD_SCRIPT, subcommand, kwargs)
-
-
-def parse_exit(result: subprocess.CompletedProcess) -> dict:
-    """Return a structured result: status + stdout lines grouped by prefix."""
-    out = result.stdout or ""
-    block, review, ok = [], [], []
-    for line in out.splitlines():
-        if line.startswith("BLOCK:"):
-            block.append(line[len("BLOCK:"):].strip())
-        elif line.startswith("REVIEW:"):
-            review.append(line[len("REVIEW:"):].strip())
-        elif line.startswith("OK:"):
-            ok.append(line[len("OK:"):].strip())
-    return {
-        "exit_code": result.returncode,
-        "block": block,
-        "review": review,
-        "ok": ok,
-        "raw": out.strip(),
-    }

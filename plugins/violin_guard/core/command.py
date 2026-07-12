@@ -127,6 +127,7 @@ def validate_scope(scope_path: Path) -> ScopeResult:
 
     try:
         import yaml
+
         data = yaml.safe_load(scope_path.read_text(encoding="utf-8"))
     except Exception as exc:
         result.add_error(f"scope.yaml parse error: {exc}")
@@ -163,8 +164,136 @@ def validate_scope(scope_path: Path) -> ScopeResult:
 
 
 # --------------------------------------------------------------------------- #
-# Skill-load gate
+# DANGEROUS-PATTERN ENFORCEMENT (audit P0: destructive commands were never
+# blocked). These patterns are hard BLOCKs — yolo cannot bypass them.
 # --------------------------------------------------------------------------- #
+
+_DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
+    (
+        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\b",
+        "destructive filesystem deletion (rm -rf) is blocked",
+    ),
+    (
+        r"\brm\s+-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\b",
+        "destructive filesystem deletion (rm -fr) is blocked",
+    ),
+    (r"\brm\s+-rf\b", "recursive force delete (rm -rf) is blocked"),
+    (r"\brm\s+-r\b", "recursive delete (rm -r) is blocked"),
+    (r"\bmkfs\.[a-z]+\b", "filesystem format (mkfs) is blocked"),
+    (r"\bdd\b[^\n]*\bof=/dev/", "raw device overwrite (dd of=/dev/...) is blocked"),
+    (r"\bwipefs\b", "filesystem wipe (wipefs) is blocked"),
+    (r"\bshred\b[^\n]*\b/dev/", "device shred is blocked"),
+    (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", "fork bomb is blocked"),
+    (r">\s*/dev/sd[a-z]", "overwriting a block device is blocked"),
+    (r"\bchmod\s+-R\s+0", "recursive permission wipe (chmod -R 0...) is blocked"),
+    (r"\bchown\s+-R\b", "recursive ownership change (chown -R) is blocked"),
+    (
+        r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b",
+        "piping a download into a shell is blocked",
+    ),
+]
+
+
+def check_destructive_patterns(command: str) -> CheckResult:
+    """Return a BLOCK if the command matches a destructive pattern."""
+    result = CheckResult()
+    for pattern, reason in _DESTRUCTIVE_PATTERNS:
+        if re.search(pattern, command):
+            result.add_error(reason)
+            break
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# SCOPE TARGET ENFORCEMENT (audit P0: command targets were never compared with
+# the engagement's allowed hosts). IPv4/CIDR literals must appear in scope;
+# unknown hostnames force a REVIEW rather than a silent pass.
+# --------------------------------------------------------------------------- #
+
+_IPV4_CIDR = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?")
+_HOST_PORT = re.compile(r"\b([A-Za-z0-9](?:[A-Za-z0-9-]*\.)*[A-Za-z0-9-]+):\d{1,5}\b")
+_FQDN = re.compile(r"\b([A-Za-z0-9](?:[A-Za-z0-9-]*\.)+[A-Za-z]{2,})\b")
+
+
+def _extract_target_candidates(command: str) -> list[str]:
+    """Ordered, de-duplicated host/IP candidates from a command line."""
+    cands: list[str] = []
+    for m in re.finditer(r"https?://([^\s'\"<>]+)", command):
+        host = m.group(1).split("/")[0].split("@")[-1]
+        if ":" in host:
+            host = host.split(":", 1)[0]
+        if host:
+            cands.append(host.lower())
+    for m in _IPV4_CIDR.finditer(command):
+        cands.append(m.group(0).lower())
+    for m in _HOST_PORT.finditer(command):
+        cands.append(m.group(1).lower())
+    for m in _FQDN.finditer(command):
+        cands.append(m.group(1).lower())
+    seen: set[str] = set()
+    out: list[str] = []
+    for c in cands:
+        if c and c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+
+def _scope_allowed_hosts(scope: dict) -> set[str]:
+    allowed: set[str] = set()
+    targets = scope.get("targets", {}) or {}
+    for ip in targets.get("ip_addresses", []) or []:
+        allowed.add(str(ip).lower())
+    for url in targets.get("in_scope_urls", []) or []:
+        m = re.match(r"https?://([^\s/]+)", str(url))
+        if m:
+            allowed.add(m.group(1).lower())
+    roles = targets.get("roles", {}) or {}
+    if isinstance(roles, dict):
+        for v in roles.values():
+            allowed.add(str(v).lower())
+    for h in targets.get("hostnames", []) or []:
+        allowed.add(str(h).lower())
+    return allowed
+
+
+def _scope_excluded_hosts(scope: dict) -> set[str]:
+    excluded: set[str] = set()
+    for item in scope.get("exclusions", {}) or []:
+        if isinstance(item, str):
+            excluded.add(item.lower())
+        elif isinstance(item, dict):
+            for v in item.values():
+                excluded.add(str(v).lower())
+    return excluded
+
+
+def check_scope_targets(scope_path: Path, command: str) -> CheckResult:
+    """Block commands whose IP/CIDR target is outside the engagement scope."""
+    result = CheckResult()
+    if not scope_path.exists():
+        return result
+    try:
+        import yaml
+
+        data = yaml.safe_load(scope_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return result
+    if not isinstance(data, dict):
+        return result
+
+    allowed = _scope_allowed_hosts(data)
+    excluded = _scope_excluded_hosts(data)
+    for cand in _extract_target_candidates(command):
+        if cand in excluded:
+            continue
+        if cand in allowed:
+            continue
+        if _IPV4_CIDR.fullmatch(cand):
+            result.add_error(f"out-of-scope target {cand} (not present in scope.yaml)")
+        else:
+            result.add_warning(f"host {cand} is not present in scope.yaml; verify authorization")
+    return result
 
 
 def check_skill_load(eng_dir: Path, session_id: str, mandatory: bool = True) -> SkillLoadResult:
@@ -203,7 +332,7 @@ def check_history_staleness(eng_dir: Path, command: str) -> CheckResult:
         return result
 
     content = hist_path.read_text(encoding="utf-8")
-    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
 
     if not lines:
         result.add_info("history.md is empty — first command will be recorded")
@@ -224,9 +353,7 @@ def check_history_staleness(eng_dir: Path, command: str) -> CheckResult:
 # --------------------------------------------------------------------------- #
 
 
-def check_hypothesis_freshness(
-    eng_dir: Path, phase: Phase, command: str
-) -> HypothesisResult:
+def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> HypothesisResult:
     """Ensure hypotheses exist and are fresh for phases that require them."""
     result = HypothesisResult()
 
@@ -238,9 +365,7 @@ def check_hypothesis_freshness(
     result.hypothesis_count = len(hyps)
 
     if not hyps:
-        result.add_error(
-            f"phase {phase.value} requires at least one hypothesis in hypotheses.md"
-        )
+        result.add_error(f"phase {phase.value} requires at least one hypothesis in hypotheses.md")
         return result
 
     # Check for stale hypotheses (no update in 48h)
@@ -295,7 +420,20 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     result.errors.extend(scope_result.errors)
     result.warnings.extend(scope_result.warnings)
 
-    # 3. Skill-load gate
+    # 2b. Scope target enforcement (audit P0). Extract command targets and
+    #     block anything that lands on an out-of-scope IP/CIDR.
+    target_result = check_scope_targets(scope_path, args.command)
+    result.errors.extend(target_result.errors)
+    result.warnings.extend(target_result.warnings)
+
+    # 2c. Destructive-pattern hard block (audit P0).
+    destructive_result = check_destructive_patterns(args.command)
+    result.errors.extend(destructive_result.errors)
+
+    # 3. Skill-load gate (mandatory). Without a session_id the command cannot
+    #    be authorized at all.
+    if not args.session_id:
+        result.add_error("session_id is required for the skill-load gate")
     if args.session_id:
         skill_result = check_skill_load(eng_dir, args.session_id, mandatory=True)
         result.errors.extend(skill_result.errors)

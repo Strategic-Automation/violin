@@ -1,9 +1,9 @@
 from pathlib import Path
 
+from plugins.violin_guard.core.release import resolve_reference
+
 ROOT = Path(__file__).resolve().parent.parent
 GUARD_ROOT = ROOT
-
-from plugins.violin_guard.core.release import resolve_reference
 
 
 def test_playbook_reference_paths_resolve_from_pentest_skill_root():

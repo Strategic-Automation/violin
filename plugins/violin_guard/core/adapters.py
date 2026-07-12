@@ -159,9 +159,7 @@ def available(tool: str, backend: str, container: str = "kali-pentest") -> ToolA
         )
 
     if backend != "docker":
-        return ToolAvailability(
-            available=False, path="", message="backend must be local or docker"
-        )
+        return ToolAvailability(available=False, path="", message="backend must be local or docker")
 
     if shutil.which("docker") is None:
         return ToolAvailability(

@@ -2,15 +2,20 @@
 
 Canonical states: Candidate, Likely, Validated, Rejected.
 Legacy aliases: Researching->Candidate, Verified->Validated.
+
+Records are scope/phase bound: a hypothesis must carry a canonical status, a
+valid phase, and a target that is in scope (audit P1-hyp).
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from .phases import normalize_phase
 
 __all__ = [
     "Hypothesis",
@@ -19,6 +24,7 @@ __all__ = [
     "validate_hypotheses",
     "find_by_service_port",
     "update_hypothesis",
+    "validate_hypothesis_record",
     "needs_hypothesis",
 ]
 
@@ -61,6 +67,21 @@ class Hypothesis:
 
     def canonical_status(self) -> str:
         return LEGACY_ALIASES.get(self.status, self.status)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "status": self.canonical_status(),
+            "phase": self.phase,
+            "service": self.service,
+            "port": self.port,
+            "target": self.target,
+            "vuln_class": self.vuln_class,
+            "rationale": self.rationale,
+            "evidence": self.evidence,
+            "updated": self.updated,
+        }
 
     def to_markdown(self) -> str:
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
@@ -165,10 +186,64 @@ def find_by_service_port(
     return None
 
 
+def validate_hypothesis_record(
+    fields: dict[str, Any], in_scope_hosts: set[str] | None = None
+) -> list[str]:
+    """Audit P1-hyp: fail-closed validation of a hypothesis record before write.
+
+    Returns a list of error strings (empty == valid). Enforces:
+      - canonical status (legacy aliases accepted, but never arbitrary text);
+      - a valid phase enum value when a phase is supplied;
+      - when the record carries a target, that target must be in scope
+        (``in_scope_hosts`` is provided by the caller from scope.yaml; ``None``
+        means "no scope check available" and the check is skipped rather than
+        failing closed so non-target hypotheses can still be recorded).
+    """
+    errors: list[str] = []
+    raw_status = (fields.get("status") or "Candidate").strip()
+    if raw_status not in CANONICAL_STATES and raw_status not in LEGACY_ALIASES:
+        errors.append(
+            f"non-canonical status '{raw_status}'; allowed: {', '.join(CANONICAL_STATES)}"
+        )
+    if fields.get("phase"):
+        try:
+            normalize_phase(fields["phase"])
+        except ValueError:
+            errors.append(f"unknown phase '{fields['phase']}'")
+    target = (fields.get("target") or "").strip().lower()
+    if target and in_scope_hosts is not None and target not in in_scope_hosts:
+        errors.append(
+            f"target '{target}' is not in scope; record a hypothesis only for in-scope hosts"
+        )
+    return errors
+
+
 def update_hypothesis(path: Path, **fields: Any) -> Hypothesis:
-    """Update a hypothesis in the file by ID (creates if missing)."""
+    """Update a hypothesis in the file by ID (creates if missing).
+
+    Audit P1-hyp: the record is scope/phase validated before any write. If
+    validation fails, no file is touched and ``ValueError`` is raised.
+    """
+    # Build the candidate record so we can validate before mutating the board.
+    temp = Hypothesis(
+        id=str(fields.get("id", "")).strip(),
+        title=fields.get("title", "") or f"Hypothesis {fields.get('id', '')}",
+        status=(fields.get("status") or "Candidate"),
+        phase=(fields.get("phase") or "").strip(),
+        service=(fields.get("service") or "").strip(),
+        port=(fields.get("port") or "").strip(),
+        target=(fields.get("target") or "").strip(),
+        vuln_class=(fields.get("vuln_class") or "").strip(),
+        rationale=(fields.get("rationale") or "").strip(),
+        evidence=(fields.get("evidence") or "").strip(),
+        updated=(fields.get("updated") or "").strip(),
+    )
+    errors = validate_hypothesis_record(temp.to_dict())
+    if errors:
+        raise ValueError("; ".join(errors))
+
     hypotheses = parse_hypotheses(path)
-    h_id = str(fields.get("id", "")).strip()
+    h_id = temp.id
     if not h_id:
         raise ValueError("id is required")
 
@@ -181,7 +256,7 @@ def update_hypothesis(path: Path, **fields: Any) -> Hypothesis:
 
     if target is None:
         # Create new
-        target = Hypothesis(id=h_id, title=fields.get("title", f"Hypothesis {h_id}"))
+        target = Hypothesis(id=h_id, title=temp.title)
         hypotheses.append(target)
 
     # Update fields
@@ -202,9 +277,7 @@ def update_hypothesis(path: Path, **fields: Any) -> Hypothesis:
 def _rewrite_hypotheses(path: Path, hypotheses: list[Hypothesis]) -> None:
     """Rewrite the entire hypotheses file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    template = (
-        path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
-    )
+    template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
     # Keep any header content before first hypothesis
     header_end = template.find("### H-")
     if header_end == -1:

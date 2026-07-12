@@ -1,6 +1,6 @@
 [project]
 name = "violin"
-version = "1.3.0"
+version = "1.2.0"
 description = "Supervised agentic Hermes penetration-testing profile"
 requires-python = ">=3.11"
 dependencies = []
@@ -22,7 +22,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]
+"tests/**/*.py" = ["S101", "E402"]
+"scripts/**/*.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import re
 import shutil
-import yaml
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
 
-from .state import artifacts_are_fresh
+import yaml
 
 __all__ = [
     "init_engagement",
@@ -19,9 +18,7 @@ __all__ = [
     "BootstrapResult",
 ]
 
-_HOST_RE = re.compile(
-    r"([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[0-9a-fA-F:]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})"
-)
+_HOST_RE = re.compile(r"([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[0-9a-fA-F:]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})")
 
 _REPAIR_TEMPLATES = {
     Path("scope/scope.yaml"): ("skills/pentest/templates/scope-template.yaml", None),
@@ -116,7 +113,7 @@ def _ctf_ptt(host: str) -> str:
     today = date.today().isoformat()
     return f"""# CTF Task Tree — {host} {today}
 
-*Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
+*Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M")}*
 
 ## Phase: RECON
 | ID | Status | Task | Evidence / Notes |
@@ -144,13 +141,33 @@ def _ctf_scope(host: str) -> dict:
     return {
         "targets": {"ip_addresses": [host], "in_scope_urls": []},
         "authorized_parties": ["lab owner (user)"],
-        "rules_of_engagement": {"allowed_actions": ["host/port discovery", "banner grabbing", "version detection", "vulnerability scanning", "exploit validation (in-scope, non-destructive)", "privilege escalation", "flag capture (user.txt, root.txt)"], "forbidden_actions": []},
+        "rules_of_engagement": {
+            "allowed_actions": [
+                "host/port discovery",
+                "banner grabbing",
+                "version detection",
+                "vulnerability scanning",
+                "exploit validation (in-scope, non-destructive)",
+                "privilege escalation",
+                "flag capture (user.txt, root.txt)",
+            ],
+            "forbidden_actions": [],
+        },
         "authorisation": {"confirmed": True, "confirmed_by": "user (HTB lab owner)"},
-        "engagement": {"name": f"CTF {host}", "date": date.today().isoformat(), "type": "ctf", "mode": "standard-pentest", "depth": "black-box", "focus_areas": ["recon", "exploitation", "privilege-escalation", "flag-capture"]},
+        "engagement": {
+            "name": f"CTF {host}",
+            "date": date.today().isoformat(),
+            "type": "ctf",
+            "mode": "standard-pentest",
+            "depth": "black-box",
+            "focus_areas": ["recon", "exploitation", "privilege-escalation", "flag-capture"],
+        },
     }
 
 
-def init_engagement(eng_dir: str | Path, host: str | None = None, *, ctf: bool = False, session_id: str = "") -> int:
+def init_engagement(
+    eng_dir: str | Path, host: str | None = None, *, ctf: bool = False, session_id: str = ""
+) -> int:
     """Create a complete, guard-clean engagement directory from templates."""
     eng_dir = Path(eng_dir)
     result = BootstrapResult()
@@ -225,15 +242,15 @@ def check_bootstrap(
 
     if eng_dir.exists() and not (eng_dir / "scope" / "scope.yaml").exists():
         result.add_info(
-            'create the scope with: cp skills/pentest/templates/scope-template.yaml <ENG_DIR>/scope/scope.yaml'
+            "create the scope with: cp skills/pentest/templates/scope-template.yaml <ENG_DIR>/scope/scope.yaml"
         )
     if eng_dir.exists() and not (eng_dir / "state" / "ptt.md").exists():
         result.add_info(
-            'create the PTT with: cp skills/pentest/templates/ptt.md <ENG_DIR>/state/ptt.md'
+            "create the PTT with: cp skills/pentest/templates/ptt.md <ENG_DIR>/state/ptt.md"
         )
     if eng_dir.exists() and not (eng_dir / "hypotheses.md").exists():
         result.add_info(
-            'create the hypothesis board with: cp skills/pentest/templates/hypothesis-board.md <ENG_DIR>/hypotheses.md'
+            "create the hypothesis board with: cp skills/pentest/templates/hypothesis-board.md <ENG_DIR>/hypotheses.md"
         )
     if eng_dir.exists() and not (eng_dir / "state" / "history.md").exists():
         result.add_info(
@@ -264,9 +281,7 @@ def _ptt_is_stale(ptt_path: Path) -> bool:
     return all("[ ]" in row for row in rows)
 
 
-def _auto_repair_corrupt_artifacts(
-    eng_dir: Path, result: BootstrapResult
-) -> BootstrapResult:
+def _auto_repair_corrupt_artifacts(eng_dir: Path, result: BootstrapResult) -> BootstrapResult:
     """Repair directory drift and missing artifacts."""
     new_errors, new_warnings, new_infos = [], [], list(result.infos)
 
