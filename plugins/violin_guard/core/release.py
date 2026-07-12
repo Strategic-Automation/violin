@@ -15,6 +15,7 @@ __all__ = [
     "StructureResult",
     "check_release",
     "validate_plugin_structure",
+    "resolve_reference",
 ]
 
 
@@ -84,6 +85,15 @@ def _plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def resolve_reference(source: Path, reference: str) -> Path:
+    """Resolve a pentest skill reference from the skill package root."""
+    source = source.resolve()
+    for parent in (source.parent, *source.parents):
+        if parent.name == "pentest" and parent.parent.name == "skills":
+            return (parent / reference).resolve()
+    raise ValueError(f"source is not inside skills/pentest: {source}")
+
+
 def check_release() -> ReleaseCheckResult:
     """Run all release gate checks."""
     result = ReleaseCheckResult()
@@ -123,6 +133,32 @@ def check_release() -> ReleaseCheckResult:
         result.add_info(f"tests directory found: {tests_dir}")
     else:
         result.add_warning("tests directory not found")
+
+    # 6. Skill documentation must match the shipped guard surface.
+    profile_root = root.parents[1]
+    skills_root = profile_root / "skills"
+    forbidden = {
+        "scripts/guard/": "removed legacy guard package",
+        "hypothesis_guard.py": "removed hypothesis wrapper",
+        "session_search": "unavailable session-search tool",
+        "violin_record_history": "removed model-visible history tool",
+        "violin_message_tick": "removed model-visible message tool",
+        "violin_guard.py close": "nonexistent close subcommand",
+        "check-closeout": "nonexistent closeout subcommand",
+        "sync-clear": "nonexistent sync-clear subcommand",
+        "validate_scope_data": "private legacy scope validator",
+    }
+    docs = [*skills_root.rglob("*.md"), *skills_root.rglob("*.yaml")]
+    for doc in docs:
+        text = doc.read_text(encoding="utf-8")
+        for token, reason in forbidden.items():
+            if token in text:
+                result.add_error(
+                    f"stale skill reference in {doc.relative_to(profile_root)}: "
+                    f"{token!r} ({reason})"
+                )
+    if not any("stale skill reference" in error for error in result.errors):
+        result.add_info("skill documentation matches the current guard surface")
 
     return result
 
