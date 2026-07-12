@@ -4,7 +4,9 @@ import json, os
 from pathlib import Path
 from . import state, command, execution, hypotheses, ptt, bootstrap
 
-def _json(status, **payload): return json.dumps({"schema_version":2,"status":status,**payload})
+def _json(status_name, **payload):
+    payload.pop("status", None)
+    return json.dumps({"schema_version":2,"status":status_name,**payload})
 def _result(r): return {"errors":r.errors,"warnings":r.warnings,"infos":r.infos}
 
 def handle_check_command(a, **kwargs):
@@ -39,10 +41,11 @@ def handle_sync_done(a, **kwargs):
 def handle_heartbeat_done(a, **kwargs): state.clear_heartbeat_pending(a["eng_dir"]); return _json("ok")
 def handle_exec(a, **kwargs):
     gate=json.loads(handle_check_command(a))
-    if gate["status"] not in ("ok",) and not (gate["status"]=="review" and os.environ.get("HERMES_YOLO_MODE")=="1"): return _json("denied", executed=False, **gate)
+    if gate["status"] not in ("ok",) and not (gate["status"]=="review" and os.environ.get("HERMES_YOLO_MODE")=="1"):
+        status = "sync_required" if any("sync-credit" in str(x) or "not synced" in str(x) for x in gate.get("errors", [])) else "denied"
+        return _json(status, executed=False, **gate)
     try:
         r=execution.execute(command=a["command"],eng_dir=a["eng_dir"],phase=a["phase"],backend=a.get("backend","local"),timeout_seconds=a.get("timeout_seconds",180),cwd=a.get("cwd",""),label=a.get("label",""))
-        state.spend_sync_credit(a["eng_dir"]); state.mark_pending_sync(a["eng_dir"],a["command"],a["phase"])
         r.pop("status", None); return _json("ok",**r)
     except Exception as e:return _json("execution_failed",error=str(e),executed=False)
 def handle_exec_status(a, **kwargs): return _json("ok", **execution.status(a.get("eng_dir"),a.get("execution_id")))
