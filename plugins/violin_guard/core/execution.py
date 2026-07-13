@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from . import state
-from .command import LOCAL_TOOLS, command_leading_tool
 from .phases import normalize_phase
 
 __all__ = [
@@ -264,7 +263,7 @@ def execute(
 
     _record_history(engagement, command, exit_code, phase, rel_manifest)
 
-    if command_leading_tool(command) in LOCAL_TOOLS:
+    if state.is_local_bookkeeping_command(command):
         remaining = state.sync_credit_remaining(str(engagement))
     else:
         remaining = _commit_guard_state(engagement, command, phase)

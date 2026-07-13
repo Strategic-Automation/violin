@@ -30,8 +30,21 @@ MESSAGE_INTERVAL = 30
 MAX_BURST_COMMANDS = 20
 RETRY_LIMIT = 3
 
-# Commands that are purely local bookkeeping. Network clients remain guarded.
+# Commands that are purely local bookkeeping.  Network clients are deliberately
+# absent: curl/dig/host/nslookup/whois can touch an engagement target and must
+# consume the same bounded review credits as every other violin_exec command.
 LOCAL_TOOLS = {"echo", "true", "false", "printf", "pwd", "ls", "cat", "date"}
+
+
+def is_local_bookkeeping_command(command: str) -> bool:
+    """Whether a command is a harmless local bookkeeping action.
+
+    The executor is the only consumer of this classification.  Keeping it here
+    avoids a second, divergent LOCAL_TOOLS list in command policy.
+    """
+    leading = command.strip().split(maxsplit=1)
+    return bool(leading) and leading[0] in LOCAL_TOOLS
+
 
 _STATE_DIR = "state"
 _SYNC_FILE = "sync.json"
@@ -376,6 +389,7 @@ __all__ = [
     "artifacts_are_fresh",
     "suppresses_heartbeat",
     "LOCAL_TOOLS",
+    "is_local_bookkeeping_command",
     "append_history",
     "mark_ptt_reviewed",
     "history_contains",
