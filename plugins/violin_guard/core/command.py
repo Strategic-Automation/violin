@@ -27,21 +27,7 @@ __all__ = [
     "check_skill_load",
     "check_history_staleness",
     "check_hypothesis_freshness",
-    "command_leading_tool",
-    "LOCAL_TOOLS",
 ]
-
-
-# Local tools that don't touch targets (no sync credit spent)
-LOCAL_TOOLS = {"curl", "dig", "host", "nslookup", "whois"}
-
-
-def command_leading_tool(command: str) -> str:
-    """Extract the leading tool name from a command string."""
-    parts = command.strip().split()
-    if not parts:
-        return ""
-    return parts[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -465,17 +451,22 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
         pending = state.get_pending_sync(str(eng_dir))
         if pending:
             credit = state.sync_credit_remaining(str(eng_dir))
+            last_command = (pending.get("commands") or [{}])[-1].get(
+                "command", pending.get("command", "prior command")
+            )
             if credit == 0:
                 # Hard block only after sync-credit window exhausted
                 result.add_error(
-                    f"prior command's artifacts not synced: {pending.get('command')} "
+                    f"prior command's artifacts not synced: {last_command} "
                     f"(phase: {pending.get('phase')})"
                 )
             else:
-                # Warning within window
-                result.add_warning(
-                    f"prior command's artifacts not synced: {pending.get('command')} "
-                    f"(phase: {pending.get('phase')}) — sync before window exhausts"
+                # A bounded batch is intentionally allowed to consume its five
+                # credits.  This must be informational, not a REVIEW: otherwise
+                # handle_exec denies command two unless global YOLO mode is on.
+                result.add_info(
+                    f"bounded batch in progress after: {last_command} "
+                    f"(phase: {pending.get('phase')}); {credit} credit(s) remain"
                 )
 
     # 8. Sync-credit window exhausted
