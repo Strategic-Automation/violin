@@ -71,11 +71,17 @@ def _lock_file(path: Path):
     processes serialise writes without racing on the temp swap.
     """
     lock_path = path.with_suffix(path.suffix + ".lock")
-    fh = None
-    try:
-        fh = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115 - closed in finally
-    except OSError:
-        return contextlib.nullcontext()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    # ``msvcrt.locking`` locks bytes, so the file must contain at least one.
+    # Opening in binary append mode also avoids truncating a lock file another
+    # process has already opened.
+    fh = open(lock_path, "a+b")  # noqa: SIM115 - closed in _FileLock
+    if msvcrt is not None:
+        fh.seek(0, 2)
+        if fh.tell() == 0:
+            fh.write(b"0")
+            fh.flush()
+        fh.seek(0)
     if fcntl is not None:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -89,9 +95,10 @@ def _lock_file(path: Path):
             try:
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
                 break
-            except OSError:
+            except OSError as exc:
                 if time.monotonic() >= deadline:
-                    break
+                    fh.close()
+                    raise TimeoutError(f"timed out acquiring state lock: {lock_path}") from exc
                 time.sleep(0.05)
     return _FileLock(fh)
 
@@ -117,13 +124,18 @@ class _FileLock:
         return False
 
 
+def _atomic_write_locked(path: Path, data: dict[str, Any]) -> None:
+    """Write JSON atomically while the caller holds ``path``'s lock."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
 def _atomic_write(path: Path, data: dict[str, Any]) -> None:
     """Atomic JSON write using tmp + os.replace, guarded by an advisory lock."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     with _lock_file(path):
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        tmp.replace(path)
+        _atomic_write_locked(path, data)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -131,6 +143,20 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+def _mutate_json(path: Path, mutation):
+    """Apply ``mutation`` to one state document under a single file lock.
+
+    Every state transition must read, modify and replace the document while
+    holding the same lock. Locking only the final replace loses updates under
+    concurrent tool calls.
+    """
+    with _lock_file(path):
+        data = _read_json(path)
+        result = mutation(data)
+        _atomic_write_locked(path, data)
+        return result
 
 
 # --------------------------------------------------------------------------- #
@@ -149,11 +175,13 @@ def sync_credit_remaining(eng_dir: str | Path) -> int:
 
 def spend_sync_credit(eng_dir: str | Path) -> int:
     path = _sync_path(eng_dir)
-    data = _read_json(path)
-    credit = max(0, data.get("credit", DEFAULT_SYNC_CREDIT) - 1)
-    data["credit"] = credit
-    _atomic_write(path, data)
-    return credit
+
+    def spend(data: dict[str, Any]) -> int:
+        credit = max(0, data.get("credit", DEFAULT_SYNC_CREDIT) - 1)
+        data["credit"] = credit
+        return credit
+
+    return _mutate_json(path, spend)
 
 
 def mark_pending_sync(
@@ -163,34 +191,36 @@ def mark_pending_sync(
     ptt_task_id: str,
 ) -> None:
     path = _sync_path(eng_dir)
-    data = _read_json(path)
-    old = data.get("pending") or {}
-    commands = list(old.get("commands") or [])
-    if old.get("command") and not commands:
-        commands = [{"command": old["command"], "phase": old.get("phase", phase)}]
-    commands.append({"command": command, "phase": phase})
-    task_id = old.get("ptt_task_id") or ptt_task_id
-    if not task_id:
-        raise ValueError("pending execution requires a captured active PTT task")
-    data["pending"] = {
-        "batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
-        "commands": commands,
-        "phase": phase,
-        "created_at": old.get("created_at") or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "ptt_task_id": task_id,
-        # Appending work always invalidates a previous review. A review can
-        # only certify the exact command set visible at that moment.
-        "ptt_reviewed": False,
-    }
-    _atomic_write(path, data)
+    def mark(data: dict[str, Any]) -> None:
+        old = data.get("pending") or {}
+        commands = list(old.get("commands") or [])
+        if old.get("command") and not commands:
+            commands = [{"command": old["command"], "phase": old.get("phase", phase)}]
+        commands.append({"command": command, "phase": phase})
+        task_id = old.get("ptt_task_id") or ptt_task_id
+        if not task_id:
+            raise ValueError("pending execution requires a captured active PTT task")
+        data["pending"] = {
+            "batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
+            "commands": commands,
+            "phase": phase,
+            "created_at": old.get("created_at") or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "ptt_task_id": task_id,
+            # Appending work always invalidates a previous review. A review can
+            # only certify the exact command set visible at that moment.
+            "ptt_reviewed": False,
+        }
+
+    _mutate_json(path, mark)
 
 
 def clear_pending_sync(eng_dir: str | Path) -> None:
     path = _sync_path(eng_dir)
-    data = _read_json(path)
-    data.pop("pending", None)
-    data["credit"] = DEFAULT_SYNC_CREDIT
-    _atomic_write(path, data)
+    def clear(data: dict[str, Any]) -> None:
+        data.pop("pending", None)
+        data["credit"] = DEFAULT_SYNC_CREDIT
+
+    _mutate_json(path, clear)
 
 
 def has_pending_sync(eng_dir: str | Path) -> bool:
@@ -205,16 +235,17 @@ def get_pending_sync(eng_dir: str | Path) -> dict | None:
 
 def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
     path = _sync_path(eng_dir)
-    data = _read_json(path)
-    pending = data.get("pending")
-    if not pending:
-        raise ValueError("no pending execution batch")
-    pending["ptt_reviewed"] = True
-    pending["ptt_task_id"] = task_id
-    pending["ptt_note"] = note.strip()
-    pending["ptt_reviewed_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    data["pending"] = pending
-    _atomic_write(path, data)
+    def mark(data: dict[str, Any]) -> None:
+        pending = data.get("pending")
+        if not pending:
+            raise ValueError("no pending execution batch")
+        pending["ptt_reviewed"] = True
+        pending["ptt_task_id"] = task_id
+        pending["ptt_note"] = note.strip()
+        pending["ptt_reviewed_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        data["pending"] = pending
+
+    _mutate_json(path, mark)
 
 
 def append_history(
@@ -226,7 +257,7 @@ def append_history(
     line = f"- {stamp} | phase={phase} | exit_code={exit_code} | command={command}"
     if receipt_path:
         line += f" | receipt={receipt_path}"
-    with path.open("a", encoding="utf-8") as handle:
+    with _lock_file(path), path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
 
 
@@ -256,19 +287,21 @@ def _heartbeat_path(eng_dir: str | Path) -> Path:
 
 def set_heartbeat_pending(eng_dir: str | Path, reason: str) -> None:
     path = _heartbeat_path(eng_dir)
-    data = _read_json(path)
-    data["pending"] = True
-    data["reason"] = reason
-    data["created_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    _atomic_write(path, data)
+    def mark(data: dict[str, Any]) -> None:
+        data["pending"] = True
+        data["reason"] = reason
+        data["created_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+    _mutate_json(path, mark)
 
 
 def clear_heartbeat_pending(eng_dir: str | Path) -> None:
     path = _heartbeat_path(eng_dir)
-    data = _read_json(path)
-    data["pending"] = False
-    data.pop("reason", None)
-    _atomic_write(path, data)
+    def clear(data: dict[str, Any]) -> None:
+        data["pending"] = False
+        data.pop("reason", None)
+
+    _mutate_json(path, clear)
 
 
 def has_heartbeat_pending(eng_dir: str | Path) -> bool:
@@ -300,18 +333,20 @@ def read_counts(eng_dir: str | Path) -> dict[str, int]:
 
 def tick_command(eng_dir: str | Path) -> int:
     path = _counts_path(eng_dir)
-    data = _read_json(path)
-    data["commands"] = data.get("commands", 0) + 1
-    _atomic_write(path, data)
-    return data["commands"]
+    def tick(data: dict[str, Any]) -> int:
+        data["commands"] = data.get("commands", 0) + 1
+        return data["commands"]
+
+    return _mutate_json(path, tick)
 
 
 def tick_message(eng_dir: str | Path) -> int:
     path = _counts_path(eng_dir)
-    data = _read_json(path)
-    data["messages"] = data.get("messages", 0) + 1
-    _atomic_write(path, data)
-    return data["messages"]
+    def tick(data: dict[str, Any]) -> int:
+        data["messages"] = data.get("messages", 0) + 1
+        return data["messages"]
+
+    return _mutate_json(path, tick)
 
 
 def record_ok_check(
@@ -320,13 +355,14 @@ def record_ok_check(
     phase: str,
 ) -> None:
     path = _counts_path(eng_dir)
-    data = _read_json(path)
-    data["last_check"] = {
-        "command": command,
-        "phase": phase,
-        "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-    }
-    _atomic_write(path, data)
+    def record(data: dict[str, Any]) -> None:
+        data["last_check"] = {
+            "command": command,
+            "phase": phase,
+            "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
+
+    _mutate_json(path, record)
 
 
 def last_ok_check(eng_dir: str | Path) -> dict | None:
