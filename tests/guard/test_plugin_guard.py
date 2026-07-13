@@ -19,6 +19,9 @@ _PLATFORM_SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
   in_scope_urls: []
 exclusions: {}
+authorized_parties: ["test owner"]
+authorisation:
+  confirmed: true
 rules_of_engagement:
   allowed_actions: [recon, vuln-research, exploitation]
   forbidden_actions: []
@@ -323,12 +326,12 @@ def test_init_engagement_creates_compliant_artifacts(tmp_path):
     rc = bootstrap.init_engagement(str(eng))
     assert rc == 0, "init-engagement should succeed"
 
-    # scope.yaml present and parses clean (no REVIEW on required fields)
+    # A default engagement is structurally complete but deliberately remains
+    # unapproved until the operator confirms authorisation.
     scope = yaml.safe_load((eng / "scope" / "scope.yaml").read_text(encoding="utf-8"))
     assert scope["targets"]["ip_addresses"] == ["10.129.45.228"]
-    assert command.validate_scope(eng / "scope" / "scope.yaml").exit_code() == 0, (
-        "filled scope must be guard-clean"
-    )
+    validation = command.validate_scope(eng / "scope" / "scope.yaml")
+    assert any("authorisation.confirmed" in error for error in validation.errors)
 
     # bootstrap reports complete (exit 0) or REVIEW-only (pristine PTT is
     # legitimate on a brand-new engagement — no task touched yet).
@@ -348,11 +351,11 @@ def test_auto_repair_creates_missing_artifacts(tmp_path):
     # After self-heal, bootstrap must be clean (0) or REVIEW-only (2).
     assert int(res) in (0, 2), f"auto-repair should self-heal to clean, got {res}"
 
-    # Artifacts now exist and scope is guard-clean
+    # Artifacts now exist; a real operator still has to confirm authorisation.
     for rel in ("scope/scope.yaml", "state/ptt.md", "hypotheses.md", "state/history.md"):
         assert (eng / rel).exists(), f"auto-repair should create {rel}"
     yaml.safe_load((eng / "scope" / "scope.yaml").read_text(encoding="utf-8"))
-    assert command.validate_scope(eng / "scope" / "scope.yaml").exit_code() == 0
+    assert command.validate_scope(eng / "scope" / "scope.yaml").errors
 
 
 def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch, tmp_path):

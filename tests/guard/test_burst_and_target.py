@@ -23,6 +23,9 @@ _SCOPE = """targets:
   roles:
     web: 10.10.10.10
 exclusions: {}
+authorized_parties: ["test owner"]
+authorisation:
+  confirmed: true
 rules_of_engagement:
   allowed_actions: [recon, vuln-research, exploitation]
   forbidden_actions: []
