@@ -19,7 +19,7 @@ def _engagement(tmp_path: Path) -> Path:
     (eng / "state" / ".skill-loaded-test").write_text("skill-loaded: test\n", encoding="utf-8")
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
-        ptt_path.read_text(encoding="utf-8").replace("| PT-001 | [ ] |", "| PT-001 | [~] |"),
+        ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
     return eng

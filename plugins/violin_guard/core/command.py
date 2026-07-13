@@ -334,7 +334,9 @@ def _matches_network(candidate: str, networks: list[ipaddress._BaseNetwork]) -> 
         network = ipaddress.ip_network(candidate, strict=False)
     except ValueError:
         return False
-    return any(network.version == allowed.version and network.subnet_of(allowed) for allowed in networks)
+    return any(
+        network.version == allowed.version and network.subnet_of(allowed) for allowed in networks
+    )
 
 
 def check_scope_targets(scope_path: Path, command: str) -> CheckResult:
@@ -447,6 +449,31 @@ def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> Hyp
         result.add_error(f"phase {phase.value} requires at least one hypothesis in hypotheses.md")
         return result
 
+    acceptable_phases = {
+        Phase.VULN_RESEARCH: {Phase.VULN_RESEARCH},
+        Phase.EXPLOITATION: {Phase.VULN_RESEARCH, Phase.EXPLOITATION},
+        Phase.POST_EXPLOITATION: {Phase.EXPLOITATION, Phase.POST_EXPLOITATION},
+        Phase.PRIVESC: {Phase.EXPLOITATION, Phase.POST_EXPLOITATION, Phase.PRIVESC},
+        Phase.FLAGS: {Phase.PRIVESC, Phase.FLAGS},
+    }.get(phase, {phase})
+    targets = set(_extract_target_candidates(command))
+    relevant = []
+    for hypothesis in hyps:
+        if hypothesis.canonical_status() == "Rejected" or not hypothesis.target:
+            continue
+        try:
+            hypothesis_phase = normalize_phase(hypothesis.phase)
+        except ValueError:
+            continue
+        target = _normalise_scope_host(hypothesis.target)
+        if hypothesis_phase in acceptable_phases and (not targets or target in targets):
+            relevant.append(hypothesis)
+    if not relevant:
+        result.add_error(
+            f"phase {phase.value} requires a non-rejected hypothesis matching the command target"
+        )
+        return result
+
     # Check for stale hypotheses (no update in 48h)
     stale = 0
     now = datetime.now(UTC)
@@ -529,6 +556,12 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     result.warnings.extend(ptt_validation.warnings)
     if ptt_validation.active_task:
         result.infos.append(f"active PTT task: {ptt_validation.active_task}")
+        active_task = ptt.find_active_task(ptt_validation.tasks)
+        if active_task and not ptt.task_matches_phase(active_task, phase):
+            result.add_error(
+                f"active PTT task {active_task.id} belongs to {active_task.phase or 'no phase'}; "
+                f"requested phase is {phase.value}"
+            )
 
     # 5. History staleness (duplicate detection)
     hist_result = check_history_staleness(eng_dir, args.command)

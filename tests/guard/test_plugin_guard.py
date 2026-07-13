@@ -130,7 +130,7 @@ def _init_e2e(tmp_path, skill_file):
     The skill-load gate requires a session-scoped marker at
     ``$ENG_DIR/state/.skill-loaded-<session-id>``; passing ``--session-id``
     makes the CLI compute that canonical path itself, so we write there. We
-    also pre-mark PT-001 as in-progress so the PTT staleness guard (which BLOCKs
+    also pre-mark PT-010 as in-progress so the PTT phase gate (which BLOCKs
     until at least one PT row has moved past ``[ ]``) does not reject the very
     first recon command — this mirrors a normal SCOPING->RECON handoff.
     """
@@ -148,7 +148,7 @@ def _init_e2e(tmp_path, skill_file):
     # At least one PTT row must have advanced so the staleness guard passes.
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
-        ptt_path.read_text(encoding="utf-8").replace("| PT-001 | [ ] |", "| PT-001 | [~] |"),
+        ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
     return eng
@@ -209,6 +209,13 @@ def test_recon_does_not_require_hypothesis(tmp_path):
         ),
         encoding="utf-8",
     )
+    ptt_path = eng / "state" / "ptt.md"
+    ptt_path.write_text(
+        ptt_path.read_text(encoding="utf-8")
+        .replace("| PT-010 | [~] |", "| PT-010 | [x] |")
+        .replace("| PT-030 | [ ] |", "| PT-030 | [~] |"),
+        encoding="utf-8",
+    )
     research2 = command.check_command(
         command.CheckCommandArgs(
             command="nmap -sV 10.10.10.10",
@@ -251,7 +258,7 @@ def test_first_command_requires_an_active_ptt_task(tmp_path):
     eng = _init_e2e(tmp_path, skill_file)
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
-        ptt_path.read_text(encoding="utf-8").replace("| PT-001 | [~] |", "| PT-001 | [ ] |"),
+        ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [~] |", "| PT-010 | [ ] |"),
         encoding="utf-8",
     )
 
@@ -275,7 +282,7 @@ def test_multiple_active_ptt_tasks_block_target_execution(tmp_path):
     eng = _init_e2e(tmp_path, skill_file)
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
-        ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
+        ptt_path.read_text(encoding="utf-8").replace("| PT-011 | [ ] |", "| PT-011 | [~] |"),
         encoding="utf-8",
     )
     result = command.check_command(
@@ -406,7 +413,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
         TOOLS.handle_record_ptt(
             {
                 "eng_dir": str(eng),
-                "id": "PT-001",
+                "id": "PT-010",
                 "status": "[~]",
                 "note": f"batch reviewed (batch_id {batch_id})",
             }
@@ -427,7 +434,7 @@ def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, 
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
         ptt_path.read_text(encoding="utf-8")
-        .replace("| PT-001 | [~] |", "| PT-001 | [x] |")
+        .replace("| PT-010 | [~] |", "| PT-010 | [x] |")
         .replace("| PT-042 | [ ] |", "| PT-042 | [~] |"),
         encoding="utf-8",
     )

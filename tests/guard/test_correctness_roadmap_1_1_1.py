@@ -75,7 +75,7 @@ def _init_e2e(tmp_path, skill_file, allowed=("recon", "vuln-research", "exploita
     )
     ptt = eng / "state" / "ptt.md"
     ptt.write_text(
-        ptt.read_text(encoding="utf-8").replace("| PT-001 | [ ] |", "| PT-001 | [~] |"),
+        ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
     return eng
@@ -196,6 +196,13 @@ def test_post_exploitation_requires_scope_and_skill_load(tmp_path):
             f"- **Phase:** POST_EXPLOITATION\n- **Target:** 10.10.10.10\n"
             f"- **Updated:** {ts} UTC\n"
         ),
+        encoding="utf-8",
+    )
+    ptt_path = eng / "state" / "ptt.md"
+    ptt_path.write_text(
+        ptt_path.read_text(encoding="utf-8")
+        .replace("| PT-010 | [~] |", "| PT-010 | [x] |")
+        .replace("| PT-042 | [ ] |", "| PT-042 | [~] |"),
         encoding="utf-8",
     )
 

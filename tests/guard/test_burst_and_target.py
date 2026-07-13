@@ -55,7 +55,7 @@ def eng(tmp_path):
     )
     ptt = d / "state" / "ptt.md"
     ptt.write_text(
-        ptt.read_text(encoding="utf-8").replace("| PT-001 | [ ] |", "| PT-001 | [~] |"),
+        ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
     return d
@@ -235,7 +235,7 @@ def test_plugin_exec_burst_accepts_inline_commands(monkeypatch, tmp_path):
     )
     ptt = d / "state" / "ptt.md"
     ptt.write_text(
-        ptt.read_text(encoding="utf-8").replace("| PT-001 | [ ] |", "| PT-001 | [~] |"),
+        ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
     _patch_burst(monkeypatch, str(d))

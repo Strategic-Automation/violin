@@ -10,12 +10,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .phases import Phase, normalize_phase
+
 __all__ = [
     "PttTask",
     "PttValidationResult",
     "parse_ptt",
     "validate_ptt",
     "find_active_task",
+    "task_matches_phase",
     "is_stale",
     "update_task",
 ]
@@ -43,6 +46,7 @@ class PttTask:
     title: str
     note: str = ""
     updated: str = ""
+    phase: str = ""
 
     def to_markdown(self) -> str:
         datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
@@ -76,7 +80,14 @@ def parse_ptt(path: Path) -> list[PttTask]:
         return []
     content = path.read_text(encoding="utf-8")
     tasks = []
+    current_phase = ""
     for line in content.splitlines():
+        heading = re.match(r"^##\s+Phase:\s*(?P<phase>.+?)\s*$", line.strip(), re.IGNORECASE)
+        if heading:
+            current_phase = (
+                heading.group("phase").strip().upper().replace("-", "_").replace(" ", "_")
+            )
+            continue
         m = _PTT_RE.match(line.strip())
         if m:
             tasks.append(
@@ -85,6 +96,7 @@ def parse_ptt(path: Path) -> list[PttTask]:
                     status=m.group("status").strip(),
                     title=m.group("title").strip(),
                     note=m.group("note").strip(),
+                    phase=current_phase,
                 )
             )
     return tasks
@@ -126,6 +138,13 @@ def find_active_task(tasks: list[PttTask]) -> PttTask | None:
     return None
 
 
+def task_matches_phase(task: PttTask, phase: Phase | str) -> bool:
+    """Whether a task belongs to the requested execution phase."""
+    requested = normalize_phase(phase) if isinstance(phase, str) else phase
+    expected = Phase.EXPLOITATION if requested is Phase.POST_EXPLOITATION else requested
+    return task.phase == expected.value
+
+
 def is_stale(path: Path) -> bool:
     """True if every task is still [ ] (pristine)."""
     tasks = parse_ptt(path)
@@ -164,18 +183,9 @@ def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
     cells[1] = status
     if len(cells) >= 4:
         cells[-1] = note
-    new_line = (
-        "| "
-        + " | ".join(
-            (
-                cells[0],
-                cells[1],
-                cells[2] if len(cells) > 2 else "",
-                cells[-1] if len(cells) > 3 else "",
-            )
-        )
-        + " |"
-    )
+    # Keep every original column. EXPLOITATION rows contain hypothesis,
+    # validation-command, and patch columns that must not be flattened.
+    new_line = "| " + " | ".join(cells) + " |"
 
     lines = content.splitlines()
     lines[target_idx] = new_line
