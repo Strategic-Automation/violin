@@ -38,7 +38,7 @@ RECORD_PTT_SCHEMA = {
 }
 
 RECORD_HYPOTHESIS_SCHEMA = {
-    "description": "Record/update a hypothesis row (delegates to hypothesis_guard.py record-hypothesis).",
+    "description": "Record or update a hypothesis row in the engagement state.",
     "parameters": {
         "type": "object",
         "properties": {

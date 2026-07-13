@@ -657,11 +657,11 @@ s4 = st(tools.handle_exec, **base2)
 assert s4 == "approved", f"step4 expected approved, got {s4}"
 print("    ok: violin_exec after sync -> approved")
 
-# Step 5: hypothesis recording via plugin routes to hypothesis_guard.py
+# Step 5: hypothesis recording through the plugin core service.
 s5 = st(tools.handle_record_hypothesis, eng_dir=eng_dir, service="SMB",
         port="445", title="anon access", status="researching")
 assert s5 == "ok", f"step5 expected ok, got {s5}"
-print("    ok: violin_record_hypothesis -> ok (routed to hypothesis_guard.py)")
+print("    ok: violin_record_hypothesis -> ok")
 print("GATES_OK")
 PY
 gates_exit=$?
