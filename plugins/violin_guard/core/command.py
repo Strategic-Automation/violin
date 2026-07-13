@@ -6,7 +6,6 @@ No subprocess calls — pure functions returning dataclasses.
 
 from __future__ import annotations
 
-import ipaddress
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -15,6 +14,7 @@ from typing import Any
 
 from . import bootstrap, hypotheses, ptt, state
 from .phases import Phase, normalize_phase, requires_hypothesis
+from .targets import check_scope_targets, extract_target_candidates, normalise_target
 
 __all__ = [
     "CheckCommandArgs",
@@ -236,144 +236,12 @@ def check_destructive_patterns(command: str) -> CheckResult:
     return result
 
 
-# --------------------------------------------------------------------------- #
-# SCOPE TARGET ENFORCEMENT (audit P0: command targets were never compared with
-# the engagement's allowed hosts). IPv4/CIDR literals must appear in scope;
-# unknown hostnames force a REVIEW rather than a silent pass.
-# --------------------------------------------------------------------------- #
+def check_local_artifact_paths(command: str) -> CheckResult:
+    """Remind operators that locally-created scripts belong in the engagement."""
 
-_IPV4_CIDR = re.compile(r"(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?")
-_HOST_PORT = re.compile(r"\b([A-Za-z0-9](?:[A-Za-z0-9-]*\.)*[A-Za-z0-9-]+):\d{1,5}\b")
-_FQDN = re.compile(r"\b([A-Za-z0-9](?:[A-Za-z0-9-]*\.)+[A-Za-z]{2,})\b")
-
-
-def _extract_target_candidates(command: str) -> list[str]:
-    """Ordered, de-duplicated host/IP candidates from a command line."""
-    cands: list[str] = []
-    for m in re.finditer(r"https?://([^\s'\"<>]+)", command):
-        host = m.group(1).split("/")[0].split("@")[-1]
-        if ":" in host:
-            host = host.split(":", 1)[0]
-        if host:
-            cands.append(host.lower())
-    for m in _IPV4_CIDR.finditer(command):
-        cands.append(m.group(0).lower())
-    # Validate colon-containing tokens with ipaddress instead of treating the
-    # leading hextet of an IPv6 address as a host:port pair.
-    for token in re.findall(r"(?<![\w:])\[?[0-9A-Fa-f:]{2,}\]?(?:/\d{1,3})?", command):
-        candidate = token.strip("[]").lower()
-        try:
-            ipaddress.ip_network(candidate, strict=False)
-        except ValueError:
-            continue
-        cands.append(candidate)
-    for m in _HOST_PORT.finditer(command):
-        cands.append(m.group(1).lower())
-    for m in _FQDN.finditer(command):
-        cands.append(m.group(1).lower())
-    seen: set[str] = set()
-    out: list[str] = []
-    for c in cands:
-        if c and c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
-
-
-def _values(value: Any):
-    if isinstance(value, dict):
-        for nested in value.values():
-            yield from _values(nested)
-    elif isinstance(value, list):
-        for nested in value:
-            yield from _values(nested)
-    elif value is not None:
-        yield str(value)
-
-
-def _normalise_scope_host(value: str) -> str:
-    match = re.match(r"https?://([^\s/]+)", value, flags=re.IGNORECASE)
-    host = match.group(1) if match else value
-    if host.startswith("[") and "]" in host:
-        return host[1 : host.index("]")].lower()
-    return host.rsplit(":", 1)[0].lower() if host.count(":") == 1 else host.lower()
-
-
-def _scope_allowed_hosts(scope: dict) -> set[str]:
-    allowed: set[str] = set()
-    targets = scope.get("targets", {}) or {}
-    for key in ("ip_addresses", "in_scope_urls", "urls", "domains", "hostnames", "roles"):
-        for value in _values(targets.get(key, [])):
-            allowed.add(_normalise_scope_host(value))
-    return allowed
-
-
-def _scope_excluded_hosts(scope: dict) -> set[str]:
-    excluded: set[str] = set()
-    for item in _values(scope.get("exclusions", {})):
-        excluded.add(_normalise_scope_host(item))
-    return excluded
-
-
-def _scope_networks(scope: dict, section: str) -> list[ipaddress._BaseNetwork]:
-    values = []
-    targets = scope.get(section, {}) or {}
-    for key in ("ip_addresses", "cidrs"):
-        values.extend(_values(targets.get(key, [])))
-    networks = []
-    for value in values:
-        try:
-            networks.append(ipaddress.ip_network(value, strict=False))
-        except ValueError:
-            continue
-    return networks
-
-
-def _matches_network(candidate: str, networks: list[ipaddress._BaseNetwork]) -> bool:
-    try:
-        network = ipaddress.ip_network(candidate, strict=False)
-    except ValueError:
-        return False
-    return any(
-        network.version == allowed.version and network.subnet_of(allowed) for allowed in networks
-    )
-
-
-def check_scope_targets(scope_path: Path, command: str) -> CheckResult:
-    """Block commands whose IP/CIDR target is outside the engagement scope."""
     result = CheckResult()
-    if not scope_path.exists():
-        return result
-    try:
-        import yaml
-
-        data = yaml.safe_load(scope_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return result
-    if not isinstance(data, dict):
-        return result
-
-    allowed = _scope_allowed_hosts(data)
-    excluded = _scope_excluded_hosts(data)
-    allowed_networks = _scope_networks(data, "targets")
-    excluded_networks = _scope_networks(data, "exclusions")
-    for cand in _extract_target_candidates(command):
-        if cand in excluded or _matches_network(cand, excluded_networks):
-            result.add_error(f"excluded target {cand} must not be touched")
-            continue
-        if cand in allowed:
-            continue
-        if _matches_network(cand, allowed_networks):
-            continue
-        try:
-            ipaddress.ip_network(cand, strict=False)
-            is_ip = True
-        except ValueError:
-            is_ip = False
-        if is_ip:
-            result.add_error(f"out-of-scope target {cand} (not present in scope.yaml)")
-        else:
-            result.add_warning(f"host {cand} is not present in scope.yaml; verify authorization")
+    if re.search(r"(?:>|\btee\s+)\s*/tmp/[^\s]+\.(?:py|pl|rb|sh)(?=\s|$)", command):
+        result.add_info("local script path uses /tmp; save it under $ENG_DIR/exploits instead")
     return result
 
 
@@ -384,10 +252,18 @@ def check_skill_load(eng_dir: Path, session_id: str, mandatory: bool = True) -> 
     result.marker_path = str(marker)
 
     if not marker.exists():
+        stale_markers = sorted((eng_dir / "state").glob(".skill-loaded-*"))
+        stale_hint = ""
+        if stale_markers:
+            names = ", ".join(candidate.name for candidate in stale_markers[:3])
+            stale_hint = (
+                f"; found marker(s) for another session: {names}. "
+                f"After loading the skill, create the canonical marker: {marker}"
+            )
         if mandatory:
-            result.add_error("skill-load gate not satisfied: marker missing")
+            result.add_error(f"skill-load gate not satisfied: marker missing{stale_hint}")
         else:
-            result.add_warning("skill-load marker missing (non-mandatory mode)")
+            result.add_warning(f"skill-load marker missing (non-mandatory mode){stale_hint}")
         return result
 
     content = marker.read_text(encoding="utf-8").strip()
@@ -456,7 +332,7 @@ def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> Hyp
         Phase.PRIVESC: {Phase.EXPLOITATION, Phase.POST_EXPLOITATION, Phase.PRIVESC},
         Phase.FLAGS: {Phase.PRIVESC, Phase.FLAGS},
     }.get(phase, {phase})
-    targets = set(_extract_target_candidates(command))
+    targets = {normalise_target(target) for target in extract_target_candidates(command)}
     relevant = []
     for hypothesis in hyps:
         if hypothesis.canonical_status() == "Rejected" or not hypothesis.target:
@@ -465,14 +341,46 @@ def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> Hyp
             hypothesis_phase = normalize_phase(hypothesis.phase)
         except ValueError:
             continue
-        target = _normalise_scope_host(hypothesis.target)
+        target = normalise_target(hypothesis.target)
         if hypothesis_phase in acceptable_phases and (not targets or target in targets):
             relevant.append(hypothesis)
     if not relevant:
+        eligible = [
+            f"H-{h.id}@{normalise_target(h.target)}"
+            for h in hyps
+            if h.canonical_status() != "Rejected" and h.target
+        ]
         result.add_error(
-            f"phase {phase.value} requires a non-rejected hypothesis matching the command target"
+            f"phase {phase.value} requires a non-rejected hypothesis matching the command target; "
+            f"parsed targets: {', '.join(sorted(targets)) or 'none'}; "
+            f"available hypotheses: {', '.join(eligible) or 'none'}"
         )
         return result
+
+    if phase in {
+        Phase.EXPLOITATION,
+        Phase.POST_EXPLOITATION,
+        Phase.PRIVESC,
+        Phase.FLAGS,
+    }:
+        researched = [h for h in relevant if h.cve_research.strip() and h.exploit_research.strip()]
+        if not researched:
+            missing = []
+            for h in relevant:
+                fields = []
+                if not h.cve_research.strip():
+                    fields.append("CVE Research")
+                if not h.exploit_research.strip():
+                    fields.append("Exploit Research")
+                missing.append(f"H-{h.id} missing {' and '.join(fields)}")
+            result.add_error(
+                "online research must be attempted and recorded before exploit execution; "
+                + "; ".join(missing)
+                + ". Record each query/source and outcome; 'no results', 'not applicable', "
+                "or 'source unavailable' are valid outcomes when truthful."
+            )
+            return result
+        relevant = researched
 
     # Check for stale hypotheses (no update in 48h)
     stale = 0
@@ -509,7 +417,7 @@ def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> Hyp
 
 def check_command(args: CheckCommandArgs) -> CheckResult:
     """Run all sub-guards for a target command."""
-    eng_dir = Path(args.eng_dir)
+    eng_dir = state._eng_dir(args.eng_dir)
     scope_path = Path(args.scope)
     phase = normalize_phase(args.phase)
 
@@ -538,6 +446,9 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     # 2c. Destructive-pattern hard block (audit P0).
     destructive_result = check_destructive_patterns(args.command)
     result.errors.extend(destructive_result.errors)
+
+    artifact_result = check_local_artifact_paths(args.command)
+    result.infos.extend(artifact_result.infos)
 
     # 3. Skill-load gate (mandatory). Without a session_id the command cannot
     #    be authorized at all.

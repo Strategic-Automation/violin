@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,19 @@ __all__ = [
     "validate_plugin_structure",
     "resolve_reference",
 ]
+
+
+def _project_python(repo_root: Path) -> str:
+    """Prefer the repository virtualenv when a profile runtime invokes the CLI."""
+
+    candidates = (
+        repo_root / ".venv" / "Scripts" / "python.exe",
+        repo_root / ".venv" / "bin" / "python",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
 
 
 @dataclass
@@ -173,10 +187,12 @@ def check_release() -> ReleaseCheckResult:
 
     # 4. Heavy checks (ruff + pytest), opt-out via env.
     if os.environ.get("VIOLIN_CHECK_RELEASE_SKIP_HEAVY") != "1":
-        repo_root = str(root.parents[1])
+        repo_path = root.parents[1]
+        repo_root = str(repo_path)
+        python = _project_python(repo_path)
         try:
             ruff = subprocess.run(
-                [sys.executable, "-m", "ruff", "check", "."],
+                [python, "-m", "ruff", "check", "."],
                 cwd=repo_root,
                 capture_output=True,
                 text=True,
@@ -190,16 +206,17 @@ def check_release() -> ReleaseCheckResult:
         except FileNotFoundError:
             result.add_warning("ruff not installed; skipped")
         try:
+            basetemp = tempfile.mkdtemp(prefix=".pytest-release-", dir=repo_path / "engagements")
             pytest = subprocess.run(
                 [
-                    sys.executable,
+                    python,
                     "-m",
                     "pytest",
                     "-q",
                     "-p",
                     "no:cacheprovider",
                     "--basetemp",
-                    str(Path(repo_root) / "engagements" / ".pytest-release"),
+                    basetemp,
                 ],
                 cwd=repo_root,
                 capture_output=True,

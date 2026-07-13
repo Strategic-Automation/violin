@@ -54,6 +54,7 @@ TOOLS = _load_sub("tools", _PLUGIN / "tools.py")
 
 # Import core modules from the new location
 from plugins.violin_guard.core import bootstrap, command, execution, hypotheses, ptt, state
+from plugins.violin_guard.core.targets import extract_target_candidates
 
 
 def _cp(code, out="", err=""):
@@ -251,6 +252,157 @@ def test_recon_does_not_require_hypothesis(tmp_path):
     assert any("hypothesis guard:" in warning for warning in research3.warnings)
 
 
+def test_target_scanner_ignores_dotted_files_and_handles_dev_tcp_endpoint():
+    candidates = extract_target_candidates(
+        "python3 server.py --output 01-nmap-full.txt "
+        "bash -c 'sock.close(); s.close(); echo test > /dev/tcp/10.10.15.65/4445'"
+    )
+
+    assert "10.10.15.65" in candidates
+    assert "10.10.15.65/44" not in candidates
+    assert "server.py" not in candidates
+    assert "01-nmap-full.txt" not in candidates
+    assert "sock.close" not in candidates
+    assert "s.close" not in candidates
+
+
+def test_hypothesis_id_and_target_are_canonicalized_without_false_collisions(tmp_path):
+    path = tmp_path / "hypotheses.md"
+    path.write_text("# Hypothesis Board\n\n### H-H-001: malformed stale entry\n", encoding="utf-8")
+
+    record = hypotheses.update_hypothesis(
+        path,
+        in_scope_hosts={"10.10.15.65"},
+        id="H-001",
+        title="Scoped endpoint test",
+        status="Candidate",
+        phase="EXPLOITATION",
+        target="http://10.10.15.65:4445",
+        cve_research="web_search scoped endpoint CVE; NVD; not applicable",
+        exploit_research="web_search scoped endpoint exploit; GitHub; no results",
+    )
+
+    assert record.id == "001"
+    text = path.read_text(encoding="utf-8")
+    assert "### H-001: Scoped endpoint test" in text
+    assert "H-H-001" not in text
+
+    result = command.check_hypothesis_freshness(
+        tmp_path,
+        command.Phase.EXPLOITATION,
+        "bash -c 'echo test > /dev/tcp/10.10.15.65/4445' > 01-nmap-full.txt",
+    )
+    assert not result.errors, result.errors
+
+
+def test_hypothesis_refuses_syntax_uncertain_rejection(tmp_path):
+    path = tmp_path / "hypotheses.md"
+    with pytest.raises(ValueError, match="must remain active for re-test"):
+        hypotheses.update_hypothesis(
+            path,
+            in_scope_hosts={"10.10.15.65"},
+            id="001",
+            title="PJL file download",
+            status="Rejected",
+            phase="EXPLOITATION",
+            target="10.10.15.65",
+            test_command='@PJL FSDOWNLOAD NAME="x" SIZE=1',
+            test_response="FILEERROR=1",
+            verification_status="syntax_uncertain",
+            rejection_reason="argument order needs source-verified re-test",
+        )
+    assert not path.exists(), "invalid rejection must not mutate the board"
+
+
+def test_hypothesis_preserves_verified_rejection_details(tmp_path):
+    path = tmp_path / "hypotheses.md"
+    record = hypotheses.update_hypothesis(
+        path,
+        in_scope_hosts={"10.10.15.65"},
+        id="001",
+        title="PJL file download",
+        status="Rejected",
+        phase="EXPLOITATION",
+        target="10.10.15.65",
+        test_command='@PJL FSDOWNLOAD NAME="x" SIZE=1',
+        test_response="parser branch proves feature disabled",
+        verification_status="not_implemented",
+        rejection_reason="source-verified stub",
+    )
+
+    assert record.verification_status == "not_implemented"
+    text = path.read_text(encoding="utf-8")
+    assert '- **Test Command:** @PJL FSDOWNLOAD NAME="x" SIZE=1' in text
+    assert "- **Verification Status:** not_implemented" in text
+    assert "- **Rejection Reason:** source-verified stub" in text
+
+
+def test_exploitation_hypothesis_match_accepts_manual_field_order(tmp_path):
+    (tmp_path / "hypotheses.md").write_text(
+        """### H-001: Queue service validation
+- **Target:** 10.129.47.140:1515
+- **Port:** 1515
+- **Evidence:** evidence/vuln-research/queue.txt
+- **CVE Research:** web_search queue service 1515 CVE; NVD; no results
+- **Exploit Research:** web_search queue service 1515 exploit; GitHub; no results
+- **Status:** Validated
+- **Phase:** EXPLOITATION
+""",
+        encoding="utf-8",
+    )
+
+    result = command.check_hypothesis_freshness(
+        tmp_path, command.Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
+    )
+    assert not result.errors, result.errors
+
+
+def test_exploitation_requires_cve_and_exploit_research_attempts(tmp_path):
+    (tmp_path / "hypotheses.md").write_text(
+        """### H-001: Queue service validation
+- **Target:** 10.129.47.140:1515
+- **Status:** Likely
+- **Phase:** VULN_RESEARCH
+- **CVE Research:** web_search queue service 1515 CVE; NVD; no results
+""",
+        encoding="utf-8",
+    )
+
+    blocked = command.check_hypothesis_freshness(
+        tmp_path, command.Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
+    )
+    assert any("Exploit Research" in error for error in blocked.errors)
+
+    (tmp_path / "hypotheses.md").write_text(
+        (tmp_path / "hypotheses.md").read_text(encoding="utf-8")
+        + "- **Exploit Research:** web_search queue service 1515 PoC; GitHub; source unavailable\n",
+        encoding="utf-8",
+    )
+    allowed = command.check_hypothesis_freshness(
+        tmp_path, command.Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
+    )
+    assert not allowed.errors, allowed.errors
+
+
+def test_record_ptt_can_start_pristine_task(tmp_path):
+    skill_file = tmp_path / ".skill-loaded-ts"
+    eng = _init_e2e(tmp_path, skill_file)
+    ptt_path = eng / "state" / "ptt.md"
+    ptt_path.write_text(
+        ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [~] |", "| PT-010 | [ ] |"),
+        encoding="utf-8",
+    )
+
+    result = json.loads(
+        TOOLS.handle_record_ptt(
+            {"eng_dir": str(eng), "id": "PT-010", "status": "[~]", "note": "Start recon"}
+        )
+    )
+    assert result["status"] == "ok", result
+    assert result["task_started"] is True
+    assert ptt.find_active_task(ptt.parse_ptt(ptt_path)).id == "PT-010"
+
+
 def test_first_command_requires_an_active_ptt_task(tmp_path):
     """The guard blocks target work until one PTT task is explicitly active."""
     skill_file = tmp_path / ".skill-loaded-ts"
@@ -324,6 +476,20 @@ def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
     assert out["status"] in ("denied", "error")
 
 
+def test_skill_load_gate_identifies_stale_session_marker(tmp_path):
+    from plugins.violin_guard.core.command import check_skill_load
+
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / ".skill-loaded-old-session").write_text("skill-loaded: test\n", encoding="utf-8")
+
+    gate = check_skill_load(tmp_path, "current-session", mandatory=True)
+
+    assert gate.errors
+    assert ".skill-loaded-old-session" in gate.errors[0]
+    assert str(state / ".skill-loaded-current-session") in gate.errors[0]
+
+
 def test_init_engagement_creates_compliant_artifacts(tmp_path):
     """`init-engagement` auto-creates a bootstrap-complete, guard-clean dir."""
     import yaml
@@ -358,10 +524,22 @@ def test_auto_repair_creates_missing_artifacts(tmp_path):
     assert int(res) in (0, 2), f"auto-repair should self-heal to clean, got {res}"
 
     # Artifacts now exist; a real operator still has to confirm authorisation.
-    for rel in ("scope/scope.yaml", "state/ptt.md", "hypotheses.md", "state/history.md"):
+    for rel in (
+        "scope/scope.yaml",
+        "state/ptt.md",
+        "hypotheses.md",
+        "state/history.md",
+        "exploits",
+        "evidence/exploitation",
+    ):
         assert (eng / rel).exists(), f"auto-repair should create {rel}"
     yaml.safe_load((eng / "scope" / "scope.yaml").read_text(encoding="utf-8"))
     assert command.validate_scope(eng / "scope" / "scope.yaml").errors
+
+
+def test_local_tmp_script_path_is_an_informational_reminder():
+    result = command.check_local_artifact_paths("cat > /tmp/exploit.py <<'PY'\nprint('x')\nPY")
+    assert result.infos == ["local script path uses /tmp; save it under $ENG_DIR/exploits instead"]
 
 
 def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch, tmp_path):
@@ -397,9 +575,8 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     assert blocked["status"] == "sync_required", blocked
     assert ptt_path.read_text(encoding="utf-8") == ptt_before
 
-    # The self-certify guard requires the review note to carry the batch_id
-    # returned by the last executed command (proves this review belongs to
-    # this batch). Capture it from the pending-sync state.
+    # The guard captures the batch ID from pending state and appends its marker
+    # to the PTT note; operators need not copy opaque internal IDs.
     from plugins.violin_guard.core import state as _state
 
     pending = _state.get_pending_sync(str(eng))
@@ -416,11 +593,12 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
                 "eng_dir": str(eng),
                 "id": "PT-010",
                 "status": "[~]",
-                "note": f"batch reviewed (batch_id {batch_id})",
+                "note": "batch reviewed",
             }
         )
     )
     assert reviewed["status"] == "ok", reviewed
+    assert f"[reviewed-batch:{batch_id}]" in ptt_path.read_text(encoding="utf-8")
     synced = json.loads(TOOLS.handle_sync_done({"eng_dir": str(eng)}))
     assert synced["status"] == "ok", synced
     resumed = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"}))
@@ -440,14 +618,23 @@ def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, 
         encoding="utf-8",
     )
     # Create a real hypothesis (not in comment) for exploitation phase
-    hypotheses.update_hypothesis(
-        eng / "hypotheses.md",
-        id="001",
-        title="scoped payload validation",
-        status="Candidate",
-        phase="EXPLOITATION",
-        target="10.10.10.10",
+    recorded = json.loads(
+        TOOLS.handle_record_hypothesis(
+            {
+                "eng_dir": str(eng),
+                "id": "001",
+                "title": "scoped payload validation",
+                "status": "Candidate",
+                "phase": "EXPLOITATION",
+                "target": "10.10.10.10",
+                "service": "http",
+                "port": "80",
+                "cve_research": "web_search HTTP endpoint CVE; NVD; not applicable",
+                "exploit_research": "web_search HTTP endpoint exploit; GitHub; no results",
+            }
+        )
     )
+    assert recorded["status"] == "ok", recorded
     args = {
         "eng_dir": str(eng),
         "scope": str(eng / "scope" / "scope.yaml"),

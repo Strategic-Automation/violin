@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -53,8 +54,20 @@ _COUNTS_FILE = "counts.json"
 _LOCK_SUFFIX = ".lock"
 
 
+def _eng_root() -> Path:
+    """Return Violin's stable profile/repository root for relative paths."""
+    override = os.environ.get("VIOLIN_ENG_ROOT", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    # <profile>/plugins/violin_guard/core/state.py -> <profile>
+    return Path(__file__).resolve().parents[3]
+
+
 def _eng_dir(eng_dir: str | Path) -> Path:
-    return Path(eng_dir).resolve()
+    path = Path(eng_dir).expanduser()
+    if not path.is_absolute():
+        path = _eng_root() / path
+    return path.resolve()
 
 
 def _state_dir(eng_dir: str | Path) -> Path:
@@ -191,6 +204,7 @@ def mark_pending_sync(
     ptt_task_id: str,
 ) -> None:
     path = _sync_path(eng_dir)
+
     def mark(data: dict[str, Any]) -> None:
         old = data.get("pending") or {}
         commands = list(old.get("commands") or [])
@@ -204,7 +218,8 @@ def mark_pending_sync(
             "batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
             "commands": commands,
             "phase": phase,
-            "created_at": old.get("created_at") or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "created_at": old.get("created_at")
+            or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "ptt_task_id": task_id,
             # Appending work always invalidates a previous review. A review can
             # only certify the exact command set visible at that moment.
@@ -216,6 +231,7 @@ def mark_pending_sync(
 
 def clear_pending_sync(eng_dir: str | Path) -> None:
     path = _sync_path(eng_dir)
+
     def clear(data: dict[str, Any]) -> None:
         data.pop("pending", None)
         data["credit"] = DEFAULT_SYNC_CREDIT
@@ -235,6 +251,7 @@ def get_pending_sync(eng_dir: str | Path) -> dict | None:
 
 def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
     path = _sync_path(eng_dir)
+
     def mark(data: dict[str, Any]) -> None:
         pending = data.get("pending")
         if not pending:
@@ -287,6 +304,7 @@ def _heartbeat_path(eng_dir: str | Path) -> Path:
 
 def set_heartbeat_pending(eng_dir: str | Path, reason: str) -> None:
     path = _heartbeat_path(eng_dir)
+
     def mark(data: dict[str, Any]) -> None:
         data["pending"] = True
         data["reason"] = reason
@@ -297,6 +315,7 @@ def set_heartbeat_pending(eng_dir: str | Path, reason: str) -> None:
 
 def clear_heartbeat_pending(eng_dir: str | Path) -> None:
     path = _heartbeat_path(eng_dir)
+
     def clear(data: dict[str, Any]) -> None:
         data["pending"] = False
         data.pop("reason", None)
@@ -333,6 +352,7 @@ def read_counts(eng_dir: str | Path) -> dict[str, int]:
 
 def tick_command(eng_dir: str | Path) -> int:
     path = _counts_path(eng_dir)
+
     def tick(data: dict[str, Any]) -> int:
         data["commands"] = data.get("commands", 0) + 1
         return data["commands"]
@@ -342,6 +362,7 @@ def tick_command(eng_dir: str | Path) -> int:
 
 def tick_message(eng_dir: str | Path) -> int:
     path = _counts_path(eng_dir)
+
     def tick(data: dict[str, Any]) -> int:
         data["messages"] = data.get("messages", 0) + 1
         return data["messages"]
@@ -355,6 +376,7 @@ def record_ok_check(
     phase: str,
 ) -> None:
     path = _counts_path(eng_dir)
+
     def record(data: dict[str, Any]) -> None:
         data["last_check"] = {
             "command": command,

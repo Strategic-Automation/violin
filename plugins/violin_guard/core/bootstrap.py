@@ -12,6 +12,8 @@ from pathlib import Path
 
 import yaml
 
+from . import state
+
 __all__ = [
     "init_engagement",
     "check_bootstrap",
@@ -26,6 +28,19 @@ _REPAIR_TEMPLATES = {
     Path("hypotheses.md"): ("skills/pentest/templates/hypothesis-board.md", None),
     Path("state/history.md"): (None, "# Command History — repair placeholder\n"),
 }
+
+
+_ARTIFACT_DIRECTORIES = (
+    "exploits",
+    "evidence/recon",
+    "evidence/vuln-research",
+    "evidence/exploitation",
+    "evidence/post-exploitation",
+    "evidence/privesc",
+    "evidence/flags",
+    "evidence/reporting",
+    "evidence/retrospective",
+)
 
 
 class BootstrapResult:
@@ -169,11 +184,13 @@ def init_engagement(
     eng_dir: str | Path, host: str | None = None, *, ctf: bool = False, session_id: str = ""
 ) -> int:
     """Create a complete, guard-clean engagement directory from templates."""
-    eng_dir = Path(eng_dir)
+    eng_dir = state._eng_dir(eng_dir)
     result = BootstrapResult()
     host = (host or "").strip() or _derive_host(eng_dir)
 
     eng_dir.mkdir(parents=True, exist_ok=True)
+    for rel in _ARTIFACT_DIRECTORIES:
+        (eng_dir / rel).mkdir(parents=True, exist_ok=True)
     for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():
         target = eng_dir / rel
         if target.exists():
@@ -211,7 +228,7 @@ def check_bootstrap(
 ) -> BootstrapResult:
     """Verify engagement bootstrap is complete (and optionally auto-repair)."""
     result = BootstrapResult()
-    eng_dir = Path(eng_dir)
+    eng_dir = state._eng_dir(eng_dir)
 
     if not eng_dir.exists():
         result.add_error("BOOTSTRAP REQUIRED: engagement directory not found")
@@ -296,6 +313,12 @@ def _auto_repair_corrupt_artifacts(eng_dir: Path, result: BootstrapResult) -> Bo
             new_infos.append(f"AUTO-REPAIR: created missing engagement directory {eng_dir}")
         except Exception as exc:
             new_errors.append(f"AUTO-REPAIR FAILED creating {eng_dir}: {exc}")
+
+    for rel in _ARTIFACT_DIRECTORIES:
+        try:
+            (eng_dir / rel).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            new_errors.append(f"AUTO-REPAIR FAILED creating {eng_dir / rel}: {exc}")
 
     for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():
         target = eng_dir / rel
