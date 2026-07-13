@@ -133,17 +133,30 @@ def check_release() -> ReleaseCheckResult:
         result.add_warning("CHANGELOG.md not found")
 
     # 3. Isolated plugin import (catches broken module-level code / imports).
+    module_name = "violin_guard_release_check"
+    old_module = sys.modules.get(module_name)
     try:
-        sys.path.insert(0, str(root.parents[1]))
+        sys.path.insert(0, str(root.parent))
         spec = importlib.util.spec_from_file_location(
-            "violin_guard_release_check", root / "__init__.py"
+            module_name,
+            root / "__init__.py",
+            submodule_search_locations=[str(root)],
         )
+        if spec is None or spec.loader is None:
+            raise ImportError("could not build plugin import specification")
         mod = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = mod
         spec.loader.exec_module(mod)
         result.add_info("isolated plugin import OK")
     except Exception as exc:  # noqa: BLE001
         result.add_error(f"plugin import failed: {type(exc).__name__}: {exc}")
         mod = None
+    finally:
+        sys.path.pop(0)
+        if old_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = old_module
 
     # 3b. Manifest vs registered tools.
     if mod is not None:
@@ -178,7 +191,16 @@ def check_release() -> ReleaseCheckResult:
             result.add_warning("ruff not installed; skipped")
         try:
             pytest = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                    "--basetemp",
+                    str(Path(repo_root) / "engagements" / ".pytest-release"),
+                ],
                 cwd=repo_root,
                 capture_output=True,
                 text=True,
@@ -204,12 +226,11 @@ def check_release() -> ReleaseCheckResult:
     # 6. Skill documentation staleness scan (corrected forbidden set).
     profile_root = root.parents[1]
     skills_root = profile_root / "skills"
-    # 'violin_record_history' is RE-REGISTERED in __init__.py, so it is no
-    # longer a stale reference; 'violin_message_tick' is genuinely absent.
     forbidden = {
         "scripts/guard/": "removed legacy guard package",
         "hypothesis_guard.py": "removed hypothesis wrapper",
         "session_search": "unavailable session-search tool",
+        "violin_record_history": "removed executor-owned history tool",
         "violin_message_tick": "removed model-visible message tool",
         "violin_guard.py close": "nonexistent close subcommand",
         "check-closeout": "nonexistent closeout subcommand",

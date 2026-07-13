@@ -1,9 +1,9 @@
 name: guard-check
 on:
   push:
-    branches: [master]
+    branches: [master, dev]
   pull_request:
-    branches: [master]
+    branches: [master, dev]
 jobs:
   guard-check:
     runs-on: ubuntu-latest
@@ -12,13 +12,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
-        run: pip install pyyaml
+      - uses: astral-sh/setup-uv@v6
+      - name: Install development dependencies
+        run: uv sync --dev
       - name: Run guard release check
-        run: python scripts/violin_guard.py check-release
+        run: uv run python scripts/violin_guard.py check-release
       - name: Validate YAML
         run: |
-          python -c "
+          uv run python -c "
           import yaml
           for f in ['distribution.yaml', 'config.yaml', 'skills/pentest/templates/scope-template.yaml']:
               yaml.safe_load(open(f))

@@ -1,6 +1,6 @@
 """Check-command sub-guards — pure validation functions.
 
-All logic ported from scripts/guard/{command,record,freshness,closeout}.py
+This is the canonical command, freshness, and closeout policy implementation.
 No subprocess calls — pure functions returning dataclasses.
 """
 

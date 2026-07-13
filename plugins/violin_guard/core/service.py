@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from . import command, execution, hypotheses, ptt, state
+from .adapters import search_exploit
 
 
 def _json(status_name, **payload):
@@ -335,9 +336,4 @@ def handle_status(a, **kwargs):
 
 
 def handle_search_exploit(a, **kwargs):
-    return _json(
-        "ok",
-        **__import__(
-            "plugins.violin_guard.core.adapters", fromlist=["search_exploit"]
-        ).search_exploit(a),
-    )
+    return _json("ok", **search_exploit(a))

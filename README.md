@@ -13,10 +13,10 @@
 </p>
 
 <p align="center">
-  <b>31 playbooks · 8 references · 1 optional guard plugin · 0 brokers · Hermes-native</b>
+  <b>31 playbooks · 8 references · required execution guard · 0 brokers · Hermes-native</b>
 </p>
 
-Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, skill-based playbooks, an optional `violin-guard` plugin, and lightweight guard scripts. No extra API keys, no per-profile credentials, no lock-in.
+Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, skill-based playbooks, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI is retained only for diagnostics and recovery. No extra API keys, no per-profile credentials, no lock-in.
 
 ```
 hermes profile install https://github.com/Strategic-Automation/violin
