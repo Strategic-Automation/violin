@@ -158,7 +158,6 @@ graph TB
 
 - `memory.memory_enabled: false` — no global memory recall/write
 - `memory.user_profile_enabled: false` — no global user profile access
-- `session_search` available for cross-referencing past engagements on the same target
 - Engagement continuity lives in project files (scope docs, evidence, reports)
 - Start a fresh Hermes conversation per engagement to keep boundaries clean
 

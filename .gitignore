@@ -4,6 +4,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.pytest-tmp-plugin/
 .DS_Store
 Thumbs.db
 .vscode/

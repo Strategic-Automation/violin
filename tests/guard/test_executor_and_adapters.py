@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import adapters, executor
+from plugins.violin_guard.core import adapters, execution
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -15,7 +15,7 @@ def _engagement(tmp_path: Path) -> Path:
 
 def test_local_executor_records_receipt_and_history(tmp_path):
     eng = _engagement(tmp_path)
-    receipt = executor.execute(
+    receipt = execution.execute(
         "echo violin-test",
         eng_dir=str(eng),
         phase="recon",
@@ -32,7 +32,7 @@ def test_local_executor_records_receipt_and_history(tmp_path):
 def test_executor_rejects_cwd_escape(tmp_path):
     eng = _engagement(tmp_path)
     with pytest.raises(ValueError, match="inside the engagement"):
-        executor.execute("echo blocked", eng_dir=str(eng), phase="recon", cwd="..")
+        execution.execute("echo blocked", eng_dir=str(eng), phase="recon", cwd="..")
 
 
 def test_adapter_builders_are_structured_and_bounded():
@@ -46,7 +46,7 @@ def test_adapter_builders_are_structured_and_bounded():
             "wordlist": "/tmp/common.txt",
         }
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(adapters.AdapterError):
         adapters.build_nmap({"target": "10.0.0.1", "ports": "80; rm -rf /"})
 
 

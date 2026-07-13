@@ -1,4 +1,9 @@
-"""Typed tool schemas for the violin-guard plugin."""
+"""Typed tool schemas for the violin-guard plugin.
+
+Model-visible contracts only — no implementation logic.
+"""
+
+from __future__ import annotations
 
 CHECK_COMMAND_SCHEMA = {
     "description": "Run a check-command gate (typed wrapper over violin_guard.py check-command).",
@@ -33,7 +38,7 @@ RECORD_PTT_SCHEMA = {
 }
 
 RECORD_HYPOTHESIS_SCHEMA = {
-    "description": "Record/update a hypothesis row (delegates to scripts/hypothesis_guard.py record-hypothesis).",
+    "description": "Record/update a hypothesis row (delegates to hypothesis_guard.py record-hypothesis).",
     "parameters": {
         "type": "object",
         "properties": {
@@ -44,6 +49,7 @@ RECORD_HYPOTHESIS_SCHEMA = {
             "title": {"type": "string"},
             "status": {"type": "string"},
             "phase": {"type": "string"},
+            "target": {"type": "string", "description": "target host/IP (must be in scope)"},
             "vuln_class": {"type": "string"},
             "rationale": {"type": "string"},
             "evidence": {"type": "string"},
@@ -53,23 +59,8 @@ RECORD_HYPOTHESIS_SCHEMA = {
     },
 }
 
-RECORD_HISTORY_SCHEMA = {
-    "description": "Append a command to state/history.md (proves continuity).",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "eng_dir": {"type": "string"},
-            "command": {"type": "string"},
-            "exit_code": {"type": "integer"},
-            "phase": {"type": "string"},
-        },
-        "required": ["eng_dir", "command"],
-        "additionalProperties": False,
-    },
-}
-
 EXEC_SCHEMA = {
-    "description": "Authorize, execute, and record one target command. Hard BLOCK and sync_required never create a process; review-tier commands require approval unless Hermes yolo mode is active. Use violin_exec_burst for exploit/race batches; never raw terminal for targets.",
+    "description": "Authorize and execute one target command. Requires one unambiguous [~] PTT task. The tool itself appends exact command history; it never updates PTT progress. After the bounded command window, review results, update the active PTT row explicitly, and call violin_sync_done. Hard BLOCK and sync_required never create a process.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -90,7 +81,7 @@ EXEC_SCHEMA = {
 }
 
 SYNC_DONE_SCHEMA = {
-    "description": "Call after reconciling the pending command: state/history.md contains the command, state/ptt.md Last updated is fresh, and hypotheses.md Updated is fresh for vuln-research/exploitation. Verifies artifacts and unlocks the next violin_exec. If it still reports stale, fix the listed artifact; do not retry target commands.",
+    "description": "Verify explicit batch reconciliation. Command history is written automatically, but the active PTT row must be reviewed and updated after the batch; the executor cannot satisfy this checkpoint. Clears the lock only when both artifacts are fresh.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -113,21 +104,9 @@ HEARTBEAT_DONE_SCHEMA = {
     },
 }
 
-MESSAGE_TICK_SCHEMA = {
-    "description": "LLM-opt-in message counter. Call once per assistant message during an engagement. Every 30 messages it sets heartbeat-pending so the next violin_exec requires violin_heartbeat_done. Returns the running message count.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "eng_dir": {"type": "string", "description": "Engagement directory"},
-        },
-        "required": ["eng_dir"],
-        "additionalProperties": False,
-    },
-}
-
 EXEC_BURST_SCHEMA = {
     "name": "violin_exec_burst",
-    "description": "Single-approval burst gate: PRE-APPROVE a batch of target-touching commands. Prefer commands=[...] inline; commands_file remains supported for newline-delimited command files. The guard runs the FULL safety gate (scope, skill-load, PTT/hypothesis freshness, dangerous/Tier-3 patterns, out-of-scope rejection) on every command in the batch, but amortises the per-command doc-sync tax to a SINGLE sync-done after the whole batch. Use for recon batches and exploit/race batches; for vhosts without /etc/hosts, target the IP and include Host headers (e.g. gobuster -u http://IP -H 'Host: name.htb'). Returns APPROVED/REVIEW/DENIED for the batch; the LAST command arms the normal sync lock so one sync-done unlocks the next call.",
+    "description": "Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch, update the active PTT row explicitly, then call violin_sync_done. Use for recon and exploit/race batches; never raw terminal for targets.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -179,7 +158,15 @@ EXEC_STATUS_SCHEMA = {
 
 EXEC_CANCEL_SCHEMA = {
     "description": "Cancel only the exact tracked process group for a running execution.",
-    "parameters": EXEC_STATUS_SCHEMA["parameters"],
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {"type": "string"},
+            "execution_id": {"type": "string"},
+        },
+        "required": ["eng_dir", "execution_id"],
+        "additionalProperties": False,
+    },
 }
 
 SEARCH_EXPLOIT_SCHEMA = {
@@ -294,7 +281,7 @@ TARGET_SCHEMA = {
 
 STATUS_SCHEMA = {
     "name": "violin_status",
-    "description": "One-shot engagement health read: bootstrap completeness, skill-load freshness, pending doc-sync, heartbeat-pending, sync credit remaining, and command/message counts. Consolidates violin_check_bootstrap + violin_check_skill_loaded + violin_sync_done + violin_message_tick into a single read-only call so the agent can poll engagement state without burning four tool calls. Mutates no state.",
+    "description": "One-shot engagement health read: bootstrap completeness, skill-load freshness, pending doc-sync, heartbeat-pending, sync credit remaining, and command/message counts. Mutates no state.",
     "parameters": {
         "type": "object",
         "properties": {

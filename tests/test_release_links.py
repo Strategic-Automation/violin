@@ -1,11 +1,9 @@
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
+from plugins.violin_guard.core.release import resolve_reference
 
-from guard.core import ROOT as GUARD_ROOT  # noqa: E402
-from guard.release import resolve_reference  # noqa: E402
+ROOT = Path(__file__).resolve().parent.parent
+GUARD_ROOT = ROOT
 
 
 def test_playbook_reference_paths_resolve_from_pentest_skill_root():
