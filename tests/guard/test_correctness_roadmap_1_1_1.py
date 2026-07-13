@@ -42,7 +42,7 @@ pkg = _load_pkg()
 TOOLS = pkg.tools
 ADAPTERS = pkg.core.adapters
 
-from plugins.violin_guard.core import bootstrap, command, execution  # noqa: E402
+from plugins.violin_guard.core import bootstrap, command, execution, ptt  # noqa: E402
 from plugins.violin_guard.core.command import check_skill_load  # noqa: E402
 
 
@@ -99,7 +99,10 @@ def _fake_target_executor(monkeypatch):
     def fake_execute(command, *, eng_dir, phase, **kwargs):
         FAKE_EXEC["called"] = True
         FAKE_EXEC["command"] = command
-        remaining = execution._commit_guard_state(Path(eng_dir), command, phase)
+        active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
+        remaining = execution._commit_guard_state(
+            Path(eng_dir), command, phase, active.id if active else ""
+        )
         return {
             "execution_id": "00000000-0000-0000-0000-000000000001",
             "status": "completed",

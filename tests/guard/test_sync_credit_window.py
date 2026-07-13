@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from plugins.violin_guard.core import bootstrap, execution, service, state
+from plugins.violin_guard.core import bootstrap, execution, ptt, service, state
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -37,7 +37,10 @@ def test_five_commands_run_without_yolo_then_sixth_blocks(monkeypatch, tmp_path:
     eng = _engagement(tmp_path)
 
     def fake_execute(command: str, *, eng_dir: str, phase: str, **_kwargs):
-        remaining = execution._commit_guard_state(Path(eng_dir), command, phase)
+        active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
+        remaining = execution._commit_guard_state(
+            Path(eng_dir), command, phase, active.id if active else ""
+        )
         return {
             "status": "completed",
             "executed": True,

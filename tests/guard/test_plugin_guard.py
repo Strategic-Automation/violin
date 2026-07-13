@@ -53,7 +53,7 @@ sys.modules["vgpkg"] = pkg
 TOOLS = _load_sub("tools", _PLUGIN / "tools.py")
 
 # Import core modules from the new location
-from plugins.violin_guard.core import bootstrap, command, execution, hypotheses, state
+from plugins.violin_guard.core import bootstrap, command, execution, hypotheses, ptt, state
 
 
 def _cp(code, out="", err=""):
@@ -80,15 +80,14 @@ def _fake_target_executor(monkeypatch):
 
     def fake_execute(command, *, eng_dir, phase, **kwargs):
         engagement = Path(eng_dir)
-        history = engagement / "state" / "history.md"
-        with history.open("a", encoding="utf-8") as handle:
-            handle.write(f"- [2026-07-11T00:00:01Z] [{phase.upper()}] exit=0 `{command}`\n")
+        state.append_history(engagement, command, phase, 0, "evidence/executions/test.json")
         remaining = state.spend_sync_credit(str(engagement))
         # Mirror real execution: tick command counter, mark pending sync, set heartbeat if interval reached
         from plugins.violin_guard.core.phases import normalize_phase, suppresses_heartbeat
 
         count = state.tick_command(str(engagement))
-        state.mark_pending_sync(str(engagement), command, phase)
+        active = ptt.find_active_task(ptt.parse_ptt(engagement / "state" / "ptt.md"))
+        state.mark_pending_sync(str(engagement), command, phase, active.id if active else "")
         phase_enum = normalize_phase(phase)
         if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
             state.set_heartbeat_pending(
@@ -383,7 +382,9 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     ptt_before = ptt_path.read_text(encoding="utf-8")
     first = json.loads(TOOLS.handle_exec(args))
     assert first["status"] in ("ok", "approved", "review"), first
-    assert "`nmap -sV 10.10.10.10`" in (eng / "state" / "history.md").read_text(encoding="utf-8")
+    assert "command=nmap -sV 10.10.10.10" in (eng / "state" / "history.md").read_text(
+        encoding="utf-8"
+    )
     assert ptt_path.read_text(encoding="utf-8") == ptt_before
 
     window = state.DEFAULT_SYNC_CREDIT
@@ -407,7 +408,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     assert batch_id, "pending batch must carry a batch_id"
 
     history_text = (eng / "state" / "history.md").read_text(encoding="utf-8")
-    assert history_text.count("exit=0 `nmap") == window
+    assert history_text.count("exit_code=0 | command=nmap") == window
 
     reviewed = json.loads(
         TOOLS.handle_record_ptt(

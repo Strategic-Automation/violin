@@ -160,6 +160,7 @@ def mark_pending_sync(
     eng_dir: str | Path,
     command: str,
     phase: str,
+    ptt_task_id: str,
 ) -> None:
     path = _sync_path(eng_dir)
     data = _read_json(path)
@@ -168,12 +169,18 @@ def mark_pending_sync(
     if old.get("command") and not commands:
         commands = [{"command": old["command"], "phase": old.get("phase", phase)}]
     commands.append({"command": command, "phase": phase})
+    task_id = old.get("ptt_task_id") or ptt_task_id
+    if not task_id:
+        raise ValueError("pending execution requires a captured active PTT task")
     data["pending"] = {
         "batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
         "commands": commands,
         "phase": phase,
         "created_at": old.get("created_at") or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "ptt_reviewed": bool(old.get("ptt_reviewed", False)),
+        "ptt_task_id": task_id,
+        # Appending work always invalidates a previous review. A review can
+        # only certify the exact command set visible at that moment.
+        "ptt_reviewed": False,
     }
     _atomic_write(path, data)
 
@@ -231,7 +238,11 @@ def history_contains(eng_dir: str | Path, command: str) -> bool:
     hist = _eng_dir(eng_dir) / "state" / "history.md"
     if not hist.exists():
         return False
-    return command in hist.read_text(encoding="utf-8")
+    marker = f" | command={command}"
+    for line in hist.read_text(encoding="utf-8").splitlines():
+        if line.endswith(marker) or f"{marker} | receipt=" in line:
+            return True
+    return False
 
 
 # --------------------------------------------------------------------------- #
