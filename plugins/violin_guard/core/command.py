@@ -6,6 +6,7 @@ No subprocess calls — pure functions returning dataclasses.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ __all__ = [
     "SkillLoadResult",
     "check_command",
     "validate_scope",
+    "check_scope_authorization",
     "check_skill_load",
     "check_history_staleness",
     "check_hypothesis_freshness",
@@ -128,6 +130,14 @@ def validate_scope(scope_path: Path) -> ScopeResult:
         if section not in data:
             result.add_error(f"scope.yaml missing required section: {section}")
 
+    # A real scope must name the approving party and be explicitly confirmed.
+    parties = data.get("authorized_parties")
+    if not isinstance(parties, list) or not any(str(item).strip() for item in parties):
+        result.add_error("scope.authorized_parties must be a non-empty list")
+    authorisation = data.get("authorisation")
+    if not isinstance(authorisation, dict) or authorisation.get("confirmed") is not True:
+        result.add_error("scope.authorisation.confirmed must be true before target execution")
+
     # targets.ip_addresses
     targets = data.get("targets", {})
     if "ip_addresses" not in targets:
@@ -137,8 +147,11 @@ def validate_scope(scope_path: Path) -> ScopeResult:
 
     # rules_of_engagement
     roe = data.get("rules_of_engagement", {})
-    if "allowed_actions" not in roe:
-        result.add_error("scope.rules_of_engagement.allowed_actions is required")
+    allowed_actions = roe.get("allowed_actions") if isinstance(roe, dict) else None
+    if not isinstance(allowed_actions, list) or not any(
+        str(item).strip() for item in allowed_actions
+    ):
+        result.add_error("scope.rules_of_engagement.allowed_actions must be a non-empty list")
 
     # engagement.date
     engagement = data.get("engagement", {})
@@ -146,6 +159,39 @@ def validate_scope(scope_path: Path) -> ScopeResult:
         result.add_warning("scope.engagement.date missing (will be set on init)")
 
     result.scope_data = data
+    return result
+
+
+_PHASE_ACTION_TERMS = {
+    Phase.SCOPING: ("scope",),
+    Phase.RECON: ("recon", "discovery", "banner", "version", "scan", "enumerat"),
+    Phase.VULN_RESEARCH: ("vuln", "research", "cve", "exploitdb"),
+    Phase.EXPLOITATION: ("exploit", "validation", "poc"),
+    Phase.POST_EXPLOITATION: ("post-exploit", "post exploitation", "exploit", "validation"),
+    Phase.PRIVESC: ("privilege", "privesc", "exploit", "validation"),
+    Phase.FLAGS: ("flag", "capture"),
+    Phase.REPORTING: ("report",),
+    Phase.RETROSPECTIVE: ("retrospective",),
+}
+
+
+def check_scope_authorization(scope: dict[str, Any] | None, phase: Phase) -> CheckResult:
+    """Ensure the approved rules of engagement allow the requested phase."""
+    result = CheckResult()
+    if not isinstance(scope, dict):
+        return result
+    roe = scope.get("rules_of_engagement") or {}
+    allowed = [str(item).lower() for item in roe.get("allowed_actions", []) or []]
+    forbidden = [str(item).lower() for item in roe.get("forbidden_actions", []) or []]
+    terms = _PHASE_ACTION_TERMS[phase]
+    if any(any(term in action for term in terms) for action in forbidden):
+        result.add_error(
+            f"phase {phase.value} conflicts with scope.rules_of_engagement.forbidden_actions"
+        )
+    if not any(any(term in action for term in terms) for action in allowed):
+        result.add_error(
+            f"phase {phase.value} is not permitted by scope.rules_of_engagement.allowed_actions"
+        )
     return result
 
 
@@ -212,6 +258,15 @@ def _extract_target_candidates(command: str) -> list[str]:
             cands.append(host.lower())
     for m in _IPV4_CIDR.finditer(command):
         cands.append(m.group(0).lower())
+    # Validate colon-containing tokens with ipaddress instead of treating the
+    # leading hextet of an IPv6 address as a host:port pair.
+    for token in re.findall(r"(?<![\w:])\[?[0-9A-Fa-f:]{2,}\]?(?:/\d{1,3})?", command):
+        candidate = token.strip("[]").lower()
+        try:
+            ipaddress.ip_network(candidate, strict=False)
+        except ValueError:
+            continue
+        cands.append(candidate)
     for m in _HOST_PORT.finditer(command):
         cands.append(m.group(1).lower())
     for m in _FQDN.finditer(command):
@@ -225,33 +280,61 @@ def _extract_target_candidates(command: str) -> list[str]:
     return out
 
 
+def _values(value: Any):
+    if isinstance(value, dict):
+        for nested in value.values():
+            yield from _values(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _values(nested)
+    elif value is not None:
+        yield str(value)
+
+
+def _normalise_scope_host(value: str) -> str:
+    match = re.match(r"https?://([^\s/]+)", value, flags=re.IGNORECASE)
+    host = match.group(1) if match else value
+    if host.startswith("[") and "]" in host:
+        return host[1 : host.index("]")].lower()
+    return host.rsplit(":", 1)[0].lower() if host.count(":") == 1 else host.lower()
+
+
 def _scope_allowed_hosts(scope: dict) -> set[str]:
     allowed: set[str] = set()
     targets = scope.get("targets", {}) or {}
-    for ip in targets.get("ip_addresses", []) or []:
-        allowed.add(str(ip).lower())
-    for url in targets.get("in_scope_urls", []) or []:
-        m = re.match(r"https?://([^\s/]+)", str(url))
-        if m:
-            allowed.add(m.group(1).lower())
-    roles = targets.get("roles", {}) or {}
-    if isinstance(roles, dict):
-        for v in roles.values():
-            allowed.add(str(v).lower())
-    for h in targets.get("hostnames", []) or []:
-        allowed.add(str(h).lower())
+    for key in ("ip_addresses", "in_scope_urls", "urls", "domains", "hostnames", "roles"):
+        for value in _values(targets.get(key, [])):
+            allowed.add(_normalise_scope_host(value))
     return allowed
 
 
 def _scope_excluded_hosts(scope: dict) -> set[str]:
     excluded: set[str] = set()
-    for item in scope.get("exclusions", {}) or []:
-        if isinstance(item, str):
-            excluded.add(item.lower())
-        elif isinstance(item, dict):
-            for v in item.values():
-                excluded.add(str(v).lower())
+    for item in _values(scope.get("exclusions", {})):
+        excluded.add(_normalise_scope_host(item))
     return excluded
+
+
+def _scope_networks(scope: dict, section: str) -> list[ipaddress._BaseNetwork]:
+    values = []
+    targets = scope.get(section, {}) or {}
+    for key in ("ip_addresses", "cidrs"):
+        values.extend(_values(targets.get(key, [])))
+    networks = []
+    for value in values:
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _matches_network(candidate: str, networks: list[ipaddress._BaseNetwork]) -> bool:
+    try:
+        network = ipaddress.ip_network(candidate, strict=False)
+    except ValueError:
+        return False
+    return any(network.version == allowed.version and network.subnet_of(allowed) for allowed in networks)
 
 
 def check_scope_targets(scope_path: Path, command: str) -> CheckResult:
@@ -270,12 +353,22 @@ def check_scope_targets(scope_path: Path, command: str) -> CheckResult:
 
     allowed = _scope_allowed_hosts(data)
     excluded = _scope_excluded_hosts(data)
+    allowed_networks = _scope_networks(data, "targets")
+    excluded_networks = _scope_networks(data, "exclusions")
     for cand in _extract_target_candidates(command):
-        if cand in excluded:
+        if cand in excluded or _matches_network(cand, excluded_networks):
+            result.add_error(f"excluded target {cand} must not be touched")
             continue
         if cand in allowed:
             continue
-        if _IPV4_CIDR.fullmatch(cand):
+        if _matches_network(cand, allowed_networks):
+            continue
+        try:
+            ipaddress.ip_network(cand, strict=False)
+            is_ip = True
+        except ValueError:
+            is_ip = False
+        if is_ip:
             result.add_error(f"out-of-scope target {cand} (not present in scope.yaml)")
         else:
             result.add_warning(f"host {cand} is not present in scope.yaml; verify authorization")
@@ -405,6 +498,9 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     scope_result = validate_scope(scope_path)
     result.errors.extend(scope_result.errors)
     result.warnings.extend(scope_result.warnings)
+
+    authorisation_result = check_scope_authorization(scope_result.scope_data, phase)
+    result.errors.extend(authorisation_result.errors)
 
     # 2b. Scope target enforcement (audit P0). Extract command targets and
     #     block anything that lands on an out-of-scope IP/CIDR.

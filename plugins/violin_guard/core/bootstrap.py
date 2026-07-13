@@ -195,7 +195,12 @@ def init_engagement(
         result.print()
         return 1
 
-    result.add_info(f"engagement initialised and guard-clean: {eng_dir}")
+    if ctf:
+        result.add_info(f"engagement initialised and ready for authorised CTF work: {eng_dir}")
+    else:
+        result.add_info(
+            f"engagement initialised; confirm scope authorisation before target work: {eng_dir}"
+        )
     result.print()
     return 0
 

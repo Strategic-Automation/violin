@@ -11,6 +11,11 @@ from plugins.violin_guard.core import bootstrap, execution, service, state
 def _engagement(tmp_path: Path) -> Path:
     eng = tmp_path / "10.10.10.10-2026-07-13"
     assert bootstrap.init_engagement(eng, host="10.10.10.10") == 0
+    scope_path = eng / "scope" / "scope.yaml"
+    scope_path.write_text(
+        scope_path.read_text(encoding="utf-8").replace("confirmed: false", "confirmed: true"),
+        encoding="utf-8",
+    )
     (eng / "state" / ".skill-loaded-test").write_text("skill-loaded: test\n", encoding="utf-8")
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
