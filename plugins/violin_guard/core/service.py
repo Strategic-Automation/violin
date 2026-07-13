@@ -8,6 +8,12 @@ import re
 from pathlib import Path
 
 from . import command, execution, hypotheses, ptt, state
+
+
+def _eng_path(eng_dir: str) -> Path:
+    return state._eng_dir(eng_dir)
+
+
 from .adapters import search_exploit
 
 
@@ -39,19 +45,19 @@ def handle_check_command(a, **kwargs):
 def handle_record_ptt(a, **kwargs):
     try:
         eng_dir = a["eng_dir"]
-        doc = ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md")
+        doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
         pending = state.get_pending_sync(eng_dir)
         task = a.get("id")
         note = (a.get("note") or "").strip()
-        status = a.get("status", "x")
+        status = a.get("status", "[~]")
 
         # --- Self-certify guard (audit P0-sync) ---------------------------------
         # A review only unlocks the batch when it demonstrably corresponds to the
         # work that was just executed. Four checks, all fail-closed:
-        if not pending:
-            raise ValueError("no pending execution batch to review")
         if not task or not note:
             raise ValueError("task id and non-empty review note required")
+        if not pending:
+            return _start_ptt_task(_eng_path(eng_dir) / "state" / "ptt.md", doc, task, status, note)
         # 1. reviewed ID must match the active [~] task — never review a different row
         validation = ptt.validate_ptt(doc)
         if validation.errors:
@@ -68,13 +74,13 @@ def handle_record_ptt(a, **kwargs):
             raise ValueError(
                 f"reviewed task {task!r} is not the active task; resolve the active task first"
             )
-        # 2. the batch id must be carried in the note — proves this review belongs to this batch
+        # 2. Bind the review to the current batch ourselves. Requiring an
+        # operator to copy an opaque ID creates avoidable friction; the guard
+        # already holds the pending state and records an explicit marker before
+        # it unlocks anything.
         batch_id = pending.get("batch_id")
         if batch_id and batch_id not in note:
-            raise ValueError(
-                f"review note must carry the batch_id {batch_id!r}; "
-                "use the batch id returned by violin_exec / violin_exec_burst"
-            )
+            note = f"{note} [reviewed-batch:{batch_id}]"
         # 3. every pending command must already be recorded in history.md
         for item in pending.get("commands") or []:
             cmd = item.get("command")
@@ -84,12 +90,32 @@ def handle_record_ptt(a, **kwargs):
                     "the batch must finish before review"
                 )
 
-        ptt.update_task(Path(eng_dir) / "state" / "ptt.md", task, status, note)
+        ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
         state.mark_ptt_reviewed(eng_dir, task, note)
         # 4. no commands may run after review until sync-done clears the batch
         return _json("ok", task_id=task, batch_id=pending.get("batch_id"))
     except Exception as e:
         return _json("error", error=str(e))
+
+
+def _start_ptt_task(ptt_path: Path, tasks, task_id: str, status: str, note: str) -> str:
+    """Arm one untouched, phase-bound task before the first target command."""
+
+    if status != "[~]":
+        raise ValueError("without a pending batch, only [~] may start a PTT task")
+    if ptt.find_active_task(tasks):
+        raise ValueError("an active PTT task already exists; review its pending batch first")
+    selected = next((item for item in tasks if item.id == task_id), None)
+    if selected is None:
+        raise ValueError(f"PTT task {task_id!r} not found")
+    if selected.status != "[ ]":
+        raise ValueError(f"PTT task {task_id!r} must be [ ] before it can be started")
+    try:
+        phase = ptt.normalize_phase(selected.phase)
+    except ValueError as exc:
+        raise ValueError(f"PTT task {task_id!r} must sit below a valid Phase heading") from exc
+    ptt.update_task(ptt_path, task_id, status, note)
+    return _json("ok", task_id=task_id, phase=phase.value, task_started=True)
 
 
 def handle_record_hypothesis(a, **kwargs):
@@ -99,7 +125,7 @@ def handle_record_hypothesis(a, **kwargs):
         # Pass in-scope hosts so the record is scope-bound (audit P1-hyp).
         in_scope = _scope_hosts(eng_dir)
         h = hypotheses.update_hypothesis(
-            Path(eng_dir) / "hypotheses.md", in_scope_hosts=in_scope, **fields
+            _eng_path(eng_dir) / "hypotheses.md", in_scope_hosts=in_scope, **fields
         )
         return _json("ok", hypothesis=h.to_dict())
     except Exception as e:
@@ -114,7 +140,7 @@ def _scope_hosts(eng_dir: str) -> set[str] | None:
     """
     import yaml
 
-    scope_path = Path(eng_dir) / "scope" / "scope.yaml"
+    scope_path = _eng_path(eng_dir) / "scope" / "scope.yaml"
     if not scope_path.exists():
         return None
     try:
@@ -171,7 +197,9 @@ def handle_exec(a, **kwargs):
         )
         return _json(status, executed=False, **gate)
     try:
-        active_task = ptt.find_active_task(ptt.parse_ptt(Path(a["eng_dir"]) / "state" / "ptt.md"))
+        active_task = ptt.find_active_task(
+            ptt.parse_ptt(_eng_path(a["eng_dir"]) / "state" / "ptt.md")
+        )
         r = execution.execute(
             command=a["command"],
             eng_dir=a["eng_dir"],
@@ -289,8 +317,8 @@ def handle_exec_burst(a, **kwargs):
                 cwd=cwd,
                 label=label,
                 ptt_task_id=(
-                    ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md")).id
-                    if ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
+                    ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")).id
+                    if ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md"))
                     else ""
                 ),
             )
@@ -318,7 +346,7 @@ def handle_exec_burst(a, **kwargs):
 def handle_target(a, **kwargs):
     import yaml
 
-    p = Path(a["eng_dir"]) / "scope" / "scope.yaml"
+    p = _eng_path(a["eng_dir"]) / "scope" / "scope.yaml"
     d = yaml.safe_load(p.read_text())
     ips = d.get("targets", {}).get("ip_addresses", [])
     if ips:

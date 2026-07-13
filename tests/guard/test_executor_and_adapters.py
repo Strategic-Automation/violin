@@ -40,6 +40,8 @@ def test_adapter_builders_are_structured_and_bounded():
         adapters.build_nmap({"target": "10.0.0.1", "ports": "80,443"})
         == "nmap -sCV -p 80,443 10.0.0.1"
     )
+    with pytest.raises(adapters.AdapterError, match="1-65535"):
+        adapters.build_nmap({"target": "10.0.0.1", "ports": "-p-"})
     assert "FUZZ" in adapters.build_ffuf(
         {
             "url": "http://10.0.0.1/FUZZ",

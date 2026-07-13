@@ -60,7 +60,7 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _resolve_engagement(eng_dir: str) -> Path:
-    path = Path(eng_dir).resolve()
+    path = state._eng_dir(eng_dir)
     if not path.is_dir():
         raise ValueError(f"engagement directory not found: {path}")
     return path

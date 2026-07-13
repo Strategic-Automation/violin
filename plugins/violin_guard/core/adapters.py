@@ -56,6 +56,8 @@ def build_nmap(args: dict) -> str:
 
     if args.get("ports"):
         ports = str(args["ports"])
+        if ports == "-p-":
+            raise AdapterError("ports is a port specification; use '1-65535' for all ports")
         if not re.fullmatch(r"[0-9,-]+", ports):
             raise AdapterError("ports must contain only digits, commas, and hyphens")
         parts.extend(["-p", ports])

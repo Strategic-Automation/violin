@@ -197,6 +197,8 @@ def test_post_exploitation_requires_scope_and_skill_load(tmp_path):
         + (
             f"\n### H-001: Post-exploit persistence\n- **Status:** Candidate\n"
             f"- **Phase:** POST_EXPLOITATION\n- **Target:** 10.10.10.10\n"
+            f"- **CVE Research:** web_search persistence CVE; NVD; not applicable\n"
+            f"- **Exploit Research:** web_search persistence technique; vendor docs; no results\n"
             f"- **Updated:** {ts} UTC\n"
         ),
         encoding="utf-8",

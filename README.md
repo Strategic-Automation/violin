@@ -30,7 +30,7 @@ hermes -p violin
 <table>
 <tr><td width="280"><b>🔬 31 Methodology Playbooks</b></td><td>7 methodology playbooks (6 phase: scoping, recon, vuln-research, exploitation, reporting, post-exploitation — plus a tools catalog) + 24 per-vulnerability-class playbooks covering OWASP Top 10, OWASP API Top 10, LLM Top 10, and beyond.</td></tr>
 <tr><td><b>🛡️ Multi-Layer Safety</b></td><td>Interactive scoping (8 questions) → scope validation → guard check → approval gates — every target-touching command validated before execution.</td></tr>
-<tr><td><b>🧠 Pentesting Task Tree</b></td><td>Structured artifact tracking every task via `[x]/[ ]/[~]` markers across phases, with command history and hypothesis linking.</td></tr>
+<tr><td><b>🧠 Pentesting Task Tree</b></td><td>Structured artifact tracking every task via `[x]/[ ]/[~]` markers across phases, with executor-owned history, hypothesis linking, and guard-bound batch reviews.</td></tr>
 <tr><td><b>🌐 Browser + Web Research</b></td><td>Browser toolset for website enumeration. Web toolset for CVE lookup, exploit search, and OSINT.</td></tr>
 <tr><td><b>📋 Evidence-Driven Reporting</b></td><td>Reproducible evidence with screenshots, tool output, request/response pairs. CVSS 3.1 scoring + auto-patch remediation.</td></tr>
 <tr><td><b>🔗 Hermes-Native</b></td><td>Inherits your existing Hermes provider/model. No extra API keys, no per-profile credentials, no lock-in.</td></tr>

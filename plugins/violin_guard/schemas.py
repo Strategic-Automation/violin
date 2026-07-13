@@ -23,7 +23,7 @@ CHECK_COMMAND_SCHEMA = {
 }
 
 RECORD_PTT_SCHEMA = {
-    "description": "Update a PTT row (status/note).",
+    "description": "Start one untouched [ ] PTT task with [~], or review the active task after a completed batch. A non-empty note is required; reviewed batches are bound automatically.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -53,6 +53,27 @@ RECORD_HYPOTHESIS_SCHEMA = {
             "vuln_class": {"type": "string"},
             "rationale": {"type": "string"},
             "evidence": {"type": "string"},
+            "cve_research": {
+                "type": "string",
+                "description": "Required before exploitation: online CVE/advisory query, source, and outcome. Truthful no-results/not-applicable/unavailable outcomes are allowed.",
+            },
+            "exploit_research": {
+                "type": "string",
+                "description": "Required before exploitation: online PoC/exploit query, source, and outcome. Truthful no-results/unavailable outcomes are allowed.",
+            },
+            "test_command": {
+                "type": "string",
+                "description": "Exact syntax tested, including argument order",
+            },
+            "test_response": {"type": "string", "description": "Exact decisive response or error"},
+            "verification_status": {
+                "type": "string",
+                "enum": ["syntax_confirmed", "syntax_uncertain", "not_implemented", "not_tested"],
+            },
+            "rejection_reason": {
+                "type": "string",
+                "description": "Why a rejected hypothesis is safe to stop pursuing",
+            },
         },
         "required": ["eng_dir", "service", "port"],
         "additionalProperties": True,
@@ -204,7 +225,10 @@ NMAP_SCHEMA = {
         "properties": {
             **_ADAPTER_COMMON,
             "scan_type": {"type": "string", "enum": ["-sV", "-sC", "-sCV", "-sn", "-Pn"]},
-            "ports": {"type": "string"},
+            "ports": {
+                "type": "string",
+                "description": "Port specification, e.g. 80,443 or 1-65535; do not include -p",
+            },
         },
         "required": ["eng_dir", "scope", "phase", "target"],
         "additionalProperties": False,

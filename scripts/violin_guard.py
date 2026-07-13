@@ -56,7 +56,7 @@ def cmd_validate_scope(args: argparse.Namespace) -> int:
 
 
 def cmd_check_skill_loaded(args: argparse.Namespace) -> int:
-    result = command.check_skill_load(Path(args.eng_dir), args.session_id, mandatory=True)
+    result = command.check_skill_load(state._eng_dir(args.eng_dir), args.session_id, mandatory=True)
     return _print_result(result)
 
 
@@ -70,7 +70,7 @@ def cmd_record_ptt(args: argparse.Namespace) -> int:
     from plugins.violin_guard.core import ptt
 
     ptt.update_task(
-        Path(args.eng_dir) / "state" / "ptt.md",
+        state._eng_dir(args.eng_dir) / "state" / "ptt.md",
         args.id,
         args.status,
         args.note or "",
@@ -129,7 +129,7 @@ def cmd_eng_root(args: argparse.Namespace) -> int:
     from plugins.violin_guard.core import state
 
     eng_dir = args.eng_dir_option or args.eng_dir
-    eng_root = state._eng_dir(eng_dir) if eng_dir else state._eng_dir("")
+    eng_root = state._eng_root()
     print(f"ENG_ROOT={eng_root}")
     if eng_dir:
         resolved = state._eng_dir(eng_dir)

@@ -9,11 +9,11 @@ valid phase, and a target that is in scope (audit P1-hyp).
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .phases import normalize_phase
 
@@ -36,19 +36,23 @@ LEGACY_ALIASES = {
 }
 ALL_STATES = CANONICAL_STATES + tuple(LEGACY_ALIASES.keys())
 
-_HYPOTHESIS_RE = re.compile(
-    r"^###\s+H-(?P<id>\d+)\s*:\s*(?P<title>[^\n]+)\n"
-    r"(?:- \*\*Status:\*\*\s*(?P<status>[^\n]+)\n)?"
-    r"(?:- \*\*Phase:\*\*\s*(?P<phase>[^\n]+)\n)?"
-    r"(?:- \*\*Service:\*\*\s*(?P<service>[^\n]+)\n)?"
-    r"(?:- \*\*Port:\*\*\s*(?P<port>[^\n]+)\n)?"
-    r"(?:- \*\*Target:\*\*\s*(?P<target>[^\n]+)\n)?"
-    r"(?:- \*\*Vuln Class:\*\*\s*(?P<vuln_class>[^\n]+)\n)?"
-    r"(?:- \*\*Rationale:\*\*\s*(?P<rationale>[^\n]+)\n)?"
-    r"(?:- \*\*Evidence:\*\*\s*(?P<evidence>[^\n]+)\n)?"
-    r"(?:- \*\*Updated:\*\*\s*(?P<updated>[^\n]+)\n)?",
-    re.MULTILINE,
-)
+_FIELD_NAMES = {
+    "status": "status",
+    "phase": "phase",
+    "service": "service",
+    "port": "port",
+    "target": "target",
+    "vuln class": "vuln_class",
+    "rationale": "rationale",
+    "evidence": "evidence",
+    "cve research": "cve_research",
+    "exploit research": "exploit_research",
+    "test command": "test_command",
+    "test response": "test_response",
+    "verification status": "verification_status",
+    "rejection reason": "rejection_reason",
+    "updated": "updated",
+}
 
 
 @dataclass
@@ -63,6 +67,12 @@ class Hypothesis:
     vuln_class: str = ""
     rationale: str = ""
     evidence: str = ""
+    cve_research: str = ""
+    exploit_research: str = ""
+    test_command: str = ""
+    test_response: str = ""
+    verification_status: str = ""
+    rejection_reason: str = ""
     updated: str = ""
 
     def canonical_status(self) -> str:
@@ -80,6 +90,12 @@ class Hypothesis:
             "vuln_class": self.vuln_class,
             "rationale": self.rationale,
             "evidence": self.evidence,
+            "cve_research": self.cve_research,
+            "exploit_research": self.exploit_research,
+            "test_command": self.test_command,
+            "test_response": self.test_response,
+            "verification_status": self.verification_status,
+            "rejection_reason": self.rejection_reason,
             "updated": self.updated,
         }
 
@@ -101,6 +117,18 @@ class Hypothesis:
             lines.append(f"- **Rationale:** {self.rationale}")
         if self.evidence:
             lines.append(f"- **Evidence:** {self.evidence}")
+        if self.cve_research:
+            lines.append(f"- **CVE Research:** {self.cve_research}")
+        if self.exploit_research:
+            lines.append(f"- **Exploit Research:** {self.exploit_research}")
+        if self.test_command:
+            lines.append(f"- **Test Command:** {self.test_command}")
+        if self.test_response:
+            lines.append(f"- **Test Response:** {self.test_response}")
+        if self.verification_status:
+            lines.append(f"- **Verification Status:** {self.verification_status}")
+        if self.rejection_reason:
+            lines.append(f"- **Rejection Reason:** {self.rejection_reason}")
         lines.append(f"- **Updated:** {self.updated or now} UTC")
         return "\n".join(lines) + "\n"
 
@@ -129,34 +157,81 @@ def _normalize_status(status: str) -> str:
     return LEGACY_ALIASES.get(status.strip(), status.strip())
 
 
-def parse_hypotheses(path: Path) -> list[Hypothesis]:
-    """Parse hypotheses.md into a list of Hypothesis objects.
+def _normalise_id(value: Any) -> str:
+    """Accept user-facing H-001 forms but persist the canonical numeric ID."""
 
-    HTML comments (e.g. template instructions wrapped in ``<!-- ... -->``) are
-    stripped before parsing so placeholder examples in templates are never
-    mistaken for real hypotheses.
-    """
+    normalized = str(value or "").strip()
+    while normalized.upper().startswith("H-"):
+        normalized = normalized[2:].strip()
+    if not normalized:
+        return ""
+    if not normalized.isdigit():
+        raise ValueError("hypothesis id must be numeric or in the form H-001")
+    return normalized.zfill(3)
+
+
+def _normalise_target(value: str) -> str:
+    """Compare URL and host:port hypothesis targets against scoped hosts."""
+
+    raw = value.strip().lower()
+    if not raw:
+        return ""
+    parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+    return parsed.hostname.lower() if parsed.hostname else raw
+
+
+def parse_hypotheses(path: Path) -> list[Hypothesis]:
+    """Parse hypothesis headings and recognised fields in any field order."""
     if not path.exists():
         return []
-    content = path.read_text(encoding="utf-8")
-    content = re.sub(r"<!--.*?-->", "", content, flags=re.DOTALL)
-    hypotheses = []
-    for match in _HYPOTHESIS_RE.finditer(content):
-        h = Hypothesis(
-            id=match.group("id"),
-            title=match.group("title").strip(),
-            status=_normalize_status(match.group("status") or "Candidate"),
-            phase=(match.group("phase") or "").strip(),
-            service=(match.group("service") or "").strip(),
-            port=(match.group("port") or "").strip(),
-            target=(match.group("target") or "").strip(),
-            vuln_class=(match.group("vuln_class") or "").strip(),
-            rationale=(match.group("rationale") or "").strip(),
-            evidence=(match.group("evidence") or "").strip(),
-            updated=(match.group("updated") or "").strip(),
+    records: list[Hypothesis] = []
+    current: Hypothesis | None = None
+    in_comment = False
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if "<!--" in line:
+            in_comment = True
+        if in_comment:
+            if "-->" in line:
+                in_comment = False
+            continue
+        heading = _parse_heading(line)
+        if heading:
+            if current:
+                records.append(current)
+            current = heading
+            continue
+        if current:
+            _apply_field(current, line)
+    if current:
+        records.append(current)
+    return records
+
+
+def _parse_heading(line: str) -> Hypothesis | None:
+    if not line.startswith("### H-"):
+        return None
+    identifier, separator, title = line.removeprefix("### H-").partition(":")
+    if not separator or not identifier.strip().isdigit() or not title.strip():
+        return None
+    return Hypothesis(id=identifier.strip(), title=title.strip())
+
+
+def _apply_field(hypothesis: Hypothesis, line: str) -> None:
+    if not line.startswith("- **"):
+        return
+    label, separator, value = line.removeprefix("- **").partition(":")
+    if not separator:
+        return
+    label = label.removesuffix("**")
+    value = value.removeprefix("**")
+    field = _FIELD_NAMES.get(label.strip().lower())
+    if field:
+        setattr(
+            hypothesis,
+            field,
+            _normalize_status(value.strip()) if field == "status" else value.strip(),
         )
-        hypotheses.append(h)
-    return hypotheses
 
 
 def validate_hypotheses(hypotheses: list[Hypothesis]) -> HypothesisValidationResult:
@@ -173,7 +248,28 @@ def validate_hypotheses(hypotheses: list[Hypothesis]) -> HypothesisValidationRes
             result.add_error(f"H-{h.id}: missing title")
         if not h.service and not h.port:
             result.add_warning(f"H-{h.id}: missing service and port")
+        for error in _validate_rejection_fields(h.to_dict()):
+            result.add_error(f"H-{h.id}: {error}")
     return result
+
+
+def _validate_rejection_fields(fields: dict[str, Any]) -> list[str]:
+    """Keep uncertain or undocumented failures from becoming permanent rejections."""
+
+    if _normalize_status(str(fields.get("status") or "Candidate")) != "Rejected":
+        return []
+
+    errors: list[str] = []
+    verification_status = str(fields.get("verification_status") or "").strip()
+    if verification_status not in {"syntax_confirmed", "not_implemented"}:
+        errors.append(
+            "Rejected requires verification_status syntax_confirmed or not_implemented; "
+            "syntax_uncertain/not_tested must remain active for re-test"
+        )
+    for field_name in ("test_command", "test_response", "rejection_reason"):
+        if not str(fields.get(field_name) or "").strip():
+            errors.append(f"Rejected requires {field_name}")
+    return errors
 
 
 def find_by_service_port(
@@ -210,11 +306,13 @@ def validate_hypothesis_record(
             normalize_phase(fields["phase"])
         except ValueError:
             errors.append(f"unknown phase '{fields['phase']}'")
-    target = (fields.get("target") or "").strip().lower()
-    if target and in_scope_hosts is not None and target not in in_scope_hosts:
+    target = _normalise_target((fields.get("target") or "").strip())
+    normalised_scope = {_normalise_target(host) for host in in_scope_hosts or set()}
+    if target and in_scope_hosts is not None and target not in normalised_scope:
         errors.append(
             f"target '{target}' is not in scope; record a hypothesis only for in-scope hosts"
         )
+    errors.extend(_validate_rejection_fields(fields))
     return errors
 
 
@@ -230,19 +328,27 @@ def update_hypothesis(
     threaded into ``validate_hypothesis_record`` so an out-of-scope target is
     rejected fail-closed instead of being written to the board.
     """
+    normalized_fields = dict(fields)
+    normalized_fields["id"] = _normalise_id(fields.get("id"))
     # Build the candidate record so we can validate before mutating the board.
     temp = Hypothesis(
-        id=str(fields.get("id", "")).strip(),
-        title=fields.get("title", "") or f"Hypothesis {fields.get('id', '')}",
-        status=(fields.get("status") or "Candidate"),
-        phase=(fields.get("phase") or "").strip(),
-        service=(fields.get("service") or "").strip(),
-        port=(fields.get("port") or "").strip(),
-        target=(fields.get("target") or "").strip(),
-        vuln_class=(fields.get("vuln_class") or "").strip(),
-        rationale=(fields.get("rationale") or "").strip(),
-        evidence=(fields.get("evidence") or "").strip(),
-        updated=(fields.get("updated") or "").strip(),
+        id=normalized_fields["id"],
+        title=normalized_fields.get("title", "") or f"Hypothesis {normalized_fields['id']}",
+        status=(normalized_fields.get("status") or "Candidate"),
+        phase=(normalized_fields.get("phase") or "").strip(),
+        service=(normalized_fields.get("service") or "").strip(),
+        port=(normalized_fields.get("port") or "").strip(),
+        target=(normalized_fields.get("target") or "").strip(),
+        vuln_class=(normalized_fields.get("vuln_class") or "").strip(),
+        rationale=(normalized_fields.get("rationale") or "").strip(),
+        evidence=(normalized_fields.get("evidence") or "").strip(),
+        cve_research=(normalized_fields.get("cve_research") or "").strip(),
+        exploit_research=(normalized_fields.get("exploit_research") or "").strip(),
+        test_command=(normalized_fields.get("test_command") or "").strip(),
+        test_response=(normalized_fields.get("test_response") or "").strip(),
+        verification_status=(normalized_fields.get("verification_status") or "").strip(),
+        rejection_reason=(normalized_fields.get("rejection_reason") or "").strip(),
+        updated=(normalized_fields.get("updated") or "").strip(),
     )
     errors = validate_hypothesis_record(temp.to_dict(), in_scope_hosts=in_scope_hosts)
     if errors:
@@ -266,7 +372,7 @@ def update_hypothesis(
         hypotheses.append(target)
 
     # Update fields
-    for key, value in fields.items():
+    for key, value in normalized_fields.items():
         if key == "id":
             continue
         if hasattr(target, key):
@@ -284,6 +390,14 @@ def _rewrite_hypotheses(path: Path, hypotheses: list[Hypothesis]) -> None:
     """Rewrite the entire hypotheses file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
+    # Template instructions are an HTML comment containing an example H-001
+    # heading. Remove that comment before locating real records, otherwise a
+    # newly written hypothesis is accidentally placed inside the comment.
+    comment_start = template.find("<!--")
+    if comment_start != -1:
+        comment_end = template.find("-->", comment_start)
+        if comment_end != -1:
+            template = template[:comment_start] + template[comment_end + 3 :]
     # Keep any header content before first hypothesis
     header_end = template.find("### H-")
     if header_end == -1:

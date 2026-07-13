@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plugins.violin_guard.core.command import check_scope_targets, validate_scope
+from plugins.violin_guard.core.command import validate_scope
+from plugins.violin_guard.core.targets import check_scope_targets
 
 
 def _write_scope(path: Path, *, confirmed: bool = True) -> None:
