@@ -151,6 +151,7 @@ def execute(
     cwd: str = "",
     label: str = "",
     docker_container: str = "kali-pentest",
+    ptt_task_id: str = "",
 ) -> dict[str, Any]:
     """Execute one already-authorized command and persist its complete receipt."""
     engagement = _resolve_engagement(eng_dir)
@@ -266,7 +267,7 @@ def execute(
     if state.is_local_bookkeeping_command(command):
         remaining = state.sync_credit_remaining(str(engagement))
     else:
-        remaining = _commit_guard_state(engagement, command, phase)
+        remaining = _commit_guard_state(engagement, command, phase, ptt_task_id)
 
     return {
         **receipt,
@@ -278,10 +279,10 @@ def execute(
     }
 
 
-def _commit_guard_state(eng_dir: Path, command: str, phase: str) -> int:
+def _commit_guard_state(eng_dir: Path, command: str, phase: str, ptt_task_id: str = "") -> int:
     state.record_ok_check(str(eng_dir), command, phase)
     remaining = state.spend_sync_credit(str(eng_dir))
-    state.mark_pending_sync(str(eng_dir), command, phase)
+    state.mark_pending_sync(str(eng_dir), command, phase, ptt_task_id)
     count = state.tick_command(str(eng_dir))
     from .phases import suppresses_heartbeat
 

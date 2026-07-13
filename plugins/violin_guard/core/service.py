@@ -52,11 +52,20 @@ def handle_record_ptt(a, **kwargs):
         if not task or not note:
             raise ValueError("task id and non-empty review note required")
         # 1. reviewed ID must match the active [~] task — never review a different row
+        validation = ptt.validate_ptt(doc)
+        if validation.errors:
+            raise ValueError("PTT must have exactly one valid active task before review")
         active = ptt.find_active_task(doc)
-        if active and active.id != task:
+        captured_task = pending.get("ptt_task_id")
+        if not captured_task:
             raise ValueError(
-                f"reviewed task {task!r} is not the active task ({active.id!r}); "
-                "resolve the active task first"
+                "pending batch has no captured PTT task; refusing legacy self-certification"
+            )
+        if task != captured_task:
+            raise ValueError(f"reviewed task {task!r} does not match batch task {captured_task!r}")
+        if not active or active.id != captured_task:
+            raise ValueError(
+                f"reviewed task {task!r} is not the active task; resolve the active task first"
             )
         # 2. the batch id must be carried in the note — proves this review belongs to this batch
         batch_id = pending.get("batch_id")
@@ -131,6 +140,11 @@ def handle_sync_done(a, **kwargs):
             return _json("ok", message="nothing pending")
         if not p.get("ptt_reviewed"):
             return _json("review", error="explicit PTT review required")
+        for item in p.get("commands") or []:
+            if not state.history_contains(a["eng_dir"], item.get("command", "")):
+                return _json(
+                    "review", error="all pending commands must exist in exact history before sync"
+                )
         state.clear_pending_sync(a["eng_dir"])
         return _json("ok", batch_id=p.get("batch_id"))
     except Exception as e:
@@ -156,6 +170,7 @@ def handle_exec(a, **kwargs):
         )
         return _json(status, executed=False, **gate)
     try:
+        active_task = ptt.find_active_task(ptt.parse_ptt(Path(a["eng_dir"]) / "state" / "ptt.md"))
         r = execution.execute(
             command=a["command"],
             eng_dir=a["eng_dir"],
@@ -164,6 +179,7 @@ def handle_exec(a, **kwargs):
             timeout_seconds=a.get("timeout_seconds", 180),
             cwd=a.get("cwd", ""),
             label=a.get("label", ""),
+            ptt_task_id=active_task.id if active_task else "",
         )
         r.pop("status", None)
         return _json("ok", **r)
@@ -271,6 +287,11 @@ def handle_exec_burst(a, **kwargs):
                 timeout_seconds=timeout_seconds,
                 cwd=cwd,
                 label=label,
+                ptt_task_id=(
+                    ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md")).id
+                    if ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
+                    else ""
+                ),
             )
             r.pop("status", None)
             entry = {"index": idx + 1, "command": cmd, **r}

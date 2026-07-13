@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from plugins.violin_guard import tools  # noqa: E402
-from plugins.violin_guard.core import bootstrap, execution, service, state  # noqa: E402
+from plugins.violin_guard.core import bootstrap, execution, ptt, service, state  # noqa: E402
 
 _SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
@@ -127,7 +127,10 @@ def _patch_burst(monkeypatch, eng_dir):
 
     def fake_execute(command, *, eng_dir=eng_dir, phase, **kwargs):
         rec["commands"].append(command)
-        remaining = execution._commit_guard_state(Path(eng_dir), command, phase)
+        active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
+        remaining = execution._commit_guard_state(
+            Path(eng_dir), command, phase, active.id if active else ""
+        )
         rec["batch_id"] = state.get_pending_sync(eng_dir)
         return {
             "execution_id": "00000000-0000-0000-0000-000000000001",
