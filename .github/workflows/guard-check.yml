@@ -27,7 +27,7 @@ jobs:
           "
       - name: Count playbooks
         run: |
-          count=$(ls -1 skills/pentest/playbooks/*.md | wc -l)
+          count=$(find skills -type f -path '*/playbooks/*.md' | wc -l)
           echo "Playbooks: $count"
           test "$count" -eq 31
       - name: Check for stale artifacts
