@@ -23,8 +23,8 @@ def _result(r):
     return {"errors": r.errors, "warnings": r.warnings, "infos": r.infos}
 
 
-def handle_check_command(a, **kwargs):
-    r = command.check_command(
+def _check_command_internal(a) -> command.CheckResult:
+    return command.check_command(
         command.CheckCommandArgs(
             command=a.get("command", ""),
             phase=a.get("phase", ""),
@@ -35,9 +35,12 @@ def handle_check_command(a, **kwargs):
             skill_loaded_file=a.get("skill_loaded_file"),
         )
     )
-    return _json(
-        "ok" if r.exit_code() == 0 else "review" if r.exit_code() == 2 else "block", **_result(r)
-    )
+
+
+def handle_check_command(a, **kwargs):
+    r = _check_command_internal(a)
+    status_name = "ok" if r.exit_code() == 0 else "review" if r.exit_code() == 2 else "block"
+    return _json(status_name, **_result(r))
 
 
 def handle_record_ptt(a, **kwargs):
@@ -276,23 +279,25 @@ def handle_heartbeat_done(a, **kwargs):
 
 
 def handle_exec(a, **kwargs):
-    gate = json.loads(handle_check_command(a))
-    if gate["status"] not in ("ok",) and not (
-        gate["status"] == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
+    r = _check_command_internal(a)
+    exit_code = r.exit_code()
+    status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
+    if status_name not in ("ok",) and not (
+        status_name == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
     ):
         status = (
             "sync_required"
             if any(
-                "sync-credit" in str(x) or "not synced" in str(x) for x in gate.get("errors", [])
+                "sync-credit" in str(x) or "not synced" in str(x) for x in r.errors
             )
             else "denied"
         )
-        return _json(status, executed=False, **gate)
+        return _json(status, executed=False, **_result(r))
     try:
         active_task = ptt.find_active_task(
             ptt.parse_ptt(_eng_path(a["eng_dir"]) / "state" / "ptt.md")
         )
-        r = execution.execute(
+        res = execution.execute(
             command=a["command"],
             eng_dir=a["eng_dir"],
             phase=a["phase"],
@@ -304,8 +309,8 @@ def handle_exec(a, **kwargs):
             argv=a.get("_argv"),
             background=bool(a.get("background", False)),
         )
-        r.pop("status", None)
-        return _json("ok", **r)
+        res.pop("status", None)
+        return _json("ok", **res)
     except Exception as e:
         return _json("execution_failed", error=str(e), executed=False)
 
@@ -356,24 +361,22 @@ def handle_exec_burst(a, **kwargs):
     active_task = ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md"))
     active_task_id = active_task.id if active_task else ""
 
-
     results = []
     executed = 0
     for idx, cmd in enumerate(cmds):
-        gate = json.loads(
-            handle_check_command(
-                {
-                    "command": cmd,
-                    "phase": phase,
-                    "eng_dir": eng_dir,
-                    "scope": scope,
-                    "session_id": session_id,
-                    "skill_loaded_file": skill_loaded_file,
-                    "target": a.get("target"),
-                }
-            )
-        )
-        if gate["status"] == "block":
+        cmd_args = {
+            "command": cmd,
+            "phase": phase,
+            "eng_dir": eng_dir,
+            "scope": scope,
+            "session_id": session_id,
+            "skill_loaded_file": skill_loaded_file,
+            "target": a.get("target"),
+        }
+        r = _check_command_internal(cmd_args)
+        exit_code = r.exit_code()
+        status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
+        if status_name == "block":
             # Hard block — never continue; halt the batch fail-closed.
             return _json(
                 "denied",
@@ -384,12 +387,12 @@ def handle_exec_burst(a, **kwargs):
                         "index": idx + 1,
                         "command": cmd,
                         "status": "blocked",
-                        "errors": gate.get("errors", []),
+                        "errors": r.errors,
                     }
                 ],
-                reason=f"command [{idx + 1}] blocked: {gate.get('errors', ['blocked'])[0]}",
+                reason=f"command [{idx + 1}] blocked: {r.errors[0] if r.errors else 'blocked'}",
             )
-        if gate["status"] == "review" and os.environ.get("HERMES_YOLO_MODE") != "1":
+        if status_name == "review" and os.environ.get("HERMES_YOLO_MODE") != "1":
             # Soft review blocks unless yolo overrides; also halts the batch.
             return _json(
                 "denied",
@@ -400,13 +403,13 @@ def handle_exec_burst(a, **kwargs):
                         "index": idx + 1,
                         "command": cmd,
                         "status": "review_required",
-                        "warnings": gate.get("warnings", []),
+                        "warnings": r.warnings,
                     }
                 ],
                 reason=f"command [{idx + 1}] requires review before execution",
             )
         try:
-            r = execution.execute(
+            res = execution.execute(
                 command=cmd,
                 eng_dir=eng_dir,
                 phase=phase,
@@ -416,13 +419,13 @@ def handle_exec_burst(a, **kwargs):
                 label=label,
                 ptt_task_id=active_task_id,
             )
-            r.pop("status", None)
-            entry = {"index": idx + 1, "command": cmd, **r}
+            res.pop("status", None)
+            entry = {"index": idx + 1, "command": cmd, **res}
             results.append(entry)
-            if r.get("executed"):
+            if res.get("executed"):
                 executed += 1
             # A target command that ran but failed: honor continue_on_error.
-            if r.get("exit_code", 0) != 0 and not continue_on_error:
+            if res.get("exit_code", 0) != 0 and not continue_on_error:
                 break
         except Exception as e:  # noqa: BLE001 - executor error must not abort silently
             if not continue_on_error:

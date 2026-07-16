@@ -5,24 +5,21 @@ Pure functions with atomic, cross-process-locked file operations. No subprocess 
 
 from __future__ import annotations
 
-import contextlib
-import json
 import os
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-try:  # POSIX
-    import fcntl
-except ImportError:  # Windows
-    fcntl = None
-try:  # Windows
-    import msvcrt
-except ImportError:  # POSIX
-    msvcrt = None
-
-from .phases import Phase
+from .phases import suppresses_heartbeat
+from .storage import (
+    lock_file as _lock_file,
+)
+from .storage import (
+    mutate_json as _mutate_json,
+)
+from .storage import (
+    read_json as _read_json,
+)
 
 # Constants
 DEFAULT_SYNC_CREDIT = 5
@@ -74,102 +71,6 @@ def _state_dir(eng_dir: str | Path) -> Path:
     p = _eng_dir(eng_dir) / _STATE_DIR
     p.mkdir(parents=True, exist_ok=True)
     return p
-
-
-def _lock_file(path: Path):
-    """Acquire an exclusive advisory lock for the duration of a ``with`` block.
-
-    Uses ``fcntl`` on POSIX and ``msvcrt`` on Windows. The lock is held on the
-    target file's directory lockfile (named ``<file>.lock``) so concurrent
-    processes serialise writes without racing on the temp swap.
-    """
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # ``msvcrt.locking`` locks bytes, so the file must contain at least one.
-    # Opening in binary append mode also avoids truncating a lock file another
-    # process has already opened.
-    fh = open(lock_path, "a+b")  # noqa: SIM115 - closed in _FileLock
-    if msvcrt is not None:
-        fh.seek(0, 2)
-        if fh.tell() == 0:
-            fh.write(b"0")
-            fh.flush()
-        fh.seek(0)
-    if fcntl is not None:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            # Blocking fallback: wait for the lock to free.
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-    elif msvcrt is not None:
-        # msvcrt has no non-blocking mode; retry briefly.
-        deadline = time.monotonic() + 5.0
-        while True:
-            try:
-                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                break
-            except OSError as exc:
-                if time.monotonic() >= deadline:
-                    fh.close()
-                    raise TimeoutError(f"timed out acquiring state lock: {lock_path}") from exc
-                time.sleep(0.05)
-    return _FileLock(fh)
-
-
-class _FileLock:
-    def __init__(self, fh):
-        self._fh = fh
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        if self._fh is None:
-            return False
-        try:
-            if fcntl is not None:
-                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
-            elif msvcrt is not None:
-                with contextlib.suppress(OSError):
-                    msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
-        finally:
-            self._fh.close()
-        return False
-
-
-def _atomic_write_locked(path: Path, data: dict[str, Any]) -> None:
-    """Write JSON atomically while the caller holds ``path``'s lock."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
-
-
-def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    """Atomic JSON write using tmp + os.replace, guarded by an advisory lock."""
-    with _lock_file(path):
-        _atomic_write_locked(path, data)
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _mutate_json(path: Path, mutation):
-    """Apply ``mutation`` to one state document under a single file lock.
-
-    Every state transition must read, modify and replace the document while
-    holding the same lock. Locking only the final replace loses updates under
-    concurrent tool calls.
-    """
-    with _lock_file(path):
-        data = _read_json(path)
-        result = mutation(data)
-        _atomic_write_locked(path, data)
-        return result
 
 
 # --------------------------------------------------------------------------- #
@@ -473,11 +374,6 @@ def artifacts_are_fresh(eng_dir: str | Path) -> bool:
         _eng_dir(eng_dir) / "state" / "history.md",
     ]
     return all(p.exists() for p in paths)
-
-
-def suppresses_heartbeat(phase: Phase) -> bool:
-    """Return True for phases that suppress heartbeat (EXPLOITATION, POST_EXPLOITATION)."""
-    return phase in (Phase.EXPLOITATION, Phase.POST_EXPLOITATION)
 
 
 __all__ = [

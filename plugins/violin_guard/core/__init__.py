@@ -18,6 +18,7 @@ from . import (
     results,
     service,
     state,
+    storage,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "results",
     "service",
     "state",
+    "storage",
 ]

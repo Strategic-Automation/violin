@@ -258,6 +258,7 @@ def validate_plugin_structure() -> StructureResult:
             "adapters.py",
             "bootstrap.py",
             "release.py",
+            "storage.py",
         ]
         for mod in core_modules:
             if (core_dir / mod).exists():

@@ -6,7 +6,6 @@ This is the ONLY module in core/ that uses subprocess. All others are pure.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import re
 import shutil
@@ -21,6 +20,8 @@ from typing import Any
 
 from . import state
 from .phases import normalize_phase
+from .storage import atomic_json as _atomic_json
+from .storage import read_json as _read_json
 
 __all__ = [
     "execute",
@@ -45,20 +46,6 @@ DOCKER_CONTAINER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _atomic_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
 
 
 def _resolve_engagement(eng_dir: str) -> Path:
