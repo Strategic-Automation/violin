@@ -152,7 +152,7 @@ Store in `$ENG_DIR/evidence/exploitation/path-traversal/` with a descriptive fil
 || **Application firewall** | Block path-traversal patterns at the WAF / reverse proxy level |
 
 ## Stop Conditions
-- Generic baseline — see `references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
+- Generic baseline — see `skills/pentest/references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
 
 ## Blocked Actions
 - **Do NOT** read or store sensitive configuration files containing secrets (e.g., `.env`, `config/database.yml`, `wp-config.php`, `web.config` with connection strings)

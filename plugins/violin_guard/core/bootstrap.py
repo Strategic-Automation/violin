@@ -155,6 +155,7 @@ def _ctf_ptt(host: str) -> str:
 def _ctf_scope(host: str) -> dict:
     return {
         "targets": {"ip_addresses": [host], "in_scope_urls": []},
+        "assessment_hosts": {"callback_hosts": []},
         "authorized_parties": ["lab owner (user)"],
         "rules_of_engagement": {
             "allowed_actions": [

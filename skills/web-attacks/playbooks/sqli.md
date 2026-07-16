@@ -103,6 +103,18 @@ print(f"Extracted: {extracted}")
 | **arjun** | `arjun -u '<url>' --get` | Parameter discovery |
 | **curl** | Manual payload injection | For fine-grained testing |
 
+### Virtual hosts without `/etc/hosts`
+
+When an authorised vhost does not resolve locally, connect to the in-scope IP and
+send the vhost in the request instead of editing host networking:
+
+```bash
+sqlmap -u 'http://<in-scope-ip>/<path>?<parameter>=<value>' \
+  -H 'Host: <authorised-vhost>' --batch --risk=1 --level=1
+```
+
+Save the captured request or exact working invocation as exploitation evidence.
+
 > ⚠️ **BLOCKED sqlmap flags:** `--dump` (data exfiltration), `--os-shell`, `--file-write`, `--file-read` (unless explicitly authorized).
 
 ---

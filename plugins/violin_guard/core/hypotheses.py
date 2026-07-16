@@ -9,13 +9,14 @@ valid phase, and a target that is in scope (audit P1-hyp).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from .phases import normalize_phase
+from .targets import normalise_target
 
 __all__ = [
     "Hypothesis",
@@ -170,16 +171,6 @@ def _normalise_id(value: Any) -> str:
     return normalized.zfill(3)
 
 
-def _normalise_target(value: str) -> str:
-    """Compare URL and host:port hypothesis targets against scoped hosts."""
-
-    raw = value.strip().lower()
-    if not raw:
-        return ""
-    parsed = urlsplit(raw if "://" in raw else f"//{raw}")
-    return parsed.hostname.lower() if parsed.hostname else raw
-
-
 def parse_hypotheses(path: Path) -> list[Hypothesis]:
     """Parse hypothesis headings and recognised fields in any field order."""
     if not path.exists():
@@ -306,8 +297,13 @@ def validate_hypothesis_record(
             normalize_phase(fields["phase"])
         except ValueError:
             errors.append(f"unknown phase '{fields['phase']}'")
-    target = _normalise_target((fields.get("target") or "").strip())
-    normalised_scope = {_normalise_target(host) for host in in_scope_hosts or set()}
+    raw_target = (fields.get("target") or "").strip()
+    if re.search(r"\s+\(", raw_target):
+        errors.append(
+            "target must contain only a host/IP/URL; move paths or descriptions to rationale"
+        )
+    target = normalise_target(raw_target)
+    normalised_scope = {normalise_target(host) for host in in_scope_hosts or set()}
     if target and in_scope_hosts is not None and target not in normalised_scope:
         errors.append(
             f"target '{target}' is not in scope; record a hypothesis only for in-scope hosts"

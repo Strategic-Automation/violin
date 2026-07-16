@@ -10,6 +10,7 @@ provides_tools:
   - violin_exec_status
   - violin_exec_cancel
   - violin_sync_done
+  - violin_rebind_pending_batch
   - violin_heartbeat_done
   - violin_exec_burst
   - violin_target
@@ -19,6 +20,7 @@ provides_tools:
   - violin_httpx
   - violin_nuclei
   - violin_ffuf
+  - violin_listener
 hooks:
   - pre_llm_call
   - on_session_reset

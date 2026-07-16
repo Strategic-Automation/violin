@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 
-from . import command, execution, hypotheses, ptt, state
+from . import command, execution, hypotheses, ptt, state, targets
+from .adapters import search_exploit
 
 
 def _eng_path(eng_dir: str) -> Path:
     return state._eng_dir(eng_dir)
-
-
-from .adapters import search_exploit
 
 
 def _json(status_name, **payload):
@@ -29,12 +26,13 @@ def _result(r):
 def handle_check_command(a, **kwargs):
     r = command.check_command(
         command.CheckCommandArgs(
-            a.get("command", ""),
-            a.get("phase", ""),
-            a.get("eng_dir", ""),
-            a.get("scope", ""),
-            a.get("session_id"),
-            a.get("skill_loaded_file"),
+            command=a.get("command", ""),
+            phase=a.get("phase", ""),
+            eng_dir=a.get("eng_dir", ""),
+            scope=a.get("scope", ""),
+            target=a.get("target"),
+            session_id=a.get("session_id"),
+            skill_loaded_file=a.get("skill_loaded_file"),
         )
     )
     return _json(
@@ -147,17 +145,7 @@ def _scope_hosts(eng_dir: str) -> set[str] | None:
         data = yaml.safe_load(scope_path.read_text(encoding="utf-8")) or {}
     except Exception:
         return None
-    targets = data.get("targets", {}) or {}
-    allowed: set[str] = set()
-    for ip in targets.get("ip_addresses", []) or []:
-        allowed.add(str(ip).lower())
-    for url in targets.get("in_scope_urls", []) or []:
-        m = re.match(r"https?://([^\s/]+)", str(url))
-        if m:
-            allowed.add(m.group(1).lower())
-    for h in targets.get("hostnames", []) or []:
-        allowed.add(str(h).lower())
-    return allowed or None
+    return targets.scope_hosts(data) or None
 
 
 def handle_sync_done(a, **kwargs):
@@ -174,6 +162,110 @@ def handle_sync_done(a, **kwargs):
                 )
         state.clear_pending_sync(a["eng_dir"])
         return _json("ok", batch_id=p.get("batch_id"))
+    except Exception as e:
+        return _json("error", error=str(e))
+
+
+def _rebind_fields(a) -> tuple[str, str, str, str, str]:
+    if a.get("confirm") is not True:
+        raise ValueError("explicit confirm=true is required to rebind a pending batch")
+    values = tuple(
+        str(a.get(key) or "").strip()
+        for key in ("eng_dir", "batch_id", "current_task_id", "replacement_task_id", "note")
+    )
+    if not all(values):
+        raise ValueError(
+            "eng_dir, batch_id, current_task_id, replacement_task_id, and note are required"
+        )
+    return values
+
+
+def _validate_pending_identity(pending: dict, batch_id: str, current_task_id: str) -> None:
+    actual_batch_id = str(pending.get("batch_id") or "")
+    if actual_batch_id != batch_id:
+        raise ValueError(
+            f"stale batch id {batch_id!r}; current pending batch is {actual_batch_id!r}"
+        )
+    captured_task_id = str(pending.get("ptt_task_id") or "")
+    if captured_task_id != current_task_id:
+        raise ValueError(
+            f"current task {current_task_id!r} does not match batch task {captured_task_id!r}"
+        )
+
+
+def _validate_pending_history(eng_dir: str, pending: dict) -> None:
+    missing = next(
+        (
+            str(item.get("command") or "")
+            for item in pending.get("commands") or []
+            if item.get("command") and not state.history_contains(eng_dir, str(item.get("command")))
+        ),
+        "",
+    )
+    if missing:
+        raise ValueError(
+            f"pending command not yet in exact history: {missing!r}; "
+            "wait for the batch to finish before rebinding"
+        )
+
+
+def _validated_replacement_task(
+    eng_dir: str, pending: dict, current_task_id: str, replacement_task_id: str
+):
+    tasks = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
+    if ptt.validate_ptt(tasks).errors:
+        raise ValueError("PTT must have exactly one valid active task before rebinding")
+    by_id = {task.id: task for task in tasks}
+    if current_task_id not in by_id:
+        raise ValueError(f"current batch task {current_task_id!r} is missing from the PTT")
+    replacement = by_id.get(replacement_task_id)
+    if replacement is None:
+        raise ValueError(f"replacement task {replacement_task_id!r} is missing from the PTT")
+    active = ptt.find_active_task(tasks)
+    if active is None or active.id != replacement_task_id:
+        raise ValueError(
+            f"replacement task {replacement_task_id!r} must be the sole active [~] task"
+        )
+    phases = {
+        str(item.get("phase") or pending.get("phase") or "")
+        for item in pending.get("commands") or []
+    } - {""}
+    incompatible = sorted(
+        phase for phase in phases if not ptt.task_matches_phase(replacement, phase)
+    )
+    if incompatible:
+        raise ValueError(
+            f"replacement task {replacement_task_id!r} is not phase-compatible with "
+            + ", ".join(incompatible)
+        )
+    return replacement
+
+
+def handle_rebind_pending_batch(a, **kwargs):
+    """Explicitly move a completed pending batch to another active PTT task."""
+
+    try:
+        eng_dir, batch_id, current_task_id, replacement_task_id, note = _rebind_fields(a)
+        pending = state.get_pending_sync(eng_dir)
+        if not pending:
+            raise ValueError("no pending execution batch")
+        _validate_pending_identity(pending, batch_id, current_task_id)
+        _validate_pending_history(eng_dir, pending)
+        _validated_replacement_task(eng_dir, pending, current_task_id, replacement_task_id)
+        audit = state.rebind_pending_sync(
+            eng_dir,
+            expected_batch_id=batch_id,
+            current_task_id=current_task_id,
+            replacement_task_id=replacement_task_id,
+            note=note,
+        )
+        return _json(
+            "ok",
+            batch_id=batch_id,
+            ptt_task_id=replacement_task_id,
+            ptt_reviewed=False,
+            audit=audit,
+        )
     except Exception as e:
         return _json("error", error=str(e))
 
@@ -209,6 +301,8 @@ def handle_exec(a, **kwargs):
             cwd=a.get("cwd", ""),
             label=a.get("label", ""),
             ptt_task_id=active_task.id if active_task else "",
+            argv=a.get("_argv"),
+            background=bool(a.get("background", False)),
         )
         r.pop("status", None)
         return _json("ok", **r)
@@ -272,6 +366,7 @@ def handle_exec_burst(a, **kwargs):
                     "scope": scope,
                     "session_id": session_id,
                     "skill_loaded_file": skill_loaded_file,
+                    "target": a.get("target"),
                 }
             )
         )

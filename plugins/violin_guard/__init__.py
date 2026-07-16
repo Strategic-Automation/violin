@@ -30,6 +30,7 @@ REGISTERED_TOOLS = [
     "violin_exec_status",
     "violin_exec_cancel",
     "violin_sync_done",
+    "violin_rebind_pending_batch",
     "violin_heartbeat_done",
     "violin_exec_burst",
     "violin_target",
@@ -39,12 +40,13 @@ REGISTERED_TOOLS = [
     "violin_httpx",
     "violin_nuclei",
     "violin_ffuf",
+    "violin_listener",
 ]
 
 
 def register(ctx) -> None:
     """Called once by the plugin loader during discovery."""
-    # Register all 16 model-visible tools
+    # Register all model-visible tools
     for name, schema, handler, emoji in (
         ("violin_check_command", schemas.CHECK_COMMAND_SCHEMA, tools.handle_check_command, "🛡️"),
         ("violin_record_ptt", schemas.RECORD_PTT_SCHEMA, tools.handle_record_ptt, "📝"),
@@ -58,6 +60,12 @@ def register(ctx) -> None:
         ("violin_exec_status", schemas.EXEC_STATUS_SCHEMA, tools.handle_exec_status, "i"),
         ("violin_exec_cancel", schemas.EXEC_CANCEL_SCHEMA, tools.handle_exec_cancel, "x"),
         ("violin_sync_done", schemas.SYNC_DONE_SCHEMA, tools.handle_sync_done, "✅"),
+        (
+            "violin_rebind_pending_batch",
+            schemas.REBIND_PENDING_BATCH_SCHEMA,
+            tools.handle_rebind_pending_batch,
+            "↔",
+        ),
         ("violin_heartbeat_done", schemas.HEARTBEAT_DONE_SCHEMA, tools.handle_heartbeat_done, "💓"),
         ("violin_exec_burst", schemas.EXEC_BURST_SCHEMA, tools.handle_exec_burst, "🚀"),
         ("violin_target", schemas.TARGET_SCHEMA, tools.handle_target, "🎯"),
@@ -67,6 +75,7 @@ def register(ctx) -> None:
         ("violin_httpx", schemas.HTTPX_SCHEMA, tools.handle_httpx, "H"),
         ("violin_nuclei", schemas.NUCLEI_SCHEMA, tools.handle_nuclei, "V"),
         ("violin_ffuf", schemas.FFUF_SCHEMA, tools.handle_ffuf, "F"),
+        ("violin_listener", schemas.LISTENER_SCHEMA, tools.handle_listener, "L"),
     ):
         ctx.register_tool(
             name=name,

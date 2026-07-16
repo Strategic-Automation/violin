@@ -28,6 +28,7 @@ def cmd_check_command(args: argparse.Namespace) -> int:
         phase=args.phase,
         eng_dir=args.eng_dir,
         scope=args.scope,
+        target=args.target or None,
         session_id=args.session_id or "",
         skill_loaded_file=args.skill_loaded_file or "",
     )
@@ -83,6 +84,25 @@ def cmd_sync_done(args: argparse.Namespace) -> int:
     from plugins.violin_guard.core.service import handle_sync_done
 
     out = json.loads(handle_sync_done(vars(args)))
+    print(out)
+    return 0 if out["status"] == "ok" else 1
+
+
+def cmd_rebind_pending_batch(args: argparse.Namespace) -> int:
+    from plugins.violin_guard.core.service import handle_rebind_pending_batch
+
+    out = json.loads(
+        handle_rebind_pending_batch(
+            {
+                "eng_dir": args.eng_dir,
+                "batch_id": args.batch_id,
+                "current_task_id": args.current_task_id,
+                "replacement_task_id": args.replacement_task_id,
+                "note": args.note,
+                "confirm": args.confirm,
+            }
+        )
+    )
     print(out)
     return 0 if out["status"] == "ok" else 1
 
@@ -195,6 +215,7 @@ def cmd_exec_burst(args: argparse.Namespace) -> int:
                 "eng_dir": args.eng_dir,
                 "scope": args.scope,
                 "phase": args.phase,
+                "target": args.target or "",
                 "commands": [],
                 "commands_file": args.commands_file or "",
                 "session_id": args.session_id or "",
@@ -226,6 +247,7 @@ def main() -> int:
     p.add_argument("--phase", required=True)
     p.add_argument("--eng-dir", required=True)
     p.add_argument("--scope", required=True)
+    p.add_argument("--target", default="", help="Explicit primary target host/IP/URL")
     p.add_argument("--session-id", default="")
     p.add_argument("--skill-loaded-file", default="")
     p.set_defaults(func=cmd_check_command)
@@ -274,6 +296,15 @@ def main() -> int:
     p.add_argument("--eng-dir", required=True)
     p.set_defaults(func=cmd_sync_done)
 
+    p = sub.add_parser("rebind-pending-batch", help="Explicitly rebind a completed pending batch")
+    p.add_argument("--eng-dir", required=True)
+    p.add_argument("--batch-id", required=True)
+    p.add_argument("--current-task-id", required=True)
+    p.add_argument("--replacement-task-id", required=True)
+    p.add_argument("--note", required=True)
+    p.add_argument("--confirm", action="store_true")
+    p.set_defaults(func=cmd_rebind_pending_batch)
+
     # heartbeat-done
     p = sub.add_parser("heartbeat-done", help="Clear heartbeat pending")
     p.add_argument("--eng-dir", required=True)
@@ -319,6 +350,7 @@ def main() -> int:
     p.add_argument("--eng-dir", required=True)
     p.add_argument("--scope", required=True)
     p.add_argument("--phase", required=True)
+    p.add_argument("--target", required=True, help="Explicit primary target for the batch")
     p.add_argument("--commands-file", default="")
     p.add_argument("--session-id", default="")
     p.add_argument("--skill-loaded-file", default="")

@@ -43,6 +43,7 @@ class CheckCommandArgs:
     phase: str
     eng_dir: str
     scope: str
+    target: str | None = None
     session_id: str | None = None
     skill_loaded_file: str | None = None
 
@@ -144,6 +145,16 @@ def validate_scope(scope_path: Path) -> ScopeResult:
         result.add_error("scope.targets.ip_addresses is required")
     elif not isinstance(targets["ip_addresses"], list) or not targets["ip_addresses"]:
         result.add_error("scope.targets.ip_addresses must be a non-empty list")
+
+    assessment_hosts = data.get("assessment_hosts", {}) or {}
+    if not isinstance(assessment_hosts, dict):
+        result.add_error("scope.assessment_hosts must be a mapping when present")
+    else:
+        callback_hosts = assessment_hosts.get("callback_hosts", []) or []
+        if not isinstance(callback_hosts, list) or any(
+            not isinstance(item, str) or not item.strip() for item in callback_hosts
+        ):
+            result.add_error("scope.assessment_hosts.callback_hosts must be a list of hosts/IPs")
 
     # rules_of_engagement
     roe = data.get("rules_of_engagement", {})
@@ -295,9 +306,13 @@ def check_history_staleness(eng_dir: Path, command: str) -> CheckResult:
         result.add_info("history.md is empty — first command will be recorded")
         return result
 
-    # Check for exact duplicate of last command
+    # History entries are written as ``... | command=<command>``.  Compare
+    # that field exactly instead of using substring matching, which can reject
+    # a command merely because it contains the previous command text.
     last_line = lines[-1]
-    if command in last_line:
+    marker = " | command="
+    recorded_command = last_line.split(marker, 1)[1] if marker in last_line else None
+    if recorded_command == command:
         result.add_error(
             f"command appears to be an exact repeat of the last recorded command: {last_line}"
         )
@@ -310,7 +325,9 @@ def check_history_staleness(eng_dir: Path, command: str) -> CheckResult:
 # --------------------------------------------------------------------------- #
 
 
-def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> HypothesisResult:
+def check_hypothesis_freshness(
+    eng_dir: Path, phase: Phase, command: str, primary_target: str | None = None
+) -> HypothesisResult:
     """Ensure hypotheses exist and are fresh for phases that require them."""
     result = HypothesisResult()
 
@@ -333,6 +350,8 @@ def check_hypothesis_freshness(eng_dir: Path, phase: Phase, command: str) -> Hyp
         Phase.FLAGS: {Phase.PRIVESC, Phase.FLAGS},
     }.get(phase, {phase})
     targets = {normalise_target(target) for target in extract_target_candidates(command)}
+    if primary_target:
+        targets.add(normalise_target(primary_target))
     relevant = []
     for hypothesis in hyps:
         if hypothesis.canonical_status() == "Rejected" or not hypothesis.target:
@@ -439,7 +458,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     # 2b. Scope target enforcement (audit P0). Extract command targets and
     #     block anything that lands on an out-of-scope IP/CIDR.
-    target_result = check_scope_targets(scope_path, args.command)
+    target_result = check_scope_targets(scope_path, args.command, args.target)
     result.errors.extend(target_result.errors)
     result.warnings.extend(target_result.warnings)
 
@@ -481,7 +500,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     result.infos.extend(hist_result.infos)
 
     # 6. Hypothesis freshness
-    hyp_result = check_hypothesis_freshness(eng_dir, phase, args.command)
+    hyp_result = check_hypothesis_freshness(eng_dir, phase, args.command, args.target)
     result.errors.extend(hyp_result.errors)
     result.warnings.extend(hyp_result.warnings)
     result.infos.extend(hyp_result.infos)

@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 __all__ = [
@@ -18,6 +19,8 @@ __all__ = [
     "build_httpx",
     "build_nuclei",
     "build_ffuf",
+    "build_netcat_listener",
+    "detect_netcat_variant",
     "available",
     "search_exploit",
     "AdapterError",
@@ -141,6 +144,105 @@ BUILDERS = {
     "nuclei": build_nuclei,
     "ffuf": build_ffuf,
 }
+
+
+def detect_netcat_variant(version_output: str) -> str:
+    """Classify a netcat implementation from one captured help/version output."""
+
+    normalized = version_output.lower()
+    if "ncat" in normalized and "nmap" in normalized:
+        return "ncat"
+    if "openbsd" in normalized:
+        return "openbsd"
+    if "v1.10" in normalized or "hobbit" in normalized or "traditional" in normalized:
+        return "traditional"
+    raise AdapterError(
+        "unsupported netcat implementation; expected OpenBSD nc, traditional nc, or Ncat"
+    )
+
+
+@lru_cache(maxsize=8)
+def _installed_netcat_variant(binary: str) -> tuple[str, str]:
+    """Detect one installed binary once; never probe individual flags."""
+
+    path = shutil.which(binary)
+    if not path:
+        raise AdapterError(f"{binary} is not installed or not on PATH")
+    result = subprocess.run(
+        [path, "-h"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+        check=False,
+    )
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    return path, detect_netcat_variant(output)
+
+
+def _listener_port(args: dict) -> int:
+    try:
+        port = int(args.get("port"))
+    except (TypeError, ValueError) as exc:
+        raise AdapterError("listener port must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise AdapterError("listener port must be between 1 and 65535")
+    return port
+
+
+def _listener_identity(args: dict) -> tuple[str, str]:
+    binary = str(args.get("binary") or "nc")
+    variant = str(args.get("variant") or "").lower()
+    if not variant:
+        return _installed_netcat_variant(binary)
+    if variant not in {"openbsd", "traditional", "ncat"}:
+        raise AdapterError("variant must be openbsd, traditional, or ncat")
+    return binary, variant
+
+
+def _openbsd_listener(path: str, port: int, bind_host: str, keep_open: bool) -> list[str]:
+    parts = [path, "-l", "-v"]
+    if keep_open:
+        parts.append("-k")
+    if bind_host:
+        parts.extend(["-s", bind_host])
+    return [*parts, str(port)]
+
+
+def _traditional_listener(path: str, port: int, bind_host: str, keep_open: bool) -> list[str]:
+    if keep_open:
+        raise AdapterError("traditional nc has no supported keep-open flag")
+    parts = [path, "-l", "-v", "-p", str(port)]
+    if bind_host:
+        parts.extend(["-s", bind_host])
+    return parts
+
+
+def _ncat_listener(path: str, port: int, bind_host: str, keep_open: bool) -> list[str]:
+    parts = [path, "--listen", "--verbose"]
+    if keep_open:
+        parts.append("--keep-open")
+    if bind_host:
+        parts.append(bind_host)
+    return [*parts, str(port)]
+
+
+_LISTENER_BUILDERS = {
+    "openbsd": _openbsd_listener,
+    "traditional": _traditional_listener,
+    "ncat": _ncat_listener,
+}
+
+
+def build_netcat_listener(args: dict) -> str:
+    """Build a deterministic listener command for a known netcat family."""
+
+    port = _listener_port(args)
+    path, variant = _listener_identity(args)
+    bind_host = str(args.get("bind_host") or "").strip()
+    parts = _LISTENER_BUILDERS[variant](path, port, bind_host, bool(args.get("keep_open")))
+    return " ".join(_quote(part) for part in parts)
 
 
 @dataclass

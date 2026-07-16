@@ -157,7 +157,7 @@ Store in `$ENG_DIR/evidence/exploitation/idor-access-control/` with descriptive 
 || **JWT signing** | Always validate JWT signature; reject `alg: none`; use RS256/ES256 not HS256 if possible |
 
 ## Stop Conditions
-- Generic baseline — see `references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
+- Generic baseline — see `skills/pentest/references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
 
 ## Blocked Actions
 - **Do NOT** modify or delete another user's data (no PUT, PATCH, DELETE on other users' resources)

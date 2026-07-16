@@ -249,6 +249,53 @@ def get_pending_sync(eng_dir: str | Path) -> dict | None:
     return data.get("pending")
 
 
+def rebind_pending_sync(
+    eng_dir: str | Path,
+    *,
+    expected_batch_id: str,
+    current_task_id: str,
+    replacement_task_id: str,
+    note: str,
+) -> dict[str, Any]:
+    """Rebind a completed pending batch without certifying its PTT review."""
+
+    path = _sync_path(eng_dir)
+
+    def rebind(data: dict[str, Any]) -> dict[str, Any]:
+        pending = data.get("pending")
+        if not pending:
+            raise ValueError("no pending execution batch")
+        batch_id = str(pending.get("batch_id") or "")
+        if batch_id != expected_batch_id:
+            raise ValueError(
+                f"stale batch id {expected_batch_id!r}; current pending batch is {batch_id!r}"
+            )
+        captured = str(pending.get("ptt_task_id") or "")
+        if captured != current_task_id:
+            raise ValueError(
+                f"current task {current_task_id!r} does not match batch task {captured!r}"
+            )
+        if current_task_id == replacement_task_id:
+            raise ValueError("replacement task must differ from the current batch task")
+
+        entry = {
+            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "batch_id": batch_id,
+            "old_task_id": current_task_id,
+            "new_task_id": replacement_task_id,
+            "note": note.strip(),
+        }
+        data.setdefault("rebind_audit", []).append(entry)
+        pending["ptt_task_id"] = replacement_task_id
+        pending["ptt_reviewed"] = False
+        pending.pop("ptt_note", None)
+        pending.pop("ptt_reviewed_at", None)
+        data["pending"] = pending
+        return entry
+
+    return _mutate_json(path, rebind)
+
+
 def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
     path = _sync_path(eng_dir)
 
@@ -445,6 +492,7 @@ __all__ = [
     "clear_pending_sync",
     "has_pending_sync",
     "get_pending_sync",
+    "rebind_pending_sync",
     "set_heartbeat_pending",
     "clear_heartbeat_pending",
     "has_heartbeat_pending",

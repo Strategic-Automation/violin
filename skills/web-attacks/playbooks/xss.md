@@ -194,7 +194,7 @@ Each finding should include:
 ---
 
 ## Stop Conditions
-- Generic baseline — see `references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
+- Generic baseline — see `skills/pentest/references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
 
 ---
 

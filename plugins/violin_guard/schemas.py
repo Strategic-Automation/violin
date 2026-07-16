@@ -14,10 +14,11 @@ CHECK_COMMAND_SCHEMA = {
             "eng_dir": {"type": "string"},
             "phase": {"type": "string"},
             "command": {"type": "string"},
+            "target": {"type": "string", "description": "Explicit primary target host/IP/URL"},
             "session_id": {"type": "string"},
             "skill_loaded_file": {"type": "string"},
         },
-        "required": ["eng_dir", "phase", "command"],
+        "required": ["eng_dir", "phase", "command", "target"],
         "additionalProperties": False,
     },
 }
@@ -89,14 +90,20 @@ EXEC_SCHEMA = {
             "scope": {"type": "string"},
             "phase": {"type": "string"},
             "command": {"type": "string", "description": "Exact on-target command"},
+            "target": {"type": "string", "description": "Explicit primary target host/IP/URL"},
             "session_id": {"type": "string"},
             "skill_loaded_file": {"type": "string"},
             "backend": {"type": "string", "enum": ["local", "docker"], "default": "local"},
             "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
             "cwd": {"type": "string", "description": "Engagement-relative working directory"},
             "label": {"type": "string"},
+            "background": {
+                "type": "boolean",
+                "default": False,
+                "description": "Run as a tracked background process; use status/cancel for lifecycle management",
+            },
         },
-        "required": ["eng_dir", "scope", "phase", "command"],
+        "required": ["eng_dir", "scope", "phase", "command", "target"],
         "additionalProperties": False,
     },
 }
@@ -109,6 +116,30 @@ SYNC_DONE_SCHEMA = {
             "eng_dir": {"type": "string", "description": "Engagement directory"},
         },
         "required": ["eng_dir"],
+        "additionalProperties": False,
+    },
+}
+
+REBIND_PENDING_BATCH_SCHEMA = {
+    "description": "Explicitly rebind a completed pending batch to the sole active phase-compatible PTT task. This does not review or unlock the batch.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {"type": "string"},
+            "batch_id": {"type": "string"},
+            "current_task_id": {"type": "string"},
+            "replacement_task_id": {"type": "string"},
+            "note": {"type": "string", "description": "Operator reason for rebinding"},
+            "confirm": {"type": "boolean", "description": "Must be explicitly true"},
+        },
+        "required": [
+            "eng_dir",
+            "batch_id",
+            "current_task_id",
+            "replacement_task_id",
+            "note",
+            "confirm",
+        ],
         "additionalProperties": False,
     },
 }
@@ -141,6 +172,10 @@ EXEC_BURST_SCHEMA = {
                 "description": "optional path to a newline-delimited file of commands",
             },
             "scope": {"type": "string", "description": "path to scope.yaml"},
+            "target": {
+                "type": "string",
+                "description": "Explicit primary target shared by the batch",
+            },
             "phase": {
                 "type": "string",
                 "description": "engagement phase: recon|vuln-research|exploitation|post-exploitation",
@@ -160,7 +195,7 @@ EXEC_BURST_SCHEMA = {
             "cwd": {"type": "string", "description": "Engagement-relative working directory"},
             "continue_on_error": {"type": "boolean", "default": False},
         },
-        "required": ["scope", "phase"],
+        "required": ["scope", "phase", "target"],
     },
 }
 
@@ -270,6 +305,35 @@ FFUF_SCHEMA = {
             "headers": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["eng_dir", "scope", "phase", "url", "wordlist"],
+        "additionalProperties": False,
+    },
+}
+
+LISTENER_SCHEMA = {
+    "description": "Start a tracked local netcat listener with deterministic flags for a known implementation.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {"type": "string"},
+            "scope": {"type": "string"},
+            "phase": {"type": "string"},
+            "target": {"type": "string", "description": "In-scope assessment target"},
+            "session_id": {"type": "string"},
+            "skill_loaded_file": {"type": "string"},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "bind_host": {"type": "string"},
+            "keep_open": {"type": "boolean", "default": False},
+            "binary": {"type": "string", "default": "nc"},
+            "variant": {
+                "type": "string",
+                "enum": ["openbsd", "traditional", "ncat"],
+                "description": "Optional known variant; otherwise detected once from binary help/version output",
+            },
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+            "cwd": {"type": "string"},
+            "label": {"type": "string"},
+        },
+        "required": ["eng_dir", "scope", "phase", "target", "port"],
         "additionalProperties": False,
     },
 }

@@ -337,6 +337,19 @@ def test_hypothesis_preserves_verified_rejection_details(tmp_path):
     assert "- **Rejection Reason:** source-verified stub" in text
 
 
+def test_hypothesis_write_rejects_descriptive_target(tmp_path):
+    with pytest.raises(ValueError, match="target must contain only"):
+        hypotheses.update_hypothesis(
+            tmp_path / "hypotheses.md",
+            in_scope_hosts={"cctv.htb"},
+            id="001",
+            title="Camera portal",
+            status="Candidate",
+            phase="VULN_RESEARCH",
+            target="cctv.htb (/zm/index.php, camera portal)",
+        )
+
+
 def test_exploitation_hypothesis_match_accepts_manual_field_order(tmp_path):
     (tmp_path / "hypotheses.md").write_text(
         """### H-001: Queue service validation
