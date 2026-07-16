@@ -44,8 +44,8 @@ def lock_file(path: Path) -> FileLock:
             # Blocking fallback: wait for the lock to free.
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
     elif msvcrt is not None:
-        # msvcrt has no non-blocking mode; retry briefly.
-        deadline = time.monotonic() + 5.0
+        # msvcrt has no non-blocking mode; retry with a generous timeout.
+        deadline = time.monotonic() + 20.0
         while True:
             try:
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
