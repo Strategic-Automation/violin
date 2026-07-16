@@ -353,6 +353,9 @@ def handle_exec_burst(a, **kwargs):
         return _json("error", error="no commands provided (inline or commands_file)")
     if len(cmds) > state.MAX_BURST_COMMANDS:
         return _json("error", error=f"burst limit is {state.MAX_BURST_COMMANDS}")
+    active_task = ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md"))
+    active_task_id = active_task.id if active_task else ""
+
 
     results = []
     executed = 0
@@ -411,11 +414,7 @@ def handle_exec_burst(a, **kwargs):
                 timeout_seconds=timeout_seconds,
                 cwd=cwd,
                 label=label,
-                ptt_task_id=(
-                    ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")).id
-                    if ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md"))
-                    else ""
-                ),
+                ptt_task_id=active_task_id,
             )
             r.pop("status", None)
             entry = {"index": idx + 1, "command": cmd, **r}
