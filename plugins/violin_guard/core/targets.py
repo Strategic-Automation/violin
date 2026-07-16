@@ -108,13 +108,13 @@ class _TargetPolicy:
 def extract_target_candidates(command: str) -> list[str]:
     """Return ordered, unique network targets found in a shell command."""
 
-    return list(dict.fromkeys(candidate for candidate, _strong in _target_candidates(command)))
+    return list(dict.fromkeys(_target_candidates(command)))
 
 
-def _target_candidates(command: str) -> list[tuple[str, bool]]:
-    """Return candidates plus whether their command syntax is unambiguously networked."""
+def _target_candidates(command: str) -> list[str]:
+    """Return network targets parsed from a shell command."""
 
-    candidates: list[tuple[str, bool]] = []
+    candidates: list[str] = []
     skip_path_value = False
     for token in _command_tokens(command):
         if skip_path_value:
@@ -129,11 +129,15 @@ def _target_candidates(command: str) -> list[tuple[str, bool]]:
         if token.rstrip(";, ").endswith("()"):
             continue
         candidate = token.strip("'\"(),;")
-        if _looks_like_local_path(candidate) and not _is_network_path(candidate):
+        if (
+            _looks_like_local_path(candidate)
+            and not _is_network_path(candidate)
+            and ("/" not in candidate or candidate.startswith(("/", "./", "../", "~/", "$", "%")))
+        ):
             continue
         host = _parse_target_token(candidate)
         if host:
-            candidates.append((host, _is_strong_network_token(candidate)))
+            candidates.append(host)
     return candidates
 
 
@@ -171,15 +175,10 @@ def check_scope_targets(
     if explicit:
         seen.add(explicit)
         policy.check_primary(explicit, result)
-    for candidate, strong in candidates:
+    for candidate in candidates:
         if candidate in seen:
             continue
         seen.add(candidate)
-        # With an explicit primary target, bare dotted words are ambiguous:
-        # they may be Python attributes, filenames, or directory names. Keep
-        # enforcing known scope entries and syntactically strong network forms.
-        if explicit and not strong and candidate not in policy.known_hosts:
-            continue
         policy.check_secondary(candidate, result)
     return result
 
@@ -268,20 +267,6 @@ def _is_path_option(token: str) -> bool:
 
 def _is_network_path(token: str) -> bool:
     return token.startswith(_DEV_NETWORK_PREFIXES) or token.startswith("//") or "://" in token
-
-
-def _is_strong_network_token(token: str) -> bool:
-    """Whether syntax identifies a network endpoint without hostname guessing."""
-
-    normalized = token.strip("'\"(),;")
-    if _is_network_path(normalized):
-        return True
-    unbracketed = normalized.strip("[]").rstrip("/.,;)")
-    try:
-        ipaddress.ip_network(unbracketed, strict=False)
-    except ValueError:
-        return False
-    return True
 
 
 def _looks_like_local_path(token: str) -> bool:

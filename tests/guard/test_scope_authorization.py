@@ -67,7 +67,7 @@ def test_dotted_arguments_are_not_treated_as_network_targets_when_they_are_paths
     ) == ["10.10.10.10"]
 
 
-def test_explicit_target_suppresses_ambiguous_dotted_words_but_not_network_forms(
+def test_explicit_target_keeps_unknown_bare_hostnames_reviewable(
     tmp_path: Path,
 ) -> None:
     scope = tmp_path / "scope.yaml"
@@ -79,10 +79,18 @@ def test_explicit_target_suppresses_ambiguous_dotted_words_but_not_network_forms
     assert not harmless.errors
     assert not harmless.warnings
 
-    strong = check_scope_targets(
+    bare = check_scope_targets(scope, "curl outside.example", primary_target="10.10.10.10")
+    assert any("outside.example" in warning for warning in bare.warnings)
+
+    host_path = check_scope_targets(
+        scope, "curl outside.example/status", primary_target="10.10.10.10"
+    )
+    assert any("outside.example" in warning for warning in host_path.warnings)
+
+    url = check_scope_targets(
         scope, "curl https://outside.example/status", primary_target="10.10.10.10"
     )
-    assert any("outside.example" in warning for warning in strong.warnings)
+    assert any("outside.example" in warning for warning in url.warnings)
 
     blocked = check_scope_targets(scope, "nmap 10.10.10.99", primary_target="10.10.10.10")
     assert blocked.errors
