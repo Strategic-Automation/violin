@@ -439,14 +439,96 @@ def handle_exec_burst(a, **kwargs):
 
 
 def handle_target(a, **kwargs):
+    from urllib.parse import urlsplit
+
     import yaml
 
-    p = _eng_path(a["eng_dir"]) / "scope" / "scope.yaml"
-    d = yaml.safe_load(p.read_text())
-    ips = d.get("targets", {}).get("ip_addresses", [])
-    if ips:
-        return _json("ok", value=ips[0])
-    return _json("error", error="no targets in scope")
+    from .targets import normalise_target, scope_hosts
+
+    scope_path = a.get("scope")
+    p = Path(scope_path) if scope_path else _eng_path(a["eng_dir"]) / "scope" / "scope.yaml"
+
+
+    if not p.exists():
+        return _json("error", error=f"scope file not found: {p}")
+
+    try:
+        scope_data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        return _json("error", error=f"failed to parse scope: {exc}")
+
+    targets_sec = scope_data.get("targets", {}) or {}
+
+    role = a.get("role")
+    host_query = a.get("host")
+    field = a.get("field") or "ip"
+
+    target_val = None
+
+    # 1. Resolve by role
+    if role:
+        roles = targets_sec.get("roles", {}) or {}
+        role_val = roles.get(role)
+        if isinstance(role_val, list) and role_val:
+            target_val = str(role_val[0]).strip()
+        elif role_val is not None:
+            target_val = str(role_val).strip()
+
+    # 2. Resolve by host
+    if not target_val and host_query:
+        allowed_hosts = scope_hosts(scope_data)
+        norm_host = normalise_target(host_query)
+        if norm_host in allowed_hosts:
+            target_val = host_query.strip()
+
+    # 3. Fallback to first in-scope target
+    if not target_val:
+        ips = targets_sec.get("ip_addresses", [])
+        if isinstance(ips, list) and ips:
+            target_val = str(ips[0]).strip()
+
+        if not target_val:
+            urls = targets_sec.get("urls", []) or targets_sec.get("in_scope_urls", [])
+            if isinstance(urls, list) and urls:
+                target_val = str(urls[0]).strip()
+
+        if not target_val:
+            domains = targets_sec.get("domains", [])
+            if isinstance(domains, list) and domains:
+                target_val = str(domains[0]).strip()
+
+        if not target_val:
+            hostnames = targets_sec.get("hostnames", [])
+            if isinstance(hostnames, list) and hostnames:
+                target_val = str(hostnames[0]).strip()
+
+        if not target_val:
+            roles = targets_sec.get("roles", {}) or {}
+            if roles:
+                first_val = list(roles.values())[0]
+                if isinstance(first_val, list) and first_val:
+                    target_val = str(first_val[0]).strip()
+                elif first_val is not None:
+                    target_val = str(first_val).strip()
+
+    if not target_val:
+        return _json("error", error="no targets in scope")
+
+    resolved_value = target_val
+    if "://" in target_val:
+        try:
+            parsed = urlsplit(target_val)
+            host_part = parsed.hostname or parsed.netloc
+            if ":" in host_part:
+                host_part = host_part.split(":")[0]
+
+            if field in ("ip", "host"):
+                resolved_value = host_part
+        except Exception:
+            pass
+
+    return _json("ok", value=resolved_value)
+
 
 
 def handle_status(a, **kwargs):
