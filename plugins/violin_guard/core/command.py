@@ -7,17 +7,19 @@ No subprocess calls — pure functions returning dataclasses.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from . import bootstrap, hypotheses, ptt, state
 from .phases import Phase, normalize_phase, requires_hypothesis
+from .results import GuardResult
 from .targets import check_scope_targets, extract_target_candidates, normalise_target
 
 __all__ = [
     "CheckCommandArgs",
+    "GuardResult",
     "CheckResult",
     "ScopeResult",
     "PttResult",
@@ -49,30 +51,7 @@ class CheckCommandArgs:
 
 
 @dataclass
-class CheckResult:
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    infos: list[str] = field(default_factory=list)
-
-    def add_error(self, msg: str) -> None:
-        self.errors.append(msg)
-
-    def add_warning(self, msg: str) -> None:
-        self.warnings.append(msg)
-
-    def add_info(self, msg: str) -> None:
-        self.infos.append(msg)
-
-    def has_errors(self) -> bool:
-        return len(self.errors) > 0
-
-    def exit_code(self) -> int:
-        if self.errors:
-            return 1
-        if self.warnings:
-            return 2
-        return 0
-
+class CheckResult(GuardResult):
     def print(self) -> None:
         for e in self.errors:
             print(f"BLOCK: {e}")

@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 import yaml
 
 from . import state
+from .results import GuardResult
 
 __all__ = [
     "init_engagement",
@@ -43,33 +45,8 @@ _ARTIFACT_DIRECTORIES = (
 )
 
 
-class BootstrapResult:
-    def __init__(
-        self,
-        errors: list[str] | None = None,
-        warnings: list[str] | None = None,
-        infos: list[str] | None = None,
-    ):
-        self.errors = errors or []
-        self.warnings = warnings or []
-        self.infos = infos or []
-
-    def add_error(self, msg: str) -> None:
-        self.errors.append(msg)
-
-    def add_warning(self, msg: str) -> None:
-        self.warnings.append(msg)
-
-    def add_info(self, msg: str) -> None:
-        self.infos.append(msg)
-
-    def exit_code(self) -> int:
-        if self.errors:
-            return 1
-        if self.warnings:
-            return 2
-        return 0
-
+@dataclass
+class BootstrapResult(GuardResult):
     def __int__(self) -> int:
         return self.exit_code()
 

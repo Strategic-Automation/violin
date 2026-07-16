@@ -20,7 +20,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .results import GuardResult
+
 __all__ = [
+    "GuardResult",
     "ReleaseCheckResult",
     "StructureResult",
     "check_release",
@@ -43,65 +46,13 @@ def _project_python(repo_root: Path) -> str:
 
 
 @dataclass
-class ReleaseCheckResult:
-    errors: list[str] = None
-    warnings: list[str] = None
-    infos: list[str] = None
-
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
-        if self.warnings is None:
-            self.warnings = []
-        if self.infos is None:
-            self.infos = []
-
-    def add_error(self, msg: str) -> None:
-        self.errors.append(msg)
-
-    def add_warning(self, msg: str) -> None:
-        self.warnings.append(msg)
-
-    def add_info(self, msg: str) -> None:
-        self.infos.append(msg)
-
-    def exit_code(self) -> int:
-        if self.errors:
-            return 1
-        if self.warnings:
-            return 2
-        return 0
+class ReleaseCheckResult(GuardResult):
+    pass
 
 
 @dataclass
-class StructureResult:
-    errors: list[str] = None
-    warnings: list[str] = None
-    infos: list[str] = None
-
-    def __post_init__(self):
-        if self.errors is None:
-            self.errors = []
-        if self.warnings is None:
-            self.warnings = []
-        if self.infos is None:
-            self.infos = []
-
-    def add_error(self, msg: str) -> None:
-        self.errors.append(msg)
-
-    def add_warning(self, msg: str) -> None:
-        self.warnings.append(msg)
-
-    def add_info(self, msg: str) -> None:
-        self.infos.append(msg)
-
-    def exit_code(self) -> int:
-        if self.errors:
-            return 1
-        if self.warnings:
-            return 2
-        return 0
+class StructureResult(GuardResult):
+    pass
 
 
 def _plugin_root() -> Path:

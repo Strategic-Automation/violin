@@ -15,6 +15,7 @@ from . import (
     phases,
     ptt,
     release,
+    results,
     service,
     state,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "phases",
     "ptt",
     "release",
+    "results",
     "service",
     "state",
 ]
