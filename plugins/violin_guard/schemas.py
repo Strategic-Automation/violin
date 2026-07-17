@@ -87,14 +87,17 @@ RECORD_HYPOTHESIS_SCHEMA = {
 }
 
 EXEC_SCHEMA = {
-    "description": "Authorize and execute one target command. Requires one unambiguous [~] PTT task. The tool itself appends exact command history; it never updates PTT progress. After the bounded command window, review results, update the active PTT row explicitly, and call violin_sync_done. Hard BLOCK and sync_required never create a process.",
+    "description": "Authorize and execute one target command using any installed non-interactive Kali/Parrot CLI tool; there is no binary allowlist. Requires one unambiguous [~] PTT task. Scope, phase, hypothesis, history, evidence, timeout, and sync gates still apply, and runtime requirements such as installation, root, hardware, services, GUI, or a TTY are not bypassed. The tool appends exact command history but never updates PTT progress. Hard BLOCK and sync_required never create a process.",
     "parameters": {
         "type": "object",
         "properties": {
             "eng_dir": {"type": "string"},
             "scope": {"type": "string"},
             "phase": {"type": "string"},
-            "command": {"type": "string", "description": "Exact on-target command"},
+            "command": {
+                "type": "string",
+                "description": "Exact on-target command for any installed CLI executable",
+            },
             "target": {"type": "string", "description": "Explicit primary target host/IP/URL"},
             "session_id": {"type": "string"},
             "skill_loaded_file": {"type": "string"},

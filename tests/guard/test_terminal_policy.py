@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from plugins.violin_guard import (
     _post_tool_call_hook,
     _pre_tool_call_hook,
     bootstrap,
     register,
 )
+from plugins.violin_guard import command as guard_command
 
 _SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
@@ -84,6 +87,23 @@ def test_wrapped_target_utility_is_blocked() -> None:
     assert result["action"] == "block"
 
 
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        "rustscan -a 10.10.10.10",
+        "enum4linux-ng -A 10.10.10.10",
+        "impacket-smbclient user:pass@10.10.10.10",
+        "sh -c 'feroxbuster -u http://10.10.10.10'",
+    ],
+)
+def test_raw_terminal_blocks_arbitrary_target_tools_without_a_name_list(
+    raw_command: str,
+) -> None:
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command})
+    assert result["action"] == "block"
+    assert "violin_exec" in result["message"]
+
+
 def test_local_source_retrieval_remains_available() -> None:
     result = _pre_tool_call_hook(
         tool_name="terminal",
@@ -133,6 +153,28 @@ def _engagement(tmp_path):
         encoding="utf-8",
     )
     return eng
+
+
+@pytest.mark.parametrize(
+    "guarded_command",
+    [
+        "rustscan -a 10.10.10.10",
+        "enum4linux-ng -A 10.10.10.10",
+        "impacket-smbclient user:pass@10.10.10.10",
+    ],
+)
+def test_guard_accepts_arbitrary_installed_cli_tool_names(tmp_path, guarded_command: str) -> None:
+    eng = _engagement(tmp_path)
+    result = guard_command.check_command(
+        guard_command.CheckCommandArgs(
+            command=guarded_command,
+            phase="recon",
+            eng_dir=str(eng),
+            target="10.10.10.10",
+            session_id="test",
+        )
+    )
+    assert not result.errors
 
 
 def _code(eng, target="10.10.10.10") -> str:

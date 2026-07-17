@@ -196,7 +196,7 @@ flowchart LR
 
 - **Authorised testing only** — no probing before scoping is complete
 - **Approval gates** — scope, active recon, and exploitation each require explicit user approval
-- **Guard check** — every target-touching command validated through `violin_exec` or another typed guard tool; Violin's `pre_tool_call` plugin hook blocks clearly target-touching raw `terminal` calls before execution. The CLI exposes the same check for diagnostics (exit 0=allowed, 1=blocked, 2=review)
+- **Guard check** — every target-touching command validated through `violin_exec` or another typed guard tool. `violin_exec` has no binary allowlist, so any installed non-interactive Kali/Parrot CLI tool can target the explicit in-scope host while the same scope, phase, PTT, hypothesis, history, evidence, timeout, and sync gates remain active. Violin's `pre_tool_call` plugin hook generically blocks target literals in raw `terminal` commands instead of maintaining a partial tool-name list. The CLI exposes the same check for diagnostics (exit 0=allowed, 1=blocked, 2=review)
 - **Non-destructive by default** — exploitation limited to safe, reproducible PoC
 - **Evidence-first** — every finding backed by reproducible tool output, screenshots, request/response pairs
 - **Exploit-first validation** — no hypothesis advances to Validated without a verification command

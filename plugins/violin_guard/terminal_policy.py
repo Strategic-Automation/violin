@@ -17,50 +17,7 @@ import re
 import shlex
 from urllib.parse import urlsplit
 
-_TARGET_EXECUTABLES = frozenset(
-    {
-        "amass",
-        "arp-scan",
-        "crackmapexec",
-        "dig",
-        "enum4linux",
-        "evil-winrm",
-        "ffuf",
-        "gobuster",
-        "hakrawler",
-        "hydra",
-        "impacket-psexec",
-        "ldapsearch",
-        "masscan",
-        "medusa",
-        "mitmproxy",
-        "msfconsole",
-        "msfvenom",
-        "ncat",
-        "nc",
-        "netexec",
-        "nikto",
-        "nmap",
-        "nuclei",
-        "onesixtyone",
-        "rpcclient",
-        "searchsploit",
-        "smbclient",
-        "socat",
-        "sqlmap",
-        "ssh",
-        "sslscan",
-        "subfinder",
-        "telnet",
-        "wfuzz",
-        "whatweb",
-        "wget",
-        "curl",
-    }
-)
-
 _SHELL_WRAPPERS = frozenset({"bash", "cmd", "fish", "powershell", "pwsh", "sh", "zsh"})
-_COMMAND_WRAPPERS = frozenset({"docker", "doas", "podman", "sudo", "winpty"})
 _SCRIPT_INTERPRETERS = _SHELL_WRAPPERS | {
     "node",
     "perl",
@@ -149,31 +106,6 @@ def _first_executable(segment: str) -> str:
     return ""
 
 
-def _contains_target_executable(command: str) -> str | None:
-    for segment in _COMMAND_SPLIT_RE.split(command):
-        executable = _first_executable(segment)
-        if executable in _TARGET_EXECUTABLES:
-            return executable
-
-        # Shell wrappers can hide the real command in `sh -c 'nmap ...'`.
-        if executable in _SHELL_WRAPPERS:
-            nested = _COMMAND_SPLIT_RE.split(segment, maxsplit=1)[-1]
-            for target in _TARGET_EXECUTABLES:
-                if re.search(rf"(?<![\w.-]){re.escape(target)}(?![\w.-])", nested, re.I):
-                    return target
-
-        # Privilege/container wrappers put the real executable later in the
-        # argument list (for example ``sudo nmap`` or ``docker exec kali
-        # nmap``).  Only inspect exact argv tokens here so ordinary commands
-        # such as ``grep nmap`` remain usable.
-        if executable in _COMMAND_WRAPPERS:
-            for word in _command_words(segment)[1:]:
-                candidate = _basename(word)
-                if candidate in _TARGET_EXECUTABLES:
-                    return candidate
-    return None
-
-
 def _is_package_or_source_command(command: str) -> bool:
     executable = _first_executable(command)
     return executable in _PACKAGE_OR_SOURCE_COMMANDS
@@ -196,12 +128,22 @@ def _has_target_literal(command: str) -> bool:
     for segment in _COMMAND_SPLIT_RE.split(command):
         words = _command_words(segment)
         executable = _first_executable(segment)
-        skip_code = executable in _SCRIPT_INTERPRETERS and "-c" in words
+        # Shell `-c` strings are commands and must still be inspected. Source
+        # passed to language runtimes is skipped to avoid classifying an IP
+        # literal inside ordinary local code as a network action.
+        skip_code = (
+            executable in _SCRIPT_INTERPRETERS
+            and executable not in _SHELL_WRAPPERS
+            and "-c" in words
+        )
         for index, word in enumerate(words):
             if skip_code and index > words.index("-c"):
                 continue
             value = word.strip("'\"()[]{}<>,")
-            if _IPV4_RE.fullmatch(value):
+            authority = value.rsplit("@", 1)[-1]
+            if authority.count(":") == 1:
+                authority = authority.split(":", 1)[0]
+            if _IPV4_RE.fullmatch(authority):
                 return True
             if "://" in value:
                 try:
@@ -216,7 +158,7 @@ def _has_target_literal(command: str) -> bool:
                 continue
             if any(value.lower().endswith(suffix) for suffix in _LOCAL_FILE_SUFFIXES):
                 continue
-            if _DOMAIN_RE.fullmatch(value):
+            if _DOMAIN_RE.fullmatch(authority):
                 return True
     return False
 
@@ -231,12 +173,6 @@ def block_terminal_command(command: str) -> str | None:
     """
     if not isinstance(command, str) or not command.strip():
         return None
-
-    target_executable = _contains_target_executable(command)
-    if target_executable:
-        return _message(
-            f"target utility `{target_executable}` detected in the raw terminal command"
-        )
 
     if _NETWORK_PATH_RE.search(command):
         return _message("network socket path detected in the raw terminal command")

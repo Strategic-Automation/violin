@@ -10,10 +10,13 @@ import re
 import shlex
 import shutil
 import subprocess
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
 __all__ = [
+    "available",
+    "ToolAvailability",
     "build_httpx",
     "build_nuclei",
     "build_ffuf",
@@ -26,6 +29,37 @@ __all__ = [
 
 class AdapterError(Exception):
     """Adapter validation error."""
+
+
+@dataclass(frozen=True)
+class ToolAvailability:
+    """Read-only result from an installed-tool probe."""
+
+    available: bool
+    tool: str
+    backend: str
+    path: str = ""
+    message: str = ""
+
+
+def available(tool: str, backend: str = "local") -> ToolAvailability:
+    """Report whether a CLI tool can be resolved without touching a target."""
+
+    name = str(tool or "").strip()
+    if not name or any(char.isspace() for char in name):
+        raise AdapterError("tool must be one executable name")
+    if backend != "local":
+        raise AdapterError("availability probes currently support the local backend only")
+
+    path = shutil.which(name)
+    if path:
+        return ToolAvailability(True, name, backend, path=path, message=f"{name} is available")
+    return ToolAvailability(
+        False,
+        name,
+        backend,
+        message=f"{name} is not installed or not on PATH",
+    )
 
 
 def _quote(value: Any) -> str:

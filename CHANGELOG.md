@@ -2,6 +2,7 @@
 
 ## 2.0.0
 
+- Made the existing `violin_exec` contract explicit for every installed non-interactive Kali/Parrot CLI tool, and removed the partial target-tool name list from raw-terminal classification in favor of generic target-literal detection.
 - Reorganised the guard into focused top-level modules under `plugins/violin_guard/`, with separate history, result, execution, state, target, and service responsibilities.
 - Split web-injection and access-control playbooks into the on-demand `web-attacks` and `access-control` skills while keeping `pentest` as the engagement orchestrator.
 - Required an explicit primary target at the command boundary and added operator-approved callback hosts that cannot be promoted to assessment targets.
