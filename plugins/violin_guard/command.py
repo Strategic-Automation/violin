@@ -470,18 +470,17 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     if credit == 0:
         result.add_error("sync-credit window exhausted — call violin_sync_done to reset")
 
-    # 9. Heartbeat gate (every COMMAND_INTERVAL commands, except in exploit phases)
-    if not suppresses_heartbeat(phase):
-        cmd_count = state.read_counts(str(eng_dir)).get("commands", 0)
-        next_count = cmd_count + 1
-        if next_count % state.COMMAND_INTERVAL == 0:
-            if not state.has_heartbeat_pending(str(eng_dir)):
-                state.set_heartbeat_pending(
-                    str(eng_dir),
-                    f"Reached {next_count} executed target commands. Review engagement files for drift.",
-                )
-            result.add_error(
-                f"heartbeat pending: reached {next_count} commands — run violin_heartbeat_done"
-            )
+    # 9. Heartbeat gate (set after every COMMAND_INTERVAL executed commands).
+    # Execution owns the command count and creates the heartbeat lock after the
+    # threshold command succeeds. Preflight only enforces that existing lock;
+    # predicting the next count here would permanently block the threshold
+    # command because blocked attempts do not advance the counter.
+    if not suppresses_heartbeat(phase) and state.has_heartbeat_pending(str(eng_dir)):
+        reason = state.get_heartbeat_reason(str(eng_dir))
+        detail = f": {reason}" if reason else ""
+        result.add_error(
+            f"heartbeat pending{detail} — review engagement state, then run "
+            "violin_heartbeat_done"
+        )
 
     return result

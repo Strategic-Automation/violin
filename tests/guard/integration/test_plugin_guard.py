@@ -669,7 +669,7 @@ def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, 
 
 
 def test_heartbeat_gate_every_n_commands(monkeypatch, tmp_path):
-    """Every COMMAND_INTERVAL commands, a heartbeat must be satisfied."""
+    """The interval command executes, then the next command waits for review."""
     monkeypatch.setenv("HERMES_YOLO_MODE", "1")
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
@@ -681,11 +681,33 @@ def test_heartbeat_gate_every_n_commands(monkeypatch, tmp_path):
         "session_id": "ts",
     }
 
-    interval = state.COMMAND_INTERVAL
-    for i in range(1, interval + 1):
-        command_val = f"nmap -sV 10.10.10.10 -p {i}"
-        out = json.loads(TOOLS.handle_exec({**args, "command": command_val}))
-        assert out["status"] in ("ok", "approved", "review", "denied", "sync_required"), out
+    for _ in range(state.COMMAND_INTERVAL - 1):
+        state.tick_command(str(eng))
+
+    threshold = json.loads(
+        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 20"})
+    )
+    assert threshold["status"] == "ok", threshold
+    assert threshold["executed"] is True
+    assert state.read_counts(str(eng))["commands"] == state.COMMAND_INTERVAL
+    assert state.has_heartbeat_pending(str(eng))
+
+    blocked = json.loads(
+        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 21"})
+    )
+    assert blocked["status"] == "denied", blocked
+    assert blocked["executed"] is False
+    assert state.read_counts(str(eng))["commands"] == state.COMMAND_INTERVAL
+
+    cleared = json.loads(TOOLS.handle_heartbeat_done({"eng_dir": str(eng)}))
+    assert cleared["status"] == "ok", cleared
+
+    resumed = json.loads(
+        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 21"})
+    )
+    assert resumed["status"] == "ok", resumed
+    assert resumed["executed"] is True
+    assert state.read_counts(str(eng))["commands"] == state.COMMAND_INTERVAL + 1
 
 
 def test_message_tick_triggers_heartbeat(monkeypatch, tmp_path):
