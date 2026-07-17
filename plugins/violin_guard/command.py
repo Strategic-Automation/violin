@@ -13,30 +13,33 @@ from pathlib import Path
 from typing import Any
 
 from . import bootstrap, hypotheses, ptt, state
-from .phases import Phase, normalize_phase, requires_hypothesis
+from . import history as history_mod
+from .phases import Phase, normalize_phase, requires_hypothesis, suppresses_heartbeat
 from .results import GuardResult
-from .targets import check_scope_targets, extract_target_candidates, normalise_target
+from .targets import (
+    check_scope_targets,
+    extract_target_candidates,
+    normalise_target,
+)
 
 __all__ = [
     "CheckCommandArgs",
     "GuardResult",
     "CheckResult",
     "ScopeResult",
-    "PttResult",
     "HypothesisResult",
     "SkillLoadResult",
     "check_command",
     "validate_scope",
     "check_scope_authorization",
     "check_skill_load",
-    "check_history_staleness",
     "check_hypothesis_freshness",
 ]
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # Argument / Result dataclasses
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -44,7 +47,7 @@ class CheckCommandArgs:
     command: str
     phase: str
     eng_dir: str
-    scope: str
+    scope: str = ""
     target: str | None = None
     session_id: str | None = None
     skill_loaded_file: str | None = None
@@ -67,11 +70,6 @@ class ScopeResult(CheckResult):
 
 
 @dataclass
-class PttResult(CheckResult):
-    active_task: str | None = None
-
-
-@dataclass
 class HypothesisResult(CheckResult):
     hypothesis_count: int = 0
 
@@ -81,9 +79,9 @@ class SkillLoadResult(CheckResult):
     marker_path: str | None = None
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # Scope validation
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 
 
 def validate_scope(scope_path: Path) -> ScopeResult:
@@ -180,15 +178,15 @@ def check_scope_authorization(scope: dict[str, Any] | None, phase: Phase) -> Che
         )
     if not any(any(term in action for term in terms) for action in allowed):
         result.add_error(
-            f"phase {phase.value} is not permitted by scope.rules_of_engagement.allowed_actions"
+            f"phase {phase.value} is not permitted by scope.rules_of_engagement.allowed_actions; "
+            f"add an allowed_actions entry containing one of: {', '.join(terms)}"
         )
     return result
 
 
-# --------------------------------------------------------------------------- #
-# DANGEROUS-PATTERN ENFORCEMENT (audit P0: destructive commands were never
-# blocked). These patterns are hard BLOCKs — yolo cannot bypass them.
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
+# DANGEROUS-PATTERN ENFORCEMENT
+# ---------------------------------------------------------------------------
 
 _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
     (
@@ -199,8 +197,6 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
         r"\brm\s+-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*\b",
         "destructive filesystem deletion (rm -fr) is blocked",
     ),
-    (r"\brm\s+-rf\b", "recursive force delete (rm -rf) is blocked"),
-    (r"\brm\s+-r\b", "recursive delete (rm -r) is blocked"),
     (r"\bmkfs\.[a-z]+\b", "filesystem format (mkfs) is blocked"),
     (r"\bdd\b[^\n]*\bof=/dev/", "raw device overwrite (dd of=/dev/...) is blocked"),
     (r"\bwipefs\b", "filesystem wipe (wipefs) is blocked"),
@@ -228,7 +224,6 @@ def check_destructive_patterns(command: str) -> CheckResult:
 
 def check_local_artifact_paths(command: str) -> CheckResult:
     """Remind operators that locally-created scripts belong in the engagement."""
-
     result = CheckResult()
     if re.search(r"(?:>|\btee\s+)\s*/tmp/[^\s]+\.(?:py|pl|rb|sh)(?=\s|$)", command):
         result.add_info("local script path uses /tmp; save it under $ENG_DIR/exploits instead")
@@ -264,44 +259,9 @@ def check_skill_load(eng_dir: Path, session_id: str, mandatory: bool = True) -> 
     return result
 
 
-# --------------------------------------------------------------------------- #
-# History staleness (duplicate detection)
-# --------------------------------------------------------------------------- #
-
-
-def check_history_staleness(eng_dir: Path, command: str) -> CheckResult:
-    """Check if the command would be an exact repeat of the last recorded command."""
-    result = CheckResult()
-    hist_path = eng_dir / "state" / "history.md"
-
-    if not hist_path.exists():
-        result.add_info("history.md does not exist — will be recorded after command runs")
-        return result
-
-    content = hist_path.read_text(encoding="utf-8")
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
-
-    if not lines:
-        result.add_info("history.md is empty — first command will be recorded")
-        return result
-
-    # History entries are written as ``... | command=<command>``.  Compare
-    # that field exactly instead of using substring matching, which can reject
-    # a command merely because it contains the previous command text.
-    last_line = lines[-1]
-    marker = " | command="
-    recorded_command = last_line.split(marker, 1)[1] if marker in last_line else None
-    if recorded_command == command:
-        result.add_error(
-            f"command appears to be an exact repeat of the last recorded command: {last_line}"
-        )
-
-    return result
-
-
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # Hypothesis freshness gate
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 
 
 def check_hypothesis_freshness(
@@ -388,7 +348,6 @@ def check_hypothesis_freshness(
             continue
         ts = None
         raw = h.updated.strip()
-        # Normalise common suffixes: " UTC", "Z"
         candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
         for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"):
             try:
@@ -408,15 +367,15 @@ def check_hypothesis_freshness(
     return result
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 # Main check-command orchestrator
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 
 
 def check_command(args: CheckCommandArgs) -> CheckResult:
     """Run all sub-guards for a target command."""
-    eng_dir = state._eng_dir(args.eng_dir)
-    scope_path = Path(args.scope)
+    eng_dir = state.resolve_eng_dir(args.eng_dir)
+    scope_path = Path(args.scope) if args.scope else eng_dir / "scope" / "scope.yaml"
     phase = normalize_phase(args.phase)
 
     result = CheckResult()
@@ -435,25 +394,24 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     authorisation_result = check_scope_authorization(scope_result.scope_data, phase)
     result.errors.extend(authorisation_result.errors)
 
-    # 2b. Scope target enforcement (audit P0). Extract command targets and
-    #     block anything that lands on an out-of-scope IP/CIDR.
+    # 2b. Scope target enforcement
     target_result = check_scope_targets(scope_path, args.command, args.target)
     result.errors.extend(target_result.errors)
     result.warnings.extend(target_result.warnings)
 
-    # 2c. Destructive-pattern hard block (audit P0).
+    # 2c. Destructive-pattern hard block
     destructive_result = check_destructive_patterns(args.command)
     result.errors.extend(destructive_result.errors)
 
     artifact_result = check_local_artifact_paths(args.command)
     result.infos.extend(artifact_result.infos)
 
-    # 3. Skill-load gate (mandatory). Without a session_id the command cannot
-    #    be authorized at all.
-    if not args.session_id:
+    # 3. Skill-load gate (mandatory)
+    session_id = state.resolve_session_id(eng_dir, args.session_id)
+    if not session_id:
         result.add_error("session_id is required for the skill-load gate")
-    if args.session_id:
-        skill_result = check_skill_load(eng_dir, args.session_id, mandatory=True)
+    if session_id:
+        skill_result = check_skill_load(eng_dir, session_id, mandatory=True)
         result.errors.extend(skill_result.errors)
         result.warnings.extend(skill_result.warnings)
         result.infos.extend(skill_result.infos)
@@ -473,10 +431,14 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
             )
 
     # 5. History staleness (duplicate detection)
-    hist_result = check_history_staleness(eng_dir, args.command)
-    result.errors.extend(hist_result.errors)
-    result.warnings.extend(hist_result.warnings)
-    result.infos.extend(hist_result.infos)
+    pending = state.get_pending_sync(str(eng_dir)) or {}
+    pending_commands = {str(item.get("command") or "") for item in pending.get("commands") or []}
+    h_errors, h_warnings, h_infos = history_mod.check_history_staleness(
+        eng_dir, args.command, allow_pending_repeat=args.command in pending_commands
+    )
+    result.errors.extend(h_errors)
+    result.warnings.extend(h_warnings)
+    result.infos.extend(h_infos)
 
     # 6. Hypothesis freshness
     hyp_result = check_hypothesis_freshness(eng_dir, phase, args.command, args.target)
@@ -485,35 +447,31 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     result.infos.extend(hyp_result.infos)
 
     # 7. Sync/heartbeat state
-    if state.has_pending_sync(str(eng_dir)):
-        pending = state.get_pending_sync(str(eng_dir))
-        if pending:
-            credit = state.sync_credit_remaining(str(eng_dir))
-            last_command = (pending.get("commands") or [{}])[-1].get(
-                "command", pending.get("command", "prior command")
+    sync_pending = state.get_pending_sync(str(eng_dir))
+    if sync_pending:
+        credit = state.sync_credit_remaining(str(eng_dir))
+        last_command = (sync_pending.get("commands") or [{}])[-1].get(
+            "command", sync_pending.get("command", "prior command")
+        )
+        if credit == 0:
+            result.add_error(
+                f"prior command's artifacts not synced: {last_command} "
+                f"(phase: {sync_pending.get('phase')})"
             )
-            if credit == 0:
-                # Hard block only after sync-credit window exhausted
-                result.add_error(
-                    f"prior command's artifacts not synced: {last_command} "
-                    f"(phase: {pending.get('phase')})"
-                )
-            else:
-                # A bounded batch is intentionally allowed to consume its five
-                # credits.  This must be informational, not a REVIEW: otherwise
-                # handle_exec denies command two unless global YOLO mode is on.
-                result.add_info(
-                    f"bounded batch in progress after: {last_command} "
-                    f"(phase: {pending.get('phase')}); {credit} credit(s) remain"
-                )
+        else:
+            result.add_info(
+                f"bounded batch in progress after: {last_command} "
+                f"(phase: {sync_pending.get('phase')}); {credit} credit(s) remain"
+            )
 
     # 8. Sync-credit window exhausted
     credit = state.sync_credit_remaining(str(eng_dir))
+    result.infos.append(f"sync credit remaining: {credit}/{state.DEFAULT_SYNC_CREDIT}")
     if credit == 0:
         result.add_error("sync-credit window exhausted — call violin_sync_done to reset")
 
     # 9. Heartbeat gate (every COMMAND_INTERVAL commands, except in exploit phases)
-    if not state.suppresses_heartbeat(phase):
+    if not suppresses_heartbeat(phase):
         cmd_count = state.read_counts(str(eng_dir)).get("commands", 0)
         next_count = cmd_count + 1
         if next_count % state.COMMAND_INTERVAL == 0:

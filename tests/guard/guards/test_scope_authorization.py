@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plugins.violin_guard.core.command import validate_scope
-from plugins.violin_guard.core.targets import (
+from plugins.violin_guard.command import validate_scope
+from plugins.violin_guard.targets import (
     check_scope_targets,
     extract_target_candidates,
     normalise_target,

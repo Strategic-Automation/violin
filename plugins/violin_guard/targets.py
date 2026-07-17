@@ -1,4 +1,4 @@
-"""Target extraction and scope enforcement for guarded commands.
+"""Target extraction, scope enforcement, and target resolution for guarded commands.
 
 This module owns the networking-aware parsing boundary.  It deliberately uses
 only Python's standard library: ``shlex`` for commands, ``urllib.parse`` for
@@ -8,7 +8,6 @@ URL authorities, and ``ipaddress`` for IP/CIDR validation.
 from __future__ import annotations
 
 import ipaddress
-import mimetypes
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -70,10 +69,14 @@ class _TargetPolicy:
         return self.allowed | self.excluded | self.research_hosts | self.callback_hosts
 
     def is_excluded(self, candidate: str) -> bool:
-        return candidate in self.excluded or _matches_network(candidate, self.excluded_networks)
+        return _matches_host(candidate, self.excluded) or _matches_network(
+            candidate, self.excluded_networks
+        )
 
     def is_assessment_target(self, candidate: str) -> bool:
-        return candidate in self.allowed or _matches_network(candidate, self.allowed_networks)
+        return _matches_host(candidate, self.allowed) or _matches_network(
+            candidate, self.allowed_networks
+        )
 
     def check_primary(self, candidate: str, result: TargetCheckResult) -> None:
         if self.is_excluded(candidate):
@@ -145,9 +148,6 @@ def normalise_target(value: str) -> str:
     """Return a comparable host, accepting legacy ``host (description)`` values."""
 
     raw = value.strip()
-    # Older hypothesis boards sometimes placed a path/description after the
-    # target.  urlsplit treats the opening parenthesis as part of the authority
-    # (``cctv.htb (``), so trim only this explicit legacy form before parsing.
     raw = re.split(r"\s+\(", raw, maxsplit=1)[0].strip()
     try:
         parsed = urlsplit(raw if "://" in raw else f"//{raw}")
@@ -156,6 +156,73 @@ def normalise_target(value: str) -> str:
     except ValueError:
         pass
     return raw.lower()
+
+
+def resolve_target(
+    scope_data: dict[str, Any],
+    role: str | None,
+    host_query: str | None,
+    field: str = "ip",
+) -> str | None:
+    """Resolve a single target value from scope data.
+
+    Resolution order:
+      1. Explicit role lookup
+      2. Host query against in-scope hosts
+      3. Fallback to first ip_address, then url/domain/hostname/role value
+
+    Returns the resolved raw string (before field extraction), or None if no
+    target is found.
+    """
+    targets_sec = scope_data.get("targets", {}) or {}
+    target_val: str | None = None
+
+    # 1. Resolve by role
+    if role:
+        roles = targets_sec.get("roles", {}) or {}
+        role_val = roles.get(role)
+        if isinstance(role_val, list) and role_val:
+            target_val = str(role_val[0]).strip()
+        elif role_val is not None:
+            target_val = str(role_val).strip()
+
+    # 2. Resolve by host query
+    if not target_val and host_query:
+        allowed_hosts = scope_hosts(scope_data)
+        norm_host = normalise_target(host_query)
+        if norm_host in allowed_hosts:
+            target_val = host_query.strip()
+
+    # 3. Fallback chain: ip_addresses -> urls/in_scope_urls -> domains -> hostnames -> roles
+    if not target_val:
+        for key in ("ip_addresses", "urls", "in_scope_urls", "domains", "hostnames"):
+            items = targets_sec.get(key, [])
+            if isinstance(items, list) and items:
+                target_val = str(items[0]).strip()
+                break
+
+        if not target_val:
+            roles = targets_sec.get("roles", {}) or {}
+            if roles:
+                first_val = next(iter(roles.values()))
+                if isinstance(first_val, list) and first_val:
+                    target_val = str(first_val[0]).strip()
+                elif first_val is not None:
+                    target_val = str(first_val).strip()
+
+    if not target_val:
+        return None
+
+    # Extract the requested field from a URL
+    if "://" in target_val and field in ("ip", "host"):
+        try:
+            parsed = urlsplit(target_val)
+            if parsed.hostname:
+                return parsed.hostname
+        except Exception:
+            pass
+
+    return target_val
 
 
 def check_scope_targets(
@@ -275,7 +342,6 @@ def _looks_like_local_path(token: str) -> bool:
         normalized.startswith(("/", "./", "../", "~/", "$", "%"))
         or "/" in normalized
         or any(normalized.lower().endswith(suffix) for suffix in _COMMON_FILE_SUFFIXES)
-        or mimetypes.guess_type(normalized)[0] is not None
     )
 
 
@@ -350,9 +416,29 @@ def _matches_network(candidate: str, networks: list[Network]) -> bool:
     )
 
 
+def _matches_host(candidate: str, allowed: set[str]) -> bool:
+    """Match an exact hostname or a scope wildcard such as ``*.example.test``."""
+    if candidate in allowed:
+        return True
+    return any(
+        pattern.startswith("*.") and candidate.endswith(pattern[1:]) and candidate != pattern[2:]
+        for pattern in allowed
+    )
+
+
 def _is_ip_network(value: str) -> bool:
     try:
         ipaddress.ip_network(value, strict=False)
     except ValueError:
         return False
     return True
+
+
+__all__ = [
+    "TargetCheckResult",
+    "extract_target_candidates",
+    "normalise_target",
+    "resolve_target",
+    "check_scope_targets",
+    "scope_hosts",
+]

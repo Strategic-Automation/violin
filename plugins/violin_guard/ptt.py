@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 
 from .phases import Phase, normalize_phase
@@ -19,7 +18,6 @@ __all__ = [
     "validate_ptt",
     "find_active_task",
     "task_matches_phase",
-    "is_stale",
     "update_task",
 ]
 
@@ -49,7 +47,6 @@ class PttTask:
     phase: str = ""
 
     def to_markdown(self) -> str:
-        datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
         return f"| {self.id} | {self.status} | {self.title} | {self.note} |"
 
 
@@ -84,9 +81,15 @@ def parse_ptt(path: Path) -> list[PttTask]:
     for line in content.splitlines():
         heading = re.match(r"^##\s+Phase:\s*(?P<phase>.+?)\s*$", line.strip(), re.IGNORECASE)
         if heading:
-            current_phase = (
-                heading.group("phase").strip().upper().replace("-", "_").replace(" ", "_")
-            )
+            raw_phase = heading.group("phase").strip()
+            # Human headings commonly add a parenthetical clarification.  The
+            # phase token remains the first bare word, rather than becoming an
+            # unmatchable value such as ``RECON_(WEB)``.
+            raw_phase = re.split(r"\s*\(", raw_phase, maxsplit=1)[0].strip()
+            try:
+                current_phase = normalize_phase(raw_phase).value
+            except ValueError:
+                current_phase = raw_phase.upper().replace("-", "_").replace(" ", "_")
             continue
         m = _PTT_RE.match(line.strip())
         if m:
@@ -145,12 +148,6 @@ def task_matches_phase(task: PttTask, phase: Phase | str) -> bool:
     return task.phase == expected.value
 
 
-def is_stale(path: Path) -> bool:
-    """True if every task is still [ ] (pristine)."""
-    tasks = parse_ptt(path)
-    return all(t.status == "[ ]" for t in tasks) and len(tasks) > 0
-
-
 def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
     """Update a single PTT task row IN PLACE.
 
@@ -200,3 +197,23 @@ def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
         if t.id == task_id:
             return t
     raise RuntimeError(f"internal error: updated task {task_id!r} not found after rewrite")
+
+
+def create_task(path: Path, task_id: str, title: str, phase: str, note: str = "") -> PttTask:
+    """Append an explicitly requested untouched task to the canonical phase."""
+    if not re.fullmatch(r"PT-[\w-]+", task_id):
+        raise ValueError("task id must use the PT- prefix")
+    canonical_phase = normalize_phase(phase).value
+    tasks = parse_ptt(path)
+    if any(task.id == task_id for task in tasks):
+        raise ValueError(f"PTT task {task_id!r} already exists")
+    content = path.read_text(encoding="utf-8") if path.exists() else "# Pentesting Task Tree\n"
+    heading = f"## Phase: {canonical_phase}"
+    if heading not in content:
+        content = (
+            content.rstrip()
+            + f"\n\n{heading}\n\n| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        )
+    content = content.rstrip() + f"\n| {task_id} | [ ] | {title.strip()} | {note.strip()} |\n"
+    path.write_text(content, encoding="utf-8")
+    return next(task for task in parse_ptt(path) if task.id == task_id)

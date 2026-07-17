@@ -5,7 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 
-from plugins.violin_guard.core import state
+from plugins.violin_guard import state
 
 
 def test_concurrent_credit_spends_are_serialised(tmp_path):

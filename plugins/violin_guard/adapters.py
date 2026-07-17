@@ -10,18 +10,15 @@ import re
 import shlex
 import shutil
 import subprocess
-from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
 __all__ = [
-    "build_nmap",
     "build_httpx",
     "build_nuclei",
     "build_ffuf",
     "build_netcat_listener",
     "detect_netcat_variant",
-    "available",
     "search_exploit",
     "AdapterError",
 ]
@@ -43,34 +40,6 @@ def _extra(values: Any) -> str:
     if not isinstance(items, list) or len(items) > 20:
         raise AdapterError("extra_args must be an array of at most 20 arguments")
     return " ".join(_quote(item) for item in items)
-
-
-def build_nmap(args: dict) -> str:
-    """Build nmap command: target, scan_type, ports, extra_args."""
-    target = args.get("target")
-    if not target:
-        raise AdapterError("target is required")
-
-    scan_type = args.get("scan_type", "-sCV")
-    if scan_type not in {"-sV", "-sC", "-sCV", "-sn", "-Pn"}:
-        raise AdapterError("unsupported scan_type")
-
-    parts = ["nmap", scan_type]
-
-    if args.get("ports"):
-        ports = str(args["ports"])
-        if ports == "-p-":
-            raise AdapterError("ports is a port specification; use '1-65535' for all ports")
-        if not re.fullmatch(r"[0-9,-]+", ports):
-            raise AdapterError("ports must contain only digits, commas, and hyphens")
-        parts.extend(["-p", ports])
-
-    extra = _extra(args.get("extra_args"))
-    if extra:
-        parts.append(extra)
-
-    parts.append(_quote(target))
-    return " ".join(parts)
 
 
 def build_httpx(args: dict) -> str:
@@ -136,14 +105,6 @@ def build_ffuf(args: dict) -> str:
         parts.append(extra)
 
     return " ".join(parts)
-
-
-BUILDERS = {
-    "nmap": build_nmap,
-    "httpx": build_httpx,
-    "nuclei": build_nuclei,
-    "ffuf": build_ffuf,
-}
 
 
 def detect_netcat_variant(version_output: str) -> str:
@@ -243,48 +204,6 @@ def build_netcat_listener(args: dict) -> str:
     bind_host = str(args.get("bind_host") or "").strip()
     parts = _LISTENER_BUILDERS[variant](path, port, bind_host, bool(args.get("keep_open")))
     return " ".join(_quote(part) for part in parts)
-
-
-@dataclass
-class ToolAvailability:
-    available: bool
-    path: str
-    message: str
-
-
-def available(tool: str, backend: str, container: str = "kali-pentest") -> ToolAvailability:
-    """Check if a tool is available locally or in a Docker container."""
-    if backend == "local":
-        path = shutil.which(tool)
-        return ToolAvailability(
-            available=bool(path),
-            path=path or "",
-            message=path or f"{tool} is not installed or not on PATH",
-        )
-
-    if backend != "docker":
-        return ToolAvailability(available=False, path="", message="backend must be local or docker")
-
-    if shutil.which("docker") is None:
-        return ToolAvailability(
-            available=False, path="", message="docker is not installed or not on PATH"
-        )
-
-    result = subprocess.run(
-        ["docker", "exec", container, "sh", "-lc", f"command -v {shlex.quote(tool)}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=15,
-        check=False,
-    )
-
-    return ToolAvailability(
-        available=result.returncode == 0,
-        path=result.stdout.strip() or "",
-        message=result.stdout.strip() or result.stderr.strip(),
-    )
 
 
 def search_exploit(args: dict) -> dict[str, Any]:

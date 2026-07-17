@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 
 # Make `violin_guard` resolvable
 _PLUGIN_ROOT = ROOT / "plugins" / "violin_guard"
@@ -50,11 +50,11 @@ pkg.__path__ = [str(_PLUGIN)]
 pkg.__package__ = "vgpkg"
 sys.modules["vgpkg"] = pkg
 
-TOOLS = _load_sub("tools", _PLUGIN / "tools.py")
+TOOLS = _load_sub("tools", _PLUGIN / "service.py")
 
 # Import core modules from the new location
-from plugins.violin_guard.core import bootstrap, command, execution, hypotheses, ptt, state
-from plugins.violin_guard.core.targets import extract_target_candidates
+from plugins.violin_guard import bootstrap, command, execution, history, hypotheses, ptt, state
+from plugins.violin_guard.targets import extract_target_candidates
 
 
 def _cp(code, out="", err=""):
@@ -81,10 +81,10 @@ def _fake_target_executor(monkeypatch):
 
     def fake_execute(command, *, eng_dir, phase, **kwargs):
         engagement = Path(eng_dir)
-        state.append_history(engagement, command, phase, 0, "evidence/executions/test.json")
+        history.append_history(engagement, command, phase, 0, "evidence/executions/test.json")
         remaining = state.spend_sync_credit(str(engagement))
         # Mirror real execution: tick command counter, mark pending sync, set heartbeat if interval reached
-        from plugins.violin_guard.core.phases import normalize_phase, suppresses_heartbeat
+        from plugins.violin_guard.phases import normalize_phase, suppresses_heartbeat
 
         count = state.tick_command(str(engagement))
         active = ptt.find_active_task(ptt.parse_ptt(engagement / "state" / "ptt.md"))
@@ -114,12 +114,10 @@ def _fake_target_executor(monkeypatch):
             "sync_credit_remaining": remaining,
         }
 
-    # Patch the execution module that vgpkg.tools imports (vgpkg.core.execution)
-    import sys
-
-    if "vgpkg.core.execution" in sys.modules:
-        monkeypatch.setattr(sys.modules["vgpkg.core.execution"], "execute", fake_execute)
+    # Patch the exact module used by the separately loaded vgpkg.tools facade.
+    monkeypatch.setattr(TOOLS.execution, "execute", fake_execute)
     monkeypatch.setattr(execution, "execute", fake_execute)
+    assert TOOLS.execution.execute is fake_execute
 
 
 def _init_e2e(tmp_path, skill_file):
@@ -132,7 +130,7 @@ def _init_e2e(tmp_path, skill_file):
     makes the CLI compute that canonical path itself, so we write there. We
     also pre-mark PT-010 as in-progress so the PTT phase gate (which BLOCKs
     until at least one PT row has moved past ``[ ]``) does not reject the very
-    first recon command — this mirrors a normal SCOPING->RECON handoff.
+    first recon command â€” this mirrors a normal SCOPING->RECON handoff.
     """
     eng = tmp_path / "10.10.10.10-2026-07-08"
     assert bootstrap.init_engagement(str(eng), host="10.10.10.10") == 0
@@ -337,17 +335,17 @@ def test_hypothesis_preserves_verified_rejection_details(tmp_path):
     assert "- **Rejection Reason:** source-verified stub" in text
 
 
-def test_hypothesis_write_rejects_descriptive_target(tmp_path):
-    with pytest.raises(ValueError, match="target must contain only"):
-        hypotheses.update_hypothesis(
-            tmp_path / "hypotheses.md",
-            in_scope_hosts={"cctv.htb"},
-            id="001",
-            title="Camera portal",
-            status="Candidate",
-            phase="VULN_RESEARCH",
-            target="cctv.htb (/zm/index.php, camera portal)",
-        )
+def test_hypothesis_write_accepts_descriptive_target_context(tmp_path):
+    record = hypotheses.update_hypothesis(
+        tmp_path / "hypotheses.md",
+        in_scope_hosts={"cctv.htb"},
+        id="001",
+        title="Camera portal",
+        status="Candidate",
+        phase="VULN_RESEARCH",
+        target="cctv.htb (/zm/index.php, camera portal)",
+    )
+    assert record.target == "cctv.htb (/zm/index.php, camera portal)"
 
 
 def test_exploitation_hypothesis_match_accepts_manual_field_order(tmp_path):
@@ -467,7 +465,7 @@ def test_multiple_active_ptt_tasks_block_target_execution(tmp_path):
 def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
     """Skill-load gate: check-command BLOCKs when the SKILL.md marker is absent,
     and handle_exec honours that BLOCK (status 'denied')."""
-    from plugins.violin_guard.core.command import check_skill_load
+    from plugins.violin_guard.command import check_skill_load
 
     # Real gate: missing marker file => BLOCK (error).
     gate = check_skill_load(Path(tmp_path / "no-skill-loaded"), "test", mandatory=True)
@@ -490,7 +488,7 @@ def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
 
 
 def test_skill_load_gate_identifies_stale_session_marker(tmp_path):
-    from plugins.violin_guard.core.command import check_skill_load
+    from plugins.violin_guard.command import check_skill_load
 
     state = tmp_path / "state"
     state.mkdir()
@@ -519,7 +517,7 @@ def test_init_engagement_creates_compliant_artifacts(tmp_path):
     assert any("authorisation.confirmed" in error for error in validation.errors)
 
     # bootstrap reports complete (exit 0) or REVIEW-only (pristine PTT is
-    # legitimate on a brand-new engagement — no task touched yet).
+    # legitimate on a brand-new engagement â€” no task touched yet).
     res = bootstrap.check_bootstrap(str(eng), auto_repair=False)
     assert int(res) in (0, 2), "bootstrap must be complete (or REVIEW for pristine PTT) after init"
 
@@ -590,7 +588,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
 
     # The guard captures the batch ID from pending state and appends its marker
     # to the PTT note; operators need not copy opaque internal IDs.
-    from plugins.violin_guard.core import state as _state
+    from plugins.violin_guard import state as _state
 
     pending = _state.get_pending_sync(str(eng))
     assert pending, "a batch must be pending before review"

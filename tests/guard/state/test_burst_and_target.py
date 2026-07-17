@@ -11,11 +11,18 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from plugins.violin_guard import tools  # noqa: E402
-from plugins.violin_guard.core import bootstrap, execution, ptt, service, state  # noqa: E402
+from plugins.violin_guard import (  # noqa: E402
+    bootstrap,
+    execution,
+    ptt,  # noqa: E402
+    service,  # noqa: E402
+    state,
+)
+from plugins.violin_guard import service as tools  # noqa: E402
+from plugins.violin_guard.targets import resolve_target  # noqa: E402
 
 _SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
@@ -35,6 +42,34 @@ engagement:
   type: authorised-pentest
   client: test
 """
+
+
+def test_relative_engagement_paths_stay_under_profile_root(monkeypatch):
+    monkeypatch.delenv("VIOLIN_ENG_ROOT", raising=False)
+
+    assert state.resolve_eng_dir("engagements/demo") == (ROOT / "engagements" / "demo").resolve()
+
+
+def test_public_handlers_serialize_expected_errors(tmp_path):
+    cases = (
+        (service.handle_status, {}),
+        (
+            service.handle_exec_status,
+            {"eng_dir": str(tmp_path), "execution_id": "not-an-execution-id"},
+        ),
+        (service.handle_search_exploit, {}),
+    )
+
+    for handler, args in cases:
+        result = json.loads(handler(args))
+        assert result["status"] == "error"
+        assert result["error"]
+
+
+def test_target_role_preserves_ipv6_url_hostname():
+    scope = {"targets": {"roles": {"web": "http://[2001:db8::1]:8080"}}}
+
+    assert resolve_target(scope, role="web", host_query=None, field="host") == "2001:db8::1"
 
 
 def _run(*args):
@@ -91,7 +126,7 @@ def test_target_host_ip(eng):
 
 def test_target_out_of_scope_host_returns_in_scope_ip(eng):
     """handle_target resolves from scope.yaml (first in-scope IP) and does NOT
-    perform scope validation itself — the per-command check-command gate is the
+    perform scope validation itself â€” the per-command check-command gate is the
     enforcement point. So an out-of-scope --host still yields rc=0 with the
     in-scope IP, proving resolution is scope-file driven, not host-argument driven."""
     r = _run("target", "--eng-dir", str(eng), "--host", "10.99.99.99")

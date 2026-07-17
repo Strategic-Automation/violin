@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core import adapters, execution
+from plugins.violin_guard import adapters, execution
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -98,20 +98,12 @@ def test_executor_rejects_cwd_escape(tmp_path):
 
 
 def test_adapter_builders_are_structured_and_bounded():
-    assert (
-        adapters.build_nmap({"target": "10.0.0.1", "ports": "80,443"})
-        == "nmap -sCV -p 80,443 10.0.0.1"
-    )
-    with pytest.raises(adapters.AdapterError, match="1-65535"):
-        adapters.build_nmap({"target": "10.0.0.1", "ports": "-p-"})
     assert "FUZZ" in adapters.build_ffuf(
         {
             "url": "http://10.0.0.1/FUZZ",
             "wordlist": "/tmp/common.txt",
         }
     )
-    with pytest.raises(adapters.AdapterError):
-        adapters.build_nmap({"target": "10.0.0.1", "ports": "80; rm -rf /"})
 
 
 def test_listener_flags_are_pinned_per_netcat_variant():

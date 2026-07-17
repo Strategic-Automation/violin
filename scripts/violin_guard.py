@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point for violin_guard — delegates to plugins/violin_guard/core/."""
+"""CLI entry point for violin_guard — delegates to plugins/violin_guard/."""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ import json
 import sys
 from pathlib import Path
 
-# Bootstrap plugin core path - add the parent of the plugin directory
+# Bootstrap the profile root so the plugin package can be imported directly.
 _PROFILE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
 
-from plugins.violin_guard.core import bootstrap, command, state
+from plugins.violin_guard import bootstrap, command, state
 
 
 def _print_result(result) -> int:
@@ -57,21 +57,25 @@ def cmd_validate_scope(args: argparse.Namespace) -> int:
 
 
 def cmd_check_skill_loaded(args: argparse.Namespace) -> int:
-    result = command.check_skill_load(state._eng_dir(args.eng_dir), args.session_id, mandatory=True)
+    result = command.check_skill_load(
+        state.resolve_eng_dir(args.eng_dir), args.session_id, mandatory=True
+    )
     return _print_result(result)
 
 
 def cmd_record_history(args: argparse.Namespace) -> int:
-    state.append_history(args.eng_dir, args.command, args.phase, args.exit_code, args.evidence)
+    from plugins.violin_guard import history
+
+    history.append_history(args.eng_dir, args.command, args.phase, args.exit_code, args.evidence)
     print("OK: history recorded")
     return 0
 
 
 def cmd_record_ptt(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core import ptt
+    from plugins.violin_guard import ptt
 
     ptt.update_task(
-        state._eng_dir(args.eng_dir) / "state" / "ptt.md",
+        state.resolve_eng_dir(args.eng_dir) / "state" / "ptt.md",
         args.id,
         args.status,
         args.note or "",
@@ -81,18 +85,18 @@ def cmd_record_ptt(args: argparse.Namespace) -> int:
 
 
 def cmd_sync_done(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core.service import handle_sync_done
+    from plugins.violin_guard import service
 
-    out = json.loads(handle_sync_done(vars(args)))
+    out = json.loads(service.handle_sync_done(vars(args)))
     print(out)
     return 0 if out["status"] == "ok" else 1
 
 
 def cmd_rebind_pending_batch(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core.service import handle_rebind_pending_batch
+    from plugins.violin_guard import service
 
     out = json.loads(
-        handle_rebind_pending_batch(
+        service.handle_rebind_pending_batch(
             {
                 "eng_dir": args.eng_dir,
                 "batch_id": args.batch_id,
@@ -115,26 +119,19 @@ def cmd_heartbeat_done(args: argparse.Namespace) -> int:
 
 def cmd_message_tick(args: argparse.Namespace) -> int:
     """Handle message tick - increment counter and check heartbeat gate."""
-    from plugins.violin_guard.core.state import (
-        get_heartbeat_reason,
-        has_heartbeat_pending,
-        tick_message,
-    )
 
     eng_dir = args.eng_dir
-    count = tick_message(eng_dir)
+    count = state.tick_message(eng_dir)
 
     # Check if heartbeat is already pending (from previous tick)
-    if has_heartbeat_pending(eng_dir):
-        reason = get_heartbeat_reason(eng_dir)
+    if state.has_heartbeat_pending(eng_dir):
+        reason = state.get_heartbeat_reason(eng_dir)
         print(f"BLOCK: heartbeat pending: {reason}")
         return 1  # BLOCK
 
     # Check if heartbeat should be triggered now (every MESSAGE_INTERVAL messages)
     if count % 30 == 0:
-        from plugins.violin_guard.core.state import set_heartbeat_pending
-
-        set_heartbeat_pending(
+        state.set_heartbeat_pending(
             eng_dir,
             f"Reached {count} LLM messages. Review engagement files for drift.",
         )
@@ -146,21 +143,21 @@ def cmd_message_tick(args: argparse.Namespace) -> int:
 
 
 def cmd_eng_root(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core import state
+    from plugins.violin_guard import state
 
     eng_dir = args.eng_dir_option or args.eng_dir
     eng_root = state._eng_root()
     print(f"ENG_ROOT={eng_root}")
     if eng_dir:
-        resolved = state._eng_dir(eng_dir)
+        resolved = state.resolve_eng_dir(eng_dir)
         print(f"resolved={resolved}")
     return 0
 
 
 def cmd_check_release(args) -> int:
-    from plugins.violin_guard.core.release import check_release
+    from plugins.violin_guard import release
 
-    result = check_release()
+    result = release.check_release()
     for item in result.errors:
         print(f"ERROR: {item}")
     for item in result.warnings:
@@ -171,9 +168,9 @@ def cmd_check_release(args) -> int:
 
 
 def cmd_search_exploit(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core.adapters import search_exploit
+    from plugins.violin_guard import adapters
 
-    result = search_exploit(
+    result = adapters.search_exploit(
         {
             "product": args.product,
             "version": args.version,
@@ -186,10 +183,10 @@ def cmd_search_exploit(args: argparse.Namespace) -> int:
 
 
 def cmd_target(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core.service import handle_target
+    from plugins.violin_guard import service
 
     out = json.loads(
-        handle_target(
+        service.handle_target(
             {
                 "eng_dir": args.eng_dir,
                 "scope": args.scope or "",
@@ -207,10 +204,10 @@ def cmd_target(args: argparse.Namespace) -> int:
 
 
 def cmd_exec_burst(args: argparse.Namespace) -> int:
-    from plugins.violin_guard.core.service import handle_exec_burst
+    from plugins.violin_guard import service
 
     out = json.loads(
-        handle_exec_burst(
+        service.handle_exec_burst(
             {
                 "eng_dir": args.eng_dir,
                 "scope": args.scope,
@@ -246,7 +243,7 @@ def main() -> int:
     p.add_argument("--command", required=True)
     p.add_argument("--phase", required=True)
     p.add_argument("--eng-dir", required=True)
-    p.add_argument("--scope", required=True)
+    p.add_argument("--scope", default="", help="defaults to <eng-dir>/scope/scope.yaml")
     p.add_argument("--target", default="", help="Explicit primary target host/IP/URL")
     p.add_argument("--session-id", default="")
     p.add_argument("--skill-loaded-file", default="")
@@ -348,7 +345,7 @@ def main() -> int:
     # exec-burst
     p = sub.add_parser("exec-burst", help="Single-approval bounded command batch")
     p.add_argument("--eng-dir", required=True)
-    p.add_argument("--scope", required=True)
+    p.add_argument("--scope", default="", help="defaults to <eng-dir>/scope/scope.yaml")
     p.add_argument("--phase", required=True)
     p.add_argument("--target", required=True, help="Explicit primary target for the batch")
     p.add_argument("--commands-file", default="")

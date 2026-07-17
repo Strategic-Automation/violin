@@ -13,8 +13,8 @@ from pathlib import Path
 
 import yaml
 
-from . import state
 from .results import GuardResult
+from .state import resolve_eng_dir
 
 __all__ = [
     "init_engagement",
@@ -65,8 +65,8 @@ def _derive_host(eng_dir: Path) -> str:
 
 
 def _profile_root() -> Path:
-    """Profile root = plugins/violin_guard/../../.."""
-    return Path(__file__).resolve().parents[3]
+    """Profile root = plugins/violin_guard/../.."""
+    return Path(__file__).resolve().parents[2]
 
 
 def _create_artifact(
@@ -162,7 +162,7 @@ def init_engagement(
     eng_dir: str | Path, host: str | None = None, *, ctf: bool = False, session_id: str = ""
 ) -> int:
     """Create a complete, guard-clean engagement directory from templates."""
-    eng_dir = state._eng_dir(eng_dir)
+    eng_dir = resolve_eng_dir(eng_dir)
     result = BootstrapResult()
     host = (host or "").strip() or _derive_host(eng_dir)
 
@@ -206,7 +206,7 @@ def check_bootstrap(
 ) -> BootstrapResult:
     """Verify engagement bootstrap is complete (and optionally auto-repair)."""
     result = BootstrapResult()
-    eng_dir = state._eng_dir(eng_dir)
+    eng_dir = resolve_eng_dir(eng_dir)
 
     if not eng_dir.exists():
         result.add_error("BOOTSTRAP REQUIRED: engagement directory not found")

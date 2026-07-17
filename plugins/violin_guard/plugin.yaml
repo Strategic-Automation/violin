@@ -16,12 +16,13 @@ provides_tools:
   - violin_target
   - violin_status
   - violin_search_exploit
-  - violin_nmap
   - violin_httpx
   - violin_nuclei
   - violin_ffuf
   - violin_listener
 hooks:
+  - pre_tool_call
+  - post_tool_call
   - pre_llm_call
   - on_session_reset
   - on_session_finalize

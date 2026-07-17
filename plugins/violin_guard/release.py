@@ -25,9 +25,7 @@ from .results import GuardResult
 __all__ = [
     "GuardResult",
     "ReleaseCheckResult",
-    "StructureResult",
     "check_release",
-    "validate_plugin_structure",
     "resolve_reference",
 ]
 
@@ -50,13 +48,9 @@ class ReleaseCheckResult(GuardResult):
     pass
 
 
-@dataclass
-class StructureResult(GuardResult):
-    pass
-
-
 def _plugin_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    # plugins/violin_guard/release.py -> plugins/violin_guard
+    return Path(__file__).resolve().parent
 
 
 def resolve_reference(source: Path, reference: str) -> Path:
@@ -91,7 +85,7 @@ def check_release() -> ReleaseCheckResult:
         result.add_error("plugin.yaml not found")
 
     # 2. CHANGELOG.md
-    changelog = root.parents[1] / "CHANGELOG.md"
+    changelog = root.parent.parent / "CHANGELOG.md"
     if changelog.exists():
         result.add_info("CHANGELOG.md present")
     else:
@@ -138,7 +132,7 @@ def check_release() -> ReleaseCheckResult:
 
     # 4. Heavy checks (ruff + pytest), opt-out via env.
     if os.environ.get("VIOLIN_CHECK_RELEASE_SKIP_HEAVY") != "1":
-        repo_path = root.parents[1]
+        repo_path = root.parent.parent
         repo_root = str(repo_path)
         python = _project_python(repo_path)
         try:
@@ -185,14 +179,14 @@ def check_release() -> ReleaseCheckResult:
         result.add_info("heavy checks skipped (VIOLIN_CHECK_RELEASE_SKIP_HEAVY=1)")
 
     # 5. Tests directory
-    tests_dir = root.parents[1] / "tests"
+    tests_dir = root.parent.parent / "tests"
     if tests_dir.exists():
         result.add_info(f"tests directory found: {tests_dir}")
     else:
         result.add_warning("tests directory not found")
 
-    # 6. Skill documentation staleness scan (corrected forbidden set).
-    profile_root = root.parents[1]
+    # 6. Skill documentation staleness scan.
+    profile_root = root.parent.parent
     skills_root = profile_root / "skills"
     forbidden = {
         "scripts/guard/": "removed legacy guard package",
@@ -220,83 +214,5 @@ def check_release() -> ReleaseCheckResult:
                     )
         if not any("stale skill reference" in e for e in result.errors):
             result.add_info("skill documentation matches the current guard surface")
-
-    return result
-
-
-def validate_plugin_structure() -> StructureResult:
-    """Validate plugin directory structure against Hermes conventions."""
-    result = StructureResult()
-    root = _plugin_root()
-
-    # Required files
-    required = {
-        "plugin.yaml": "plugin manifest",
-        "__init__.py": "registration entry point",
-        "schemas.py": "tool schemas",
-        "tools.py": "tool handlers",
-    }
-
-    for fname, desc in required.items():
-        path = root / fname
-        if path.exists():
-            result.add_info(f"found {fname} ({desc})")
-        else:
-            result.add_error(f"missing {fname} ({desc})")
-
-    # core/ subpackage
-    core_dir = root / "core"
-    if core_dir.is_dir():
-        core_modules = [
-            "service.py",
-            "command.py",
-            "ptt.py",
-            "hypotheses.py",
-            "phases.py",
-            "state.py",
-            "execution.py",
-            "adapters.py",
-            "bootstrap.py",
-            "release.py",
-            "storage.py",
-        ]
-        for mod in core_modules:
-            if (core_dir / mod).exists():
-                result.add_info(f"core/{mod} present")
-            else:
-                result.add_warning(f"core/{mod} missing")
-
-        # __init__.py exports
-        init_content = (core_dir / "__init__.py").read_text(encoding="utf-8")
-        if "__all__" in init_content:
-            result.add_info("core/__init__.py defines __all__")
-        else:
-            result.add_warning("core/__init__.py missing __all__")
-    else:
-        result.add_error("core/ subpackage directory missing")
-
-    # plugin.yaml structure
-    plugin_yaml = root / "plugin.yaml"
-    if plugin_yaml.exists():
-        import yaml
-
-        try:
-            data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
-            for key in ("name", "version", "description", "provides_tools"):
-                if key in data:
-                    result.add_info(f"plugin.yaml has {key}")
-                else:
-                    result.add_error(f"plugin.yaml missing {key}")
-        except Exception as e:
-            result.add_error(f"plugin.yaml parse error: {e}")
-
-    # __init__.py has register(ctx)
-    init_py = root / "__init__.py"
-    if init_py.exists():
-        content = init_py.read_text(encoding="utf-8")
-        if "def register(" in content:
-            result.add_info("__init__.py has register(ctx)")
-        else:
-            result.add_error("__init__.py missing register(ctx)")
 
     return result

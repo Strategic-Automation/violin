@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from plugins.violin_guard.core.targets import check_scope_targets
+from plugins.violin_guard.targets import check_scope_targets
 
 
 def test_public_research_host_is_not_treated_as_an_assessment_target(tmp_path):

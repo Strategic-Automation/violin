@@ -32,6 +32,11 @@ RECORD_PTT_SCHEMA = {
             "id": {"type": "string"},
             "status": {"type": "string"},
             "note": {"type": "string"},
+            "title": {
+                "type": "string",
+                "description": "Required when explicitly creating a new PTT task",
+            },
+            "phase": {"type": "string", "description": "Phase for an explicitly created PTT task"},
         },
         "required": ["eng_dir", "id"],
         "additionalProperties": False,
@@ -76,7 +81,7 @@ RECORD_HYPOTHESIS_SCHEMA = {
                 "description": "Why a rejected hypothesis is safe to stop pursuing",
             },
         },
-        "required": ["eng_dir", "service", "port"],
+        "required": ["eng_dir"],
         "additionalProperties": True,
     },
 }
@@ -103,7 +108,7 @@ EXEC_SCHEMA = {
                 "description": "Run as a tracked background process; use status/cancel for lifecycle management",
             },
         },
-        "required": ["eng_dir", "scope", "phase", "command", "target"],
+        "required": ["eng_dir", "phase", "command", "target"],
         "additionalProperties": False,
     },
 }
@@ -195,7 +200,7 @@ EXEC_BURST_SCHEMA = {
             "cwd": {"type": "string", "description": "Engagement-relative working directory"},
             "continue_on_error": {"type": "boolean", "default": False},
         },
-        "required": ["scope", "phase", "target"],
+        "required": ["eng_dir", "phase", "target"],
     },
 }
 
@@ -253,29 +258,13 @@ _ADAPTER_COMMON = {
     "extra_args": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
 }
 
-NMAP_SCHEMA = {
-    "description": "Run a typed, scope-checked nmap scan through violin_exec.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            **_ADAPTER_COMMON,
-            "scan_type": {"type": "string", "enum": ["-sV", "-sC", "-sCV", "-sn", "-Pn"]},
-            "ports": {
-                "type": "string",
-                "description": "Port specification, e.g. 80,443 or 1-65535; do not include -p",
-            },
-        },
-        "required": ["eng_dir", "scope", "phase", "target"],
-        "additionalProperties": False,
-    },
-}
 
 HTTPX_SCHEMA = {
     "description": "Run typed HTTP probing through violin_exec.",
     "parameters": {
         "type": "object",
         "properties": _ADAPTER_COMMON,
-        "required": ["eng_dir", "scope", "phase", "target"],
+        "required": ["eng_dir", "phase", "target"],
         "additionalProperties": False,
     },
 }
@@ -289,7 +278,7 @@ NUCLEI_SCHEMA = {
             "templates": {"type": "string"},
             "severity": {"type": "string"},
         },
-        "required": ["eng_dir", "scope", "phase", "target"],
+        "required": ["eng_dir", "phase", "target"],
         "additionalProperties": False,
     },
 }
@@ -304,7 +293,7 @@ FFUF_SCHEMA = {
             "wordlist": {"type": "string"},
             "headers": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["eng_dir", "scope", "phase", "url", "wordlist"],
+        "required": ["eng_dir", "phase", "url", "wordlist"],
         "additionalProperties": False,
     },
 }
@@ -333,7 +322,7 @@ LISTENER_SCHEMA = {
             "cwd": {"type": "string"},
             "label": {"type": "string"},
         },
-        "required": ["eng_dir", "scope", "phase", "target", "port"],
+        "required": ["eng_dir", "phase", "target", "port"],
         "additionalProperties": False,
     },
 }

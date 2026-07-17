@@ -13,10 +13,10 @@
 </p>
 
 <p align="center">
-  <b>31 playbooks · 8 references · required execution guard · 0 brokers · Hermes-native</b>
+  <b>31 playbooks · 10 references · 11 templates · required execution guard · Hermes-native</b>
 </p>
 
-Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, skill-based playbooks, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI is retained only for diagnostics and recovery. No extra API keys, no per-profile credentials, no lock-in.
+Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, three routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
 
 ```
 hermes profile install https://github.com/Strategic-Automation/violin
@@ -28,12 +28,12 @@ hermes -p violin
 ## Features
 
 <table>
-<tr><td width="280"><b>🔬 31 Methodology Playbooks</b></td><td>7 methodology playbooks (6 phase: scoping, recon, vuln-research, exploitation, reporting, post-exploitation — plus a tools catalog) + 24 per-vulnerability-class playbooks covering OWASP Top 10, OWASP API Top 10, LLM Top 10, and beyond.</td></tr>
-<tr><td><b>🛡️ Multi-Layer Safety</b></td><td>Interactive scoping (8 questions) → scope validation → guard check → approval gates — every target-touching command validated before execution.</td></tr>
+<tr><td width="280"><b>🔬 31 Methodology Playbooks</b></td><td>7 operational playbooks (five execution phases, optional post-exploitation, and the tools catalog) + 24 vulnerability-class playbooks, routed across the `pentest`, `web-attacks`, and `access-control` skills.</td></tr>
+<tr><td><b>🛡️ Multi-Layer Safety</b></td><td>Interactive scoping (9 questions) → scope validation → guard check → approval gates — every target-touching command validated before execution.</td></tr>
 <tr><td><b>🧠 Pentesting Task Tree</b></td><td>Structured artifact tracking every task via `[x]/[ ]/[~]` markers across phases, with executor-owned history, hypothesis linking, and guard-bound batch reviews.</td></tr>
 <tr><td><b>🌐 Browser + Web Research</b></td><td>Browser toolset for website enumeration. Web toolset for CVE lookup, exploit search, and OSINT.</td></tr>
-<tr><td><b>📋 Evidence-Driven Reporting</b></td><td>Reproducible evidence with screenshots, tool output, request/response pairs. CVSS 3.1 scoring + auto-patch remediation.</td></tr>
-<tr><td><b>🔗 Hermes-Native</b></td><td>Inherits your existing Hermes provider/model. No extra API keys, no per-profile credentials, no lock-in.</td></tr>
+<tr><td><b>📋 Evidence-Driven Reporting</b></td><td>Reproducible evidence with screenshots, tool output, and request/response pairs. CVSS 3.1 + 4.0 crosswalks and optional remediation patches.</td></tr>
+<tr><td><b>🔗 Hermes-Native</b></td><td>Inherits your existing Hermes provider, model, and tool backends. Violin introduces no separate credential store or broker.</td></tr>
 </table>
 
 ---
@@ -56,7 +56,8 @@ hermes -p violin
 
 - **Hermes Agent >= 0.18.0** — installed and on your PATH
 - **Hermes provider configured** — Violin inherits your normal Hermes provider/model
-- **Kali Linux or Parrot OS recommended** — Docker Kali, WSL, macOS, Windows, and remote jump boxes also work
+- **Kali Linux or Parrot OS** — the primary execution environments; Docker Kali is the supported fallback when the host lacks pentest tools
+- **Optional web/browser backend** — required only for Hermes web or browser capabilities; Violin does not add separate API credentials
 
 </details>
 
@@ -97,7 +98,7 @@ flowchart LR
 
 | Phase | Action | Safety Gate |
 |-------|--------|-------------|
-| **1. Scoping** | 8 questions via `clarify` | User approval |
+| **1. Scoping** | 9 questions via `clarify` | User approval |
 | **2. Reconnaissance** | Passive OSINT → tech detection → active scanning | Guard + approval |
 | **3. Vuln Research** | CVE lookup, exploit search, attack surface analysis | Guard check |
 | **4. Exploitation** | Safe PoC validation per vulnerability class | Guard + user approval |
@@ -117,13 +118,15 @@ graph TB
     end
     
     subgraph "Violin Skills"
-        SK["SKILL.md"]
+        SK["pentest orchestrator"]
+        WEB["web-attacks skill"]
+        AC["access-control skill"]
         PB["31 Playbooks"]
-        REF["8 References"]
-        TEMP["10 Templates"]
+        REF["10 References"]
+        TEMP["11 Templates"]
     end
     
-    subgraph "Hermes Built-in Tools"
+    subgraph "Configured Toolsets"
         T["terminal"]
         W["web"]
         B["browser"]
@@ -141,7 +144,11 @@ graph TB
     
     HE -->|"hermes -p violin"| VI
     VI -->|"loads"| SK
-    SK -->|"routes to"| PB
+    VI -->|"requires"| GUARD
+    SK -->|"routes to"| WEB & AC & PB
+    WEB --> PB
+    AC --> PB
+    SK --> REF & TEMP
     HE -->|"calls"| T & W & B & F & CE & S & CL & D & V & TD & VG
     HE -->|"inherits"| LLM
 
@@ -159,7 +166,7 @@ graph TB
 - `memory.memory_enabled: false` — no global memory recall/write
 - `memory.user_profile_enabled: false` — no global user profile access
 - Engagement continuity lives in project files (scope docs, evidence, reports)
-- Start a fresh Hermes conversation per engagement to keep boundaries clean
+- Keep one Hermes conversation per engagement; after compression, resume in that conversation from `$ENG_DIR/state/`
 
 ---
 
@@ -168,7 +175,7 @@ graph TB
 ```mermaid
 flowchart LR
     subgraph "Layer 1"
-        A["8 Scoping Questions"]
+        A["9 Scoping Questions"]
         B["Written Authorisation"]
     end
     subgraph "Layer 2"
@@ -189,11 +196,11 @@ flowchart LR
 
 - **Authorised testing only** — no probing before scoping is complete
 - **Approval gates** — scope, active recon, and exploitation each require explicit user approval
-- **Guard check** — every target-touching terminal command validated by `violin_guard.py` (exit 0=allowed, 1=blocked, 2=review)
+- **Guard check** — every target-touching command validated through `violin_exec` or another typed guard tool; Violin's `pre_tool_call` plugin hook blocks clearly target-touching raw `terminal` calls before execution. The CLI exposes the same check for diagnostics (exit 0=allowed, 1=blocked, 2=review)
 - **Non-destructive by default** — exploitation limited to safe, reproducible PoC
 - **Evidence-first** — every finding backed by reproducible tool output, screenshots, request/response pairs
 - **Exploit-first validation** — no hypothesis advances to Validated without a verification command
-- **Fresh context per objective** — structured state summaries on phase transitions to prevent context bloat
+- **Stateful recovery** — phase summaries and checkpoints restore the current engagement after context compression without starting a new conversation
 
 Full safety policy: `skills/pentest/references/standards.md`. Forbidden actions: `.hermes.md` §Forbidden Behaviour.
 
@@ -207,17 +214,22 @@ violin/
 ├── SOUL.md                 # Agent identity — senior pentester persona
 ├── config.yaml             # Profile config (toolsets, safety, memory)
 ├── distribution.yaml       # Hermes distribution manifest
-├── scripts/                # Guard & smoke tests
-│   ├── violin_guard.py     # CLI entrypoint for the guard state machine
-│   └── guard/              # Guard logic: bootstrap, scope, command, record, sync, release
+├── plugins/violin_guard/   # Required Hermes guard plugin and execution boundary
+│   ├── terminal_policy.py  # Best-effort blocks for clearly target-touching raw terminal calls
+│   └── code_execution_audit.py # Engagement audit contract for execute_code
+├── scripts/                # CLI and release smoke helpers
+│   ├── violin_guard.py     # Diagnostic/admin CLI over the plugin modules
 │   ├── smoke-test.sh       # Linux/macOS release smoke
 │   ├── smoke-test.ps1      # Windows supplemental smoke
 │   └── kali.sh             # Docker Kali helper
-└── skills/pentest/         # Pentest methodology
-    ├── SKILL.md            # Orchestrator skill (playbook index, workflow)
-    ├── playbooks/          # 31 playbooks (7 phase + 24 vuln-class)
-    ├── references/         # 8 reference documents
-    └── templates/          # 10 engagement, evidence, and methodology templates
+└── skills/
+    ├── pentest/            # Orchestrator, workflow, shared policy, and templates
+    │   ├── SKILL.md
+    │   ├── playbooks/      # 23 operational and vulnerability-class playbooks
+    │   ├── references/     # 10 reference files
+    │   └── templates/      # 11 engagement, evidence, and methodology helpers
+    ├── web-attacks/        # Routed skill + 5 injection/web playbooks
+    └── access-control/     # Routed skill + 3 authentication/authorisation playbooks
 ```
 
 ---
@@ -228,7 +240,7 @@ violin/
 python scripts/violin_guard.py check-release
 ```
 
-Validates: YAML structure, 31 playbooks present, required sections in vuln playbooks, no stale evidence paths, all markdown references resolve.
+Validates the plugin manifest and registered tools, isolated Hermes-style plugin import, stale skill references, Ruff, and the full pytest suite.
 
 ---
 
@@ -250,24 +262,6 @@ docker exec kali-pentest apt install -y kali-linux-headless
 ```
 
 </details>
-
----
-
-## Optional MCP Servers
-
-<details>
-<summary><b>Enhance Violin with community MCP servers</b></summary>
-
-| MCP Server | Install | Purpose |
-|-----------|---------|---------|
-| `onlinecybertools-mcp-server` | `npx -y onlinecybertools-mcp-server` | 280+ OSINT/recon tools — whois, SSL check, JWT decode, network diag, hashes |
-| `runyourempire/4DA` | `npx -y @runyourempire/4DA` | Live CVE scanning, dependency health, upgrade planning |
-
-Add to `config.yaml` under `mcp_servers:` after install. See [Hermes MCP docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp).
-
-</details>
-
----
 
 ## Contributing
 

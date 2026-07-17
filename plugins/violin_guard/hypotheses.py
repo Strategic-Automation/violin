@@ -9,8 +9,7 @@ valid phase, and a target that is in scope (audit P1-hyp).
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,13 +19,9 @@ from .targets import normalise_target
 
 __all__ = [
     "Hypothesis",
-    "HypothesisValidationResult",
     "parse_hypotheses",
-    "validate_hypotheses",
-    "find_by_service_port",
     "update_hypothesis",
     "validate_hypothesis_record",
-    "needs_hypothesis",
 ]
 
 # Canonical states
@@ -35,7 +30,6 @@ LEGACY_ALIASES = {
     "Researching": "Candidate",
     "Verified": "Validated",
 }
-ALL_STATES = CANONICAL_STATES + tuple(LEGACY_ALIASES.keys())
 
 _FIELD_NAMES = {
     "status": "status",
@@ -134,26 +128,6 @@ class Hypothesis:
         return "\n".join(lines) + "\n"
 
 
-@dataclass
-class HypothesisValidationResult:
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    hypotheses: list[Hypothesis] = field(default_factory=list)
-
-    def add_error(self, msg: str) -> None:
-        self.errors.append(msg)
-
-    def add_warning(self, msg: str) -> None:
-        self.warnings.append(msg)
-
-    def exit_code(self) -> int:
-        if self.errors:
-            return 1
-        if self.warnings:
-            return 2
-        return 0
-
-
 def _normalize_status(status: str) -> str:
     return LEGACY_ALIASES.get(status.strip(), status.strip())
 
@@ -200,18 +174,22 @@ def parse_hypotheses(path: Path) -> list[Hypothesis]:
 
 
 def _parse_heading(line: str) -> Hypothesis | None:
-    if not line.startswith("### H-"):
+    line = line.lstrip("- ").strip()
+    if not line.startswith("### H-") and not line.startswith("H-"):
         return None
-    identifier, separator, title = line.removeprefix("### H-").partition(":")
+    identifier, separator, title = line.removeprefix("### ").removeprefix("H-").partition(":")
     if not separator or not identifier.strip().isdigit() or not title.strip():
         return None
     return Hypothesis(id=identifier.strip(), title=title.strip())
 
 
 def _apply_field(hypothesis: Hypothesis, line: str) -> None:
-    if not line.startswith("- **"):
+    line = line.removeprefix("- ").strip()
+    if line.startswith("**"):
+        line = line.removeprefix("**")
+    if not line:
         return
-    label, separator, value = line.removeprefix("- **").partition(":")
+    label, separator, value = line.partition(":")
     if not separator:
         return
     label = label.removesuffix("**")
@@ -223,25 +201,6 @@ def _apply_field(hypothesis: Hypothesis, line: str) -> None:
             field,
             _normalize_status(value.strip()) if field == "status" else value.strip(),
         )
-
-
-def validate_hypotheses(hypotheses: list[Hypothesis]) -> HypothesisValidationResult:
-    """Validate a list of hypotheses."""
-    result = HypothesisValidationResult(hypotheses=hypotheses)
-    seen_ids = set()
-    for h in hypotheses:
-        if h.id in seen_ids:
-            result.add_error(f"duplicate hypothesis ID: H-{h.id}")
-        seen_ids.add(h.id)
-        if h.canonical_status() not in CANONICAL_STATES:
-            result.add_warning(f"H-{h.id}: non-canonical status '{h.status}'")
-        if not h.title:
-            result.add_error(f"H-{h.id}: missing title")
-        if not h.service and not h.port:
-            result.add_warning(f"H-{h.id}: missing service and port")
-        for error in _validate_rejection_fields(h.to_dict()):
-            result.add_error(f"H-{h.id}: {error}")
-    return result
 
 
 def _validate_rejection_fields(fields: dict[str, Any]) -> list[str]:
@@ -261,16 +220,6 @@ def _validate_rejection_fields(fields: dict[str, Any]) -> list[str]:
         if not str(fields.get(field_name) or "").strip():
             errors.append(f"Rejected requires {field_name}")
     return errors
-
-
-def find_by_service_port(
-    hypotheses: list[Hypothesis], service: str, port: str
-) -> Hypothesis | None:
-    """Find a hypothesis matching service and port (exact match)."""
-    for h in hypotheses:
-        if h.service.lower() == service.lower() and h.port == port:
-            return h
-    return None
 
 
 def validate_hypothesis_record(
@@ -298,13 +247,13 @@ def validate_hypothesis_record(
         except ValueError:
             errors.append(f"unknown phase '{fields['phase']}'")
     raw_target = (fields.get("target") or "").strip()
-    if re.search(r"\s+\(", raw_target):
-        errors.append(
-            "target must contain only a host/IP/URL; move paths or descriptions to rationale"
-        )
     target = normalise_target(raw_target)
     normalised_scope = {normalise_target(host) for host in in_scope_hosts or set()}
-    if target and in_scope_hosts is not None and target not in normalised_scope:
+    in_scope = target in normalised_scope or any(
+        host.startswith("*.") and target.endswith(host[1:]) and target != host[2:]
+        for host in normalised_scope
+    )
+    if target and in_scope_hosts is not None and not in_scope:
         errors.append(
             f"target '{target}' is not in scope; record a hypothesis only for in-scope hosts"
         )
@@ -325,7 +274,13 @@ def update_hypothesis(
     rejected fail-closed instead of being written to the board.
     """
     normalized_fields = dict(fields)
-    normalized_fields["id"] = _normalise_id(fields.get("id"))
+    hypotheses_list = parse_hypotheses(path)
+    supplied_id = fields.get("id")
+    if supplied_id:
+        normalized_fields["id"] = _normalise_id(supplied_id)
+    else:
+        numeric_ids = [int(h.id) for h in hypotheses_list if h.id.isdigit()]
+        normalized_fields["id"] = str(max(numeric_ids, default=0) + 1).zfill(3)
     # Build the candidate record so we can validate before mutating the board.
     temp = Hypothesis(
         id=normalized_fields["id"],
@@ -350,14 +305,13 @@ def update_hypothesis(
     if errors:
         raise ValueError("; ".join(errors))
 
-    hypotheses = parse_hypotheses(path)
     h_id = temp.id
     if not h_id:
         raise ValueError("id is required")
 
     # Find existing
     target = None
-    for h in hypotheses:
+    for h in hypotheses_list:
         if h.id == h_id:
             target = h
             break
@@ -365,7 +319,7 @@ def update_hypothesis(
     if target is None:
         # Create new
         target = Hypothesis(id=h_id, title=temp.title)
-        hypotheses.append(target)
+        hypotheses_list.append(target)
 
     # Update fields
     for key, value in normalized_fields.items():
@@ -378,11 +332,11 @@ def update_hypothesis(
     target.updated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
 
     # Rewrite file
-    _rewrite_hypotheses(path, hypotheses)
+    _rewrite_hypotheses(path, hypotheses_list)
     return target
 
 
-def _rewrite_hypotheses(path: Path, hypotheses: list[Hypothesis]) -> None:
+def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
     """Rewrite the entire hypotheses file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
@@ -401,11 +355,5 @@ def _rewrite_hypotheses(path: Path, hypotheses: list[Hypothesis]) -> None:
     else:
         header = template[:header_end].rstrip() + "\n\n"
 
-    body = "\n".join(h.to_markdown() for h in hypotheses)
+    body = "\n".join(h.to_markdown() for h in hypotheses_list)
     path.write_text(header + body, encoding="utf-8")
-
-
-def needs_hypothesis(phase: str) -> bool:
-    """Return True if the phase requires hypotheses (vuln-research/exploitation)."""
-    phase_lower = phase.lower().replace("-", "_")
-    return phase_lower in ("vuln_research", "exploitation")

@@ -9,6 +9,8 @@ env_requires: []
 distribution_owned:
   - distribution.yaml
   - README.md
+  - CHANGELOG.md
+  - LICENSE
   - SOUL.md
   - .hermes.md
   - CONTRIBUTING.md
@@ -20,3 +22,4 @@ distribution_owned:
   - plugins/
   - assets/
   - .github/
+

@@ -6,18 +6,19 @@ Hermes plugin registration entry point.
 from __future__ import annotations
 
 import contextlib
-from pathlib import Path
 
-# Hermes loads profile plugins directly from ``<profile>/plugins`` and does not
-# add the profile's ``scripts`` directory to Python's import path. Bootstrap the
-# shared guard package before importing tool modules that depend on it.
-_PROFILE_HOME = Path(__file__).resolve().parents[2]
+from . import (
+    code_execution_audit,
+    schemas,  # noqa: E402
+    service,  # noqa: E402
+    state,  # noqa: E402
+)
+from .terminal_policy import block_terminal_command
 
-from . import schemas, tools  # noqa: E402 - profile scripts path is required first
+__all__ = ["register", "TOOLS", "REGISTERED_TOOLS", "tools"]
 
-__all__ = ["register", "TOOLS", "REGISTERED_TOOLS"]
-
-TOOLS = tools
+TOOLS = service
+tools = service
 
 # Tool names registered with the Hermes plugin loader. Kept in sync with the
 # registration tuple below; the release gate compares these against
@@ -36,7 +37,6 @@ REGISTERED_TOOLS = [
     "violin_target",
     "violin_status",
     "violin_search_exploit",
-    "violin_nmap",
     "violin_httpx",
     "violin_nuclei",
     "violin_ffuf",
@@ -46,36 +46,44 @@ REGISTERED_TOOLS = [
 
 def register(ctx) -> None:
     """Called once by the plugin loader during discovery."""
-    # Register all model-visible tools
     for name, schema, handler, emoji in (
-        ("violin_check_command", schemas.CHECK_COMMAND_SCHEMA, tools.handle_check_command, "🛡️"),
-        ("violin_record_ptt", schemas.RECORD_PTT_SCHEMA, tools.handle_record_ptt, "📝"),
+        ("violin_check_command", schemas.CHECK_COMMAND_SCHEMA, service.handle_check_command, "🛡️"),
+        ("violin_record_ptt", schemas.RECORD_PTT_SCHEMA, service.handle_record_ptt, "📝"),
         (
             "violin_record_hypothesis",
             schemas.RECORD_HYPOTHESIS_SCHEMA,
-            tools.handle_record_hypothesis,
+            service.handle_record_hypothesis,
             "🔎",
         ),
-        ("violin_exec", schemas.EXEC_SCHEMA, tools.handle_exec, "⚡"),
-        ("violin_exec_status", schemas.EXEC_STATUS_SCHEMA, tools.handle_exec_status, "i"),
-        ("violin_exec_cancel", schemas.EXEC_CANCEL_SCHEMA, tools.handle_exec_cancel, "x"),
-        ("violin_sync_done", schemas.SYNC_DONE_SCHEMA, tools.handle_sync_done, "✅"),
+        ("violin_exec", schemas.EXEC_SCHEMA, service.handle_exec, "⚡"),
+        ("violin_exec_status", schemas.EXEC_STATUS_SCHEMA, service.handle_exec_status, "i"),
+        ("violin_exec_cancel", schemas.EXEC_CANCEL_SCHEMA, service.handle_exec_cancel, "x"),
+        ("violin_sync_done", schemas.SYNC_DONE_SCHEMA, service.handle_sync_done, "✅"),
         (
             "violin_rebind_pending_batch",
             schemas.REBIND_PENDING_BATCH_SCHEMA,
-            tools.handle_rebind_pending_batch,
+            service.handle_rebind_pending_batch,
             "↔",
         ),
-        ("violin_heartbeat_done", schemas.HEARTBEAT_DONE_SCHEMA, tools.handle_heartbeat_done, "💓"),
-        ("violin_exec_burst", schemas.EXEC_BURST_SCHEMA, tools.handle_exec_burst, "🚀"),
-        ("violin_target", schemas.TARGET_SCHEMA, tools.handle_target, "🎯"),
-        ("violin_status", schemas.STATUS_SCHEMA, tools.handle_status, "📊"),
-        ("violin_search_exploit", schemas.SEARCH_EXPLOIT_SCHEMA, tools.handle_search_exploit, "?"),
-        ("violin_nmap", schemas.NMAP_SCHEMA, tools.handle_nmap, "N"),
-        ("violin_httpx", schemas.HTTPX_SCHEMA, tools.handle_httpx, "H"),
-        ("violin_nuclei", schemas.NUCLEI_SCHEMA, tools.handle_nuclei, "V"),
-        ("violin_ffuf", schemas.FFUF_SCHEMA, tools.handle_ffuf, "F"),
-        ("violin_listener", schemas.LISTENER_SCHEMA, tools.handle_listener, "L"),
+        (
+            "violin_heartbeat_done",
+            schemas.HEARTBEAT_DONE_SCHEMA,
+            service.handle_heartbeat_done,
+            "💓",
+        ),
+        ("violin_exec_burst", schemas.EXEC_BURST_SCHEMA, service.handle_exec_burst, "🚀"),
+        ("violin_target", schemas.TARGET_SCHEMA, service.handle_target, "🎯"),
+        ("violin_status", schemas.STATUS_SCHEMA, service.handle_status, "📊"),
+        (
+            "violin_search_exploit",
+            schemas.SEARCH_EXPLOIT_SCHEMA,
+            service.handle_search_exploit,
+            "?",
+        ),
+        ("violin_httpx", schemas.HTTPX_SCHEMA, service.handle_httpx, "H"),
+        ("violin_nuclei", schemas.NUCLEI_SCHEMA, service.handle_nuclei, "V"),
+        ("violin_ffuf", schemas.FFUF_SCHEMA, service.handle_ffuf, "F"),
+        ("violin_listener", schemas.LISTENER_SCHEMA, service.handle_listener, "L"),
     ):
         ctx.register_tool(
             name=name,
@@ -85,15 +93,46 @@ def register(ctx) -> None:
             emoji=emoji,
         )
 
-    # Lifecycle hooks
+    ctx.register_hook("pre_tool_call", _pre_tool_call_hook)
+    ctx.register_hook("post_tool_call", _post_tool_call_hook)
     ctx.register_hook("pre_llm_call", _pre_llm_call_hook)
     ctx.register_hook("on_session_reset", _on_session_reset_hook)
     ctx.register_hook("on_session_finalize", _on_session_finalize_hook)
 
 
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
+# Tool policy hooks
+# ---------------------------------------------------------------------------
+
+
+def _pre_tool_call_hook(tool_name=None, args=None, **kwargs):
+    """Apply the raw-terminal classifier and the execute-code audit gate.
+
+    Violin-specific execution tools carry the engagement context required for
+    full scope/state validation.  The built-in terminal has no such fields, so
+    it remains available only for host-local work; clearly target-touching
+    commands must use ``violin_exec`` or ``violin_exec_burst``.
+    """
+    args = args if isinstance(args, dict) else {}
+    if tool_name == "execute_code":
+        _metadata, message = code_execution_audit.validate_source(args.get("code"))
+        return None if message is None else {"action": "block", "message": message}
+    if tool_name != "terminal":
+        return None
+    message = block_terminal_command(args.get("command", ""))
+    return None if message is None else {"action": "block", "message": message}
+
+
+def _post_tool_call_hook(tool_name=None, args=None, result=None, duration_ms=0, **kwargs):
+    """Write the auditable execute-code source receipt after dispatch."""
+    if tool_name == "execute_code" and isinstance(args, dict):
+        with contextlib.suppress(Exception):
+            code_execution_audit.record_completion(args.get("code"), result, duration_ms)
+
+
+# ---------------------------------------------------------------------------
 # Lifecycle hooks
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------
 
 
 def _pre_llm_call_hook(session_id=None, eng_dir=None, **kwargs):
@@ -104,22 +143,15 @@ def _pre_llm_call_hook(session_id=None, eng_dir=None, **kwargs):
     command gate. When ``eng_dir`` is available we record the tick; otherwise we
     simply return without mutating state.
     """
-    from .core import state
-
     if eng_dir:
         with contextlib.suppress(Exception):
             state.tick_message(str(eng_dir))
+            state.record_session_id(str(eng_dir), session_id)
     return None
 
 
 def _on_session_reset_hook(session_id=None, eng_dir=None, **kwargs) -> None:
-    """Hook: session reset (context compression, /goal set, etc.).
-
-    Re-reads the engagement so message-count enforcement stays accurate across a
-    context reset; the command-count gate remains authoritative for execution.
-    """
-    from .core import state
-
+    """Hook: session reset (context compression, /goal set, etc.)."""
     if eng_dir:
         with contextlib.suppress(Exception):
             state.tick_message(str(eng_dir))
@@ -131,8 +163,6 @@ def _on_session_finalize_hook(session_id=None, eng_dir=None, **kwargs) -> None:
     Closeout gates are explicit (violin_sync_done / close command). On finalize
     we leave a continuity marker so a fresh session can re-read pending state.
     """
-    from .core import state
-
     if eng_dir:
         try:
             pending = state.has_pending_sync(str(eng_dir))

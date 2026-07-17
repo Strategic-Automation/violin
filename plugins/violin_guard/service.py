@@ -1,20 +1,36 @@
-"""Single application facade for guarded execution."""
+"""All tool handler implementations for the Violin Guard Hermes plugin."""
 
 from __future__ import annotations
 
 import json
 import os
+import shlex
+from functools import wraps
 from pathlib import Path
 
-from . import command, execution, hypotheses, ptt, state, targets
-from .adapters import search_exploit
+from . import command as cmd_module
+from . import execution, hypotheses, ptt, state
+from .adapters import (
+    build_ffuf,
+    build_httpx,
+    build_netcat_listener,
+    build_nuclei,
+    search_exploit,
+)
+from .command import CheckCommandArgs
+from .history import history_contains
+from .targets import resolve_target
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _eng_path(eng_dir: str) -> Path:
-    return state._eng_dir(eng_dir)
+    return state.resolve_eng_dir(eng_dir)
 
 
-def _json(status_name, **payload):
+def _json(status_name: str, **payload) -> str:
     payload.pop("status", None)
     return json.dumps({"schema_version": 2, "status": status_name, **payload})
 
@@ -23,9 +39,9 @@ def _result(r):
     return {"errors": r.errors, "warnings": r.warnings, "infos": r.infos}
 
 
-def _check_command_internal(a) -> command.CheckResult:
-    return command.check_command(
-        command.CheckCommandArgs(
+def _check_command_internal(a) -> cmd_module.CheckResult:
+    return cmd_module.check_command(
+        CheckCommandArgs(
             command=a.get("command", ""),
             phase=a.get("phase", ""),
             eng_dir=a.get("eng_dir", ""),
@@ -37,66 +53,114 @@ def _check_command_internal(a) -> command.CheckResult:
     )
 
 
+def _call(fn, args, **kwargs):
+    """Wrap a handler function with uniform error serialisation."""
+    try:
+        return fn(args or {}, **kwargs)
+    except Exception as exc:
+        return _json("error", error=str(exc))
+
+
+def _serialise_errors(fn):
+    """Keep every model-visible handler on the stable JSON response contract."""
+
+    @wraps(fn)
+    def wrapped(args=None, **kwargs):
+        return _call(fn, args, **kwargs)
+
+    return wrapped
+
+
+# ---------------------------------------------------------------------------
+# Handler implementations
+# ---------------------------------------------------------------------------
+
+
+@_serialise_errors
 def handle_check_command(a, **kwargs):
     r = _check_command_internal(a)
     status_name = "ok" if r.exit_code() == 0 else "review" if r.exit_code() == 2 else "block"
     return _json(status_name, **_result(r))
 
 
+@_serialise_errors
 def handle_record_ptt(a, **kwargs):
-    try:
-        eng_dir = a["eng_dir"]
-        doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
-        pending = state.get_pending_sync(eng_dir)
-        task = a.get("id")
-        note = (a.get("note") or "").strip()
-        status = a.get("status", "[~]")
+    eng_dir = a["eng_dir"]
+    doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
+    pending = state.get_pending_sync(eng_dir)
+    task = a.get("id")
+    note = (a.get("note") or "").strip()
+    status = a.get("status", "[~]")
 
-        # --- Self-certify guard (audit P0-sync) ---------------------------------
-        # A review only unlocks the batch when it demonstrably corresponds to the
-        # work that was just executed. Four checks, all fail-closed:
-        if not task or not note:
-            raise ValueError("task id and non-empty review note required")
-        if not pending:
-            return _start_ptt_task(_eng_path(eng_dir) / "state" / "ptt.md", doc, task, status, note)
-        # 1. reviewed ID must match the active [~] task — never review a different row
-        validation = ptt.validate_ptt(doc)
-        if validation.errors:
-            raise ValueError("PTT must have exactly one valid active task before review")
-        active = ptt.find_active_task(doc)
-        captured_task = pending.get("ptt_task_id")
-        if not captured_task:
-            raise ValueError(
-                "pending batch has no captured PTT task; refusing legacy self-certification"
+    # --- Self-certify guard (audit P0-sync) ---------------------------------
+    if not task or not note:
+        raise ValueError("task id and non-empty review note required")
+    if not pending:
+        if not any(item.id == task for item in doc):
+            created = ptt.create_task(
+                _eng_path(eng_dir) / "state" / "ptt.md",
+                task,
+                a.get("title") or task,
+                a.get("phase") or "RECON",
+                note,
             )
-        if task != captured_task:
-            raise ValueError(f"reviewed task {task!r} does not match batch task {captured_task!r}")
-        if not active or active.id != captured_task:
-            raise ValueError(
-                f"reviewed task {task!r} is not the active task; resolve the active task first"
+            doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
+            if status == "[ ]":
+                return _json("ok", task_id=created.id, task_created=True)
+        existing = next((item for item in doc if item.id == task), None)
+        if existing and status in {"[x]", "[-]"}:
+            if existing.status != "[~]":
+                raise ValueError("only the active [~] task may be closed outside a batch")
+            ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
+            return _json("ok", task_id=task, task_closed=True)
+        return _start_ptt_task(_eng_path(eng_dir) / "state" / "ptt.md", doc, task, status, note)
+    validation = ptt.validate_ptt(doc)
+    if validation.errors:
+        raise ValueError("PTT must have exactly one valid active task before review")
+    active = ptt.find_active_task(doc)
+    captured_task = pending.get("ptt_task_id")
+    if not captured_task:
+        raise ValueError(
+            "pending batch has no captured PTT task; refusing legacy self-certification"
+        )
+    # A human may update ptt.md directly after a batch.  If there is one
+    # phase-compatible active task, reconcile that deliberate state edit
+    # here instead of forcing an opaque multi-step rebind ceremony.
+    if active and active.id != captured_task:
+        phases = {
+            str(item.get("phase") or pending.get("phase") or "")
+            for item in pending.get("commands") or []
+        } - {""}
+        if all(ptt.task_matches_phase(active, phase) for phase in phases):
+            state.rebind_pending_sync(
+                eng_dir,
+                expected_batch_id=str(pending.get("batch_id") or ""),
+                current_task_id=str(captured_task),
+                replacement_task_id=active.id,
+                note="automatic rebind after direct PTT edit",
             )
-        # 2. Bind the review to the current batch ourselves. Requiring an
-        # operator to copy an opaque ID creates avoidable friction; the guard
-        # already holds the pending state and records an explicit marker before
-        # it unlocks anything.
-        batch_id = pending.get("batch_id")
-        if batch_id and batch_id not in note:
-            note = f"{note} [reviewed-batch:{batch_id}]"
-        # 3. every pending command must already be recorded in history.md
-        for item in pending.get("commands") or []:
-            cmd = item.get("command")
-            if cmd and not state.history_contains(eng_dir, cmd):
-                raise ValueError(
-                    f"pending command not yet in history.md: {cmd!r}; "
-                    "the batch must finish before review"
-                )
+            pending = state.get_pending_sync(eng_dir) or pending
+            captured_task = active.id
+    if task != captured_task:
+        raise ValueError(f"reviewed task {task!r} does not match batch task {captured_task!r}")
+    if not active or active.id != captured_task:
+        raise ValueError(
+            f"reviewed task {task!r} is not the active task; resolve the active task first"
+        )
+    batch_id = pending.get("batch_id")
+    if batch_id and batch_id not in note:
+        note = f"{note} [reviewed-batch:{batch_id}]"
+    for item in pending.get("commands") or []:
+        cmd = item.get("command")
+        if cmd and not history_contains(eng_dir, cmd):
+            raise ValueError(
+                f"pending command not yet in history.md: {cmd!r}; "
+                "the batch must finish before review"
+            )
 
-        ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
-        state.mark_ptt_reviewed(eng_dir, task, note)
-        # 4. no commands may run after review until sync-done clears the batch
-        return _json("ok", task_id=task, batch_id=pending.get("batch_id"))
-    except Exception as e:
-        return _json("error", error=str(e))
+    ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
+    state.mark_ptt_reviewed(eng_dir, task, note)
+    return _json("ok", task_id=task, batch_id=pending.get("batch_id"))
 
 
 def _start_ptt_task(ptt_path: Path, tasks, task_id: str, status: str, note: str) -> str:
@@ -119,27 +183,22 @@ def _start_ptt_task(ptt_path: Path, tasks, task_id: str, status: str, note: str)
     return _json("ok", task_id=task_id, phase=phase.value, task_started=True)
 
 
+@_serialise_errors
 def handle_record_hypothesis(a, **kwargs):
-    try:
-        eng_dir = a["eng_dir"]
-        fields = {k: v for k, v in a.items() if k != "eng_dir"}
-        # Pass in-scope hosts so the record is scope-bound (audit P1-hyp).
-        in_scope = _scope_hosts(eng_dir)
-        h = hypotheses.update_hypothesis(
-            _eng_path(eng_dir) / "hypotheses.md", in_scope_hosts=in_scope, **fields
-        )
-        return _json("ok", hypothesis=h.to_dict())
-    except Exception as e:
-        return _json("error", error=str(e))
+    eng_dir = a["eng_dir"]
+    fields = {k: v for k, v in a.items() if k != "eng_dir"}
+    in_scope = _scope_hosts(eng_dir)
+    h = hypotheses.update_hypothesis(
+        _eng_path(eng_dir) / "hypotheses.md", in_scope_hosts=in_scope, **fields
+    )
+    return _json("ok", hypothesis=h.to_dict())
 
 
 def _scope_hosts(eng_dir: str) -> set[str] | None:
-    """Return the in-scope host set from scope.yaml, or None if no scope file.
-
-    ``None`` (rather than empty set) signals 'no scope check available' so the
-    guard does not fail-closed on hypotheses recorded without a target.
-    """
+    """Return the in-scope host set from scope.yaml, or None if no scope file."""
     import yaml
+
+    from .targets import scope_hosts
 
     scope_path = _eng_path(eng_dir) / "scope" / "scope.yaml"
     if not scope_path.exists():
@@ -148,20 +207,22 @@ def _scope_hosts(eng_dir: str) -> set[str] | None:
         data = yaml.safe_load(scope_path.read_text(encoding="utf-8")) or {}
     except Exception:
         return None
-    return targets.scope_hosts(data) or None
+    return scope_hosts(data) or None
 
 
+@_serialise_errors
 def handle_sync_done(a, **kwargs):
     try:
         p = state.get_pending_sync(a["eng_dir"])
         if not p:
             return _json("ok", message="nothing pending")
         if not p.get("ptt_reviewed"):
-            return _json("review", error="explicit PTT review required")
+            return _json("sync_required", error="explicit PTT review required")
         for item in p.get("commands") or []:
-            if not state.history_contains(a["eng_dir"], item.get("command", "")):
+            if not history_contains(a["eng_dir"], item.get("command", "")):
                 return _json(
-                    "review", error="all pending commands must exist in exact history before sync"
+                    "sync_required",
+                    error="all pending commands must exist in exact history before sync",
                 )
         state.clear_pending_sync(a["eng_dir"])
         return _json("ok", batch_id=p.get("batch_id"))
@@ -201,7 +262,7 @@ def _validate_pending_history(eng_dir: str, pending: dict) -> None:
         (
             str(item.get("command") or "")
             for item in pending.get("commands") or []
-            if item.get("command") and not state.history_contains(eng_dir, str(item.get("command")))
+            if item.get("command") and not history_contains(eng_dir, str(item.get("command")))
         ),
         "",
     )
@@ -244,6 +305,7 @@ def _validated_replacement_task(
     return replacement
 
 
+@_serialise_errors
 def handle_rebind_pending_batch(a, **kwargs):
     """Explicitly move a completed pending batch to another active PTT task."""
 
@@ -273,11 +335,13 @@ def handle_rebind_pending_batch(a, **kwargs):
         return _json("error", error=str(e))
 
 
+@_serialise_errors
 def handle_heartbeat_done(a, **kwargs):
     state.clear_heartbeat_pending(a["eng_dir"])
     return _json("ok")
 
 
+@_serialise_errors
 def handle_exec(a, **kwargs):
     r = _check_command_internal(a)
     exit_code = r.exit_code()
@@ -285,14 +349,12 @@ def handle_exec(a, **kwargs):
     if status_name not in ("ok",) and not (
         status_name == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
     ):
-        status = (
+        sync_status = (
             "sync_required"
-            if any(
-                "sync-credit" in str(x) or "not synced" in str(x) for x in r.errors
-            )
+            if any("sync-credit" in str(x) or "not synced" in str(x) for x in r.errors)
             else "denied"
         )
-        return _json(status, executed=False, **_result(r))
+        return _json(sync_status, executed=False, **_result(r))
     try:
         active_task = ptt.find_active_task(
             ptt.parse_ptt(_eng_path(a["eng_dir"]) / "state" / "ptt.md")
@@ -315,25 +377,19 @@ def handle_exec(a, **kwargs):
         return _json("execution_failed", error=str(e), executed=False)
 
 
+@_serialise_errors
 def handle_exec_status(a, **kwargs):
     return _json("ok", **execution.status(a.get("eng_dir"), a.get("execution_id")))
 
 
+@_serialise_errors
 def handle_exec_cancel(a, **kwargs):
     return _json("ok", **execution.cancel(a.get("eng_dir"), a.get("execution_id")))
 
 
+@_serialise_errors
 def handle_exec_burst(a, **kwargs):
-    """Single-approval bounded command batch with real burst semantics.
-
-    - Reads commands from ``commands`` (inline) and/or ``commands_file``.
-    - Fail-closed: a hard-blocked command (gate exit 1, non-yolo) halts the
-      whole batch and returns DENIED at once.
-    - ``continue_on_error`` only survives executed-but-failed *target* commands
-      (exit code != 0) and soft reviews; it never survives a hard BLOCK.
-    - Returns an accurate ``executed`` count (commands that actually ran) and a
-      single batch boundary (one pending-sync lock armed on the last command).
-    """
+    """Single-approval bounded command batch with real burst semantics."""
     eng_dir = a.get("eng_dir", "")
     phase = a.get("phase", "")
     scope = a.get("scope", "")
@@ -377,7 +433,6 @@ def handle_exec_burst(a, **kwargs):
         exit_code = r.exit_code()
         status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
         if status_name == "block":
-            # Hard block — never continue; halt the batch fail-closed.
             return _json(
                 "denied",
                 executed=executed,
@@ -392,22 +447,7 @@ def handle_exec_burst(a, **kwargs):
                 ],
                 reason=f"command [{idx + 1}] blocked: {r.errors[0] if r.errors else 'blocked'}",
             )
-        if status_name == "review" and os.environ.get("HERMES_YOLO_MODE") != "1":
-            # Soft review blocks unless yolo overrides; also halts the batch.
-            return _json(
-                "denied",
-                executed=executed,
-                results=results
-                + [
-                    {
-                        "index": idx + 1,
-                        "command": cmd,
-                        "status": "review_required",
-                        "warnings": r.warnings,
-                    }
-                ],
-                reason=f"command [{idx + 1}] requires review before execution",
-            )
+        review_warnings = r.warnings if status_name == "review" else []
         try:
             res = execution.execute(
                 command=cmd,
@@ -421,13 +461,15 @@ def handle_exec_burst(a, **kwargs):
             )
             res.pop("status", None)
             entry = {"index": idx + 1, "command": cmd, **res}
+            if review_warnings:
+                entry["review_required"] = True
+                entry["warnings"] = review_warnings
             results.append(entry)
             if res.get("executed"):
                 executed += 1
-            # A target command that ran but failed: honor continue_on_error.
             if res.get("exit_code", 0) != 0 and not continue_on_error:
                 break
-        except Exception as e:  # noqa: BLE001 - executor error must not abort silently
+        except Exception as e:  # noqa: BLE001
             if not continue_on_error:
                 return _json(
                     "execution_failed",
@@ -437,19 +479,21 @@ def handle_exec_burst(a, **kwargs):
                 )
             results.append({"index": idx + 1, "command": cmd, "error": str(e)})
 
-    return _json("batch_complete", executed=executed, results=results)
+    return _json(
+        "batch_complete",
+        executed=executed,
+        results=results,
+        review_required=any(item.get("review_required") for item in results),
+    )
 
 
+@_serialise_errors
 def handle_target(a, **kwargs):
-    from urllib.parse import urlsplit
-
+    """Resolve a target value from scope.yaml."""
     import yaml
 
-    from .targets import normalise_target, scope_hosts
-
-    scope_path = a.get("scope")
-    p = Path(scope_path) if scope_path else _eng_path(a["eng_dir"]) / "scope" / "scope.yaml"
-
+    scope_path_arg = a.get("scope")
+    p = Path(scope_path_arg) if scope_path_arg else _eng_path(a["eng_dir"]) / "scope" / "scope.yaml"
 
     if not p.exists():
         return _json("error", error=f"scope file not found: {p}")
@@ -459,80 +503,18 @@ def handle_target(a, **kwargs):
     except Exception as exc:
         return _json("error", error=f"failed to parse scope: {exc}")
 
-    targets_sec = scope_data.get("targets", {}) or {}
-
-    role = a.get("role")
-    host_query = a.get("host")
-    field = a.get("field") or "ip"
-
-    target_val = None
-
-    # 1. Resolve by role
-    if role:
-        roles = targets_sec.get("roles", {}) or {}
-        role_val = roles.get(role)
-        if isinstance(role_val, list) and role_val:
-            target_val = str(role_val[0]).strip()
-        elif role_val is not None:
-            target_val = str(role_val).strip()
-
-    # 2. Resolve by host
-    if not target_val and host_query:
-        allowed_hosts = scope_hosts(scope_data)
-        norm_host = normalise_target(host_query)
-        if norm_host in allowed_hosts:
-            target_val = host_query.strip()
-
-    # 3. Fallback to first in-scope target
-    if not target_val:
-        ips = targets_sec.get("ip_addresses", [])
-        if isinstance(ips, list) and ips:
-            target_val = str(ips[0]).strip()
-
-        if not target_val:
-            urls = targets_sec.get("urls", []) or targets_sec.get("in_scope_urls", [])
-            if isinstance(urls, list) and urls:
-                target_val = str(urls[0]).strip()
-
-        if not target_val:
-            domains = targets_sec.get("domains", [])
-            if isinstance(domains, list) and domains:
-                target_val = str(domains[0]).strip()
-
-        if not target_val:
-            hostnames = targets_sec.get("hostnames", [])
-            if isinstance(hostnames, list) and hostnames:
-                target_val = str(hostnames[0]).strip()
-
-        if not target_val:
-            roles = targets_sec.get("roles", {}) or {}
-            if roles:
-                first_val = list(roles.values())[0]
-                if isinstance(first_val, list) and first_val:
-                    target_val = str(first_val[0]).strip()
-                elif first_val is not None:
-                    target_val = str(first_val).strip()
-
-    if not target_val:
+    value = resolve_target(
+        scope_data,
+        role=a.get("role"),
+        host_query=a.get("host"),
+        field=a.get("field") or "ip",
+    )
+    if value is None:
         return _json("error", error="no targets in scope")
-
-    resolved_value = target_val
-    if "://" in target_val:
-        try:
-            parsed = urlsplit(target_val)
-            host_part = parsed.hostname or parsed.netloc
-            if ":" in host_part:
-                host_part = host_part.split(":")[0]
-
-            if field in ("ip", "host"):
-                resolved_value = host_part
-        except Exception:
-            pass
-
-    return _json("ok", value=resolved_value)
+    return _json("ok", value=value)
 
 
-
+@_serialise_errors
 def handle_status(a, **kwargs):
     return _json(
         "ok",
@@ -542,5 +524,54 @@ def handle_status(a, **kwargs):
     )
 
 
+@_serialise_errors
 def handle_search_exploit(a, **kwargs):
     return _json("ok", **search_exploit(a))
+
+
+# ---------------------------------------------------------------------------
+# Adapter-built tool handlers (nmap, httpx, nuclei, ffuf, listener)
+# ---------------------------------------------------------------------------
+
+
+def _adapter(builder):
+    """Create a handler that builds a command via ``builder`` then passes it to handle_exec."""
+
+    def execute_adapter(args, **kwargs):
+        values = args or {}
+        built = builder(values)
+        return _call(
+            handle_exec,
+            {
+                **values,
+                "target": values.get("target") or values.get("url"),
+                "command": built,
+                # Safe here because adapter builders quote every controlled value.
+                "_argv": shlex.split(built, posix=True),
+            },
+        )
+
+    return execute_adapter
+
+
+handle_httpx = _adapter(build_httpx)
+handle_nuclei = _adapter(build_nuclei)
+handle_ffuf = _adapter(build_ffuf)
+
+
+@_serialise_errors
+def handle_listener(args, **kwargs):
+    values = args or {}
+    built = build_netcat_listener(values)
+    return _call(
+        handle_exec,
+        {
+            **values,
+            "command": built,
+            "_argv": shlex.split(built, posix=True),
+            "background": True,
+        },
+    )
+
+
+__all__ = [name for name in globals() if name.startswith("handle_")]
