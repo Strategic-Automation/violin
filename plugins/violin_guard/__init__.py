@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 
 from . import (
+    adapters,
     code_execution_audit,
     schemas,  # noqa: E402
     service,  # noqa: E402
