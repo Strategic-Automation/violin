@@ -16,8 +16,8 @@ from filelock import FileLock
 # ---------------------------------------------------------------------------
 
 DEFAULT_SYNC_CREDIT = 5
-COMMAND_INTERVAL = 20
-MESSAGE_INTERVAL = 30
+COMMAND_INTERVAL = 50
+MESSAGE_INTERVAL = 60
 MAX_BURST_COMMANDS = 20
 
 # Local tools

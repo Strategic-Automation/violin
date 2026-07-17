@@ -5,6 +5,8 @@ Model-visible contracts only — no implementation logic.
 
 from __future__ import annotations
 
+from . import state
+
 CHECK_COMMAND_SCHEMA = {
     "description": "Run a check-command gate (typed wrapper over violin_guard.py check-command).",
     "parameters": {
@@ -153,7 +155,7 @@ REBIND_PENDING_BATCH_SCHEMA = {
 }
 
 HEARTBEAT_DONE_SCHEMA = {
-    "description": "Call AFTER heartbeat review: re-read skills/pentest/SKILL.md and review scope.yaml / state/ptt.md / hypotheses.md / state/history.md. Cadence is 20 target commands or 30 message ticks; exploitation/post-exploitation suppresses heartbeat. Clears heartbeat lock so violin_exec may release the next command.",
+    "description": f"Call AFTER heartbeat review: re-read skills/pentest/SKILL.md and review scope.yaml / state/ptt.md / hypotheses.md / state/history.md. Cadence is {state.COMMAND_INTERVAL} target commands or {state.MESSAGE_INTERVAL} message ticks; exploitation/post-exploitation suppresses heartbeat. Clears heartbeat lock so violin_exec may release the next command.",
     "parameters": {
         "type": "object",
         "properties": {

@@ -130,7 +130,7 @@ def cmd_message_tick(args: argparse.Namespace) -> int:
         return 1  # BLOCK
 
     # Check if heartbeat should be triggered now (every MESSAGE_INTERVAL messages)
-    if count % 30 == 0:
+    if count % state.MESSAGE_INTERVAL == 0:
         state.set_heartbeat_pending(
             eng_dir,
             f"Reached {count} LLM messages. Review engagement files for drift.",
