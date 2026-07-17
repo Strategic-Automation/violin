@@ -53,6 +53,14 @@ def _plugin_root() -> Path:
     return Path(__file__).resolve().parent
 
 
+def _pytest_basetemp(repo_path: Path) -> str:
+    """Create pytest's private temp directory in the ignored engagement tree."""
+
+    engagement_root = repo_path / "engagements"
+    engagement_root.mkdir(parents=True, exist_ok=True)
+    return tempfile.mkdtemp(prefix=".pytest-release-", dir=engagement_root)
+
+
 def resolve_reference(source: Path, reference: str) -> Path:
     """Resolve a pentest skill reference from the skill package root."""
     source = source.resolve()
@@ -151,7 +159,7 @@ def check_release() -> ReleaseCheckResult:
         except FileNotFoundError:
             result.add_warning("ruff not installed; skipped")
         try:
-            basetemp = tempfile.mkdtemp(prefix=".pytest-release-", dir=repo_path / "engagements")
+            basetemp = _pytest_basetemp(repo_path)
             pytest = subprocess.run(
                 [
                     python,
