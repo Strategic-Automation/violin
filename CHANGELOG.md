@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2
+
+- Restricted all GitHub Actions workflow tokens to read-only repository contents, resolving the three least-privilege code-scanning alerts without changing workflow behavior.
+
 ## 2.0.1
 
 - Upgraded the pytest development dependency to 9.0.3 or later to address CVE-2025-71176 insecure temporary-directory handling.
