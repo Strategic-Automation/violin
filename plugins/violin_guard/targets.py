@@ -7,6 +7,7 @@ URL authorities, and ``ipaddress`` for IP/CIDR validation.
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import re
 import shlex
@@ -78,9 +79,16 @@ class _TargetPolicy:
             candidate, self.allowed_networks
         )
 
+    def is_secondary_only(self, candidate: str) -> bool:
+        return _matches_host(candidate, self.callback_hosts | self.research_hosts)
+
     def check_primary(self, candidate: str, result: TargetCheckResult) -> None:
         if self.is_excluded(candidate):
             result.errors.append(f"excluded target {candidate} must not be touched")
+        elif self.is_secondary_only(candidate):
+            result.errors.append(
+                f"secondary-only endpoint {candidate} must not be used as a primary target"
+            )
         elif self.is_assessment_target(candidate):
             return
         elif _is_ip_network(candidate):
@@ -96,9 +104,7 @@ class _TargetPolicy:
     def check_secondary(self, candidate: str, result: TargetCheckResult) -> None:
         if self.is_excluded(candidate):
             result.errors.append(f"excluded target {candidate} must not be touched")
-        elif self.is_assessment_target(candidate) or candidate in (
-            self.callback_hosts | self.research_hosts
-        ):
+        elif self.is_assessment_target(candidate) or self.is_secondary_only(candidate):
             return
         elif _is_ip_network(candidate):
             result.errors.append(f"out-of-scope target {candidate} (not present in scope.yaml)")
@@ -149,12 +155,10 @@ def normalise_target(value: str) -> str:
 
     raw = value.strip()
     raw = re.split(r"\s+\(", raw, maxsplit=1)[0].strip()
-    try:
+    with contextlib.suppress(ValueError):
         parsed = urlsplit(raw if "://" in raw else f"//{raw}")
         if parsed.hostname:
             return parsed.hostname.lower()
-    except ValueError:
-        pass
     return raw.lower()
 
 
@@ -215,12 +219,10 @@ def resolve_target(
 
     # Extract the requested field from a URL
     if "://" in target_val and field in ("ip", "host"):
-        try:
+        with contextlib.suppress(ValueError):
             parsed = urlsplit(target_val)
             if parsed.hostname:
                 return parsed.hostname
-        except Exception:
-            pass
 
     return target_val
 
@@ -286,12 +288,10 @@ def _parse_target_token(token: str) -> str | None:
     if not raw:
         return None
     unbracketed = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
-    try:
+    with contextlib.suppress(ValueError):
         if "/" in unbracketed:
             return str(ipaddress.ip_network(unbracketed, strict=False)).lower()
         return str(ipaddress.ip_address(unbracketed)).lower()
-    except ValueError:
-        pass
 
     try:
         parsed = urlsplit(raw if raw.startswith("//") or "://" in raw else f"//{raw}")

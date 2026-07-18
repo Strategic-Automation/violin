@@ -55,11 +55,18 @@ _DOMAIN_RE = re.compile(
     re.IGNORECASE,
 )
 _URL_RE = re.compile(r"\b(?:https?|ftp|wss?|file)://[^\s'\"<>]+", re.IGNORECASE)
-_KNOWN_SOURCE_HOST_RE = re.compile(
-    r"https?://(?:[^/]*\.)?(?:github\.com|gitlab\.com|bitbucket\.org|"
-    r"pypi\.org|files\.pythonhosted\.org|registry\.npmjs\.org|"
-    r"crates\.io|proxy\.golang\.org|go\.dev)(?::\d+)?(?:/|$)",
-    re.IGNORECASE,
+_KNOWN_SOURCE_HOSTS = frozenset(
+    {
+        "bitbucket.org",
+        "crates.io",
+        "files.pythonhosted.org",
+        "github.com",
+        "gitlab.com",
+        "go.dev",
+        "proxy.golang.org",
+        "pypi.org",
+        "registry.npmjs.org",
+    }
 )
 _NETWORK_PATH_RE = re.compile(r"/(?:dev/)?(?:tcp|udp)/", re.IGNORECASE)
 _NETWORK_MODULE_RE = re.compile(
@@ -123,6 +130,13 @@ def _url_hosts(command: str) -> list[str]:
     return hosts
 
 
+def _is_known_source_host(host: str) -> bool:
+    normalized = host.lower().rstrip(".")
+    return any(
+        normalized == known or normalized.endswith(f".{known}") for known in _KNOWN_SOURCE_HOSTS
+    )
+
+
 def _has_target_literal(command: str) -> bool:
     """Inspect shell arguments, not arbitrary source code or file paths."""
     for segment in _COMMAND_SPLIT_RE.split(command):
@@ -163,6 +177,42 @@ def _has_target_literal(command: str) -> bool:
     return False
 
 
+def _block_terminal_segment(segment: str) -> str | None:
+    if _NETWORK_PATH_RE.search(segment):
+        return _message("network socket path detected in the raw terminal command")
+
+    executable = _first_executable(segment)
+    if executable in _SCRIPT_INTERPRETERS and _NETWORK_MODULE_RE.search(segment):
+        return _message("network-capable script primitive detected in the raw terminal command")
+
+    # Package/source retrieval is allowed for local setup (for example git
+    # clone or pip install).  URLs and host literals in all other commands are
+    # treated as target interaction and must use the typed guard.
+    is_source_command = _is_package_or_source_command(segment)
+    url_hosts = _url_hosts(segment)
+    if not is_source_command and url_hosts:
+        return _message("URL detected in a non-package raw terminal command")
+
+    # Public package/source URLs are host-local setup, not assessment traffic.
+    # Keep numeric authorities conservative: a clone/install from an IP may be
+    # an engagement target and must go through the typed guard.
+    if (
+        is_source_command
+        and url_hosts
+        and all(_is_known_source_host(host) for host in url_hosts)
+        and not _IPV4_RE.search(segment)
+    ):
+        return None
+
+    if executable not in _LOCAL_COMMANDS and _has_target_literal(segment):
+        return _message("target host literal detected in the raw terminal command")
+
+    if executable in _SCRIPT_INTERPRETERS and _SUSPICIOUS_SCRIPT_RE.search(segment):
+        return _message("assessment script detected in the raw terminal command")
+
+    return None
+
+
 def block_terminal_command(command: str) -> str | None:
     """Return a block message for clearly target-touching raw terminal calls.
 
@@ -174,37 +224,9 @@ def block_terminal_command(command: str) -> str | None:
     if not isinstance(command, str) or not command.strip():
         return None
 
-    if _NETWORK_PATH_RE.search(command):
-        return _message("network socket path detected in the raw terminal command")
-
-    executable = _first_executable(command)
-    if executable in _SCRIPT_INTERPRETERS and _NETWORK_MODULE_RE.search(command):
-        return _message("network-capable script primitive detected in the raw terminal command")
-
-    # Package/source retrieval is allowed for local setup (for example git
-    # clone or pip install).  URLs and host literals in all other commands are
-    # treated as target interaction and must use the typed guard.
-    url_hosts = _url_hosts(command)
-    if not _is_package_or_source_command(command) and url_hosts:
-        return _message("URL detected in a non-package raw terminal command")
-
-    # Public package/source URLs are host-local setup, not assessment traffic.
-    # Keep numeric authorities conservative: a clone/install from an IP may be
-    # an engagement target and must go through the typed guard.
-    if (
-        _is_package_or_source_command(command)
-        and url_hosts
-        and _KNOWN_SOURCE_HOST_RE.search(command)
-        and not _IPV4_RE.search(command)
-    ):
-        return None
-
-    if executable not in _LOCAL_COMMANDS and _has_target_literal(command):
-        return _message("target host literal detected in the raw terminal command")
-
-    if executable in _SCRIPT_INTERPRETERS and _SUSPICIOUS_SCRIPT_RE.search(command):
-        return _message("assessment script detected in the raw terminal command")
-
+    for segment in _COMMAND_SPLIT_RE.split(command):
+        if message := _block_terminal_segment(segment):
+            return message
     return None
 
 

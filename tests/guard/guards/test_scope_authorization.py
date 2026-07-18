@@ -20,6 +20,7 @@ def _write_scope(path: Path, *, confirmed: bool = True, callback_hosts: str = "1
   domains: [allowed.example]
 assessment_hosts:
   callback_hosts: [{callback_hosts}]
+research_hosts: [github.com, 192.0.2.10]
 exclusions:
   ip_addresses: [10.10.10.99]
   cidrs: [2001:db8:dead::/48]
@@ -102,7 +103,7 @@ def test_legacy_descriptive_target_normalises_to_host() -> None:
 
 def test_callback_hosts_are_secondary_only_and_exclusions_still_win(tmp_path: Path) -> None:
     scope = tmp_path / "scope.yaml"
-    _write_scope(scope, callback_hosts="10.10.14.5, 10.10.10.99")
+    _write_scope(scope, callback_hosts="10.10.14.5, listener.example, 10.10.10.99")
 
     callback = check_scope_targets(
         scope,
@@ -112,6 +113,13 @@ def test_callback_hosts_are_secondary_only_and_exclusions_still_win(tmp_path: Pa
     assert not callback.errors
     assert not callback.warnings
 
+    for host in ("listener.example", "github.com"):
+        secondary = check_scope_targets(
+            scope, f"curl https://{host}/status", primary_target="10.10.10.10"
+        )
+        assert not secondary.errors
+        assert not secondary.warnings
+
     unconfigured = check_scope_targets(
         scope, "bash -c 'echo ready > /dev/tcp/10.10.14.6/4444'", primary_target="10.10.10.10"
     )
@@ -120,7 +128,13 @@ def test_callback_hosts_are_secondary_only_and_exclusions_still_win(tmp_path: Pa
     callback_as_primary = check_scope_targets(
         scope, "nc -l -v -s 10.10.14.5 4444", primary_target="10.10.14.5"
     )
-    assert any("10.10.14.5" in error for error in callback_as_primary.errors)
+    assert any(
+        "secondary-only endpoint 10.10.14.5" in error for error in callback_as_primary.errors
+    )
+
+    for host in ("listener.example", "github.com", "192.0.2.10"):
+        primary = check_scope_targets(scope, f"curl https://{host}", primary_target=host)
+        assert any(f"secondary-only endpoint {host}" in error for error in primary.errors)
 
     excluded = check_scope_targets(
         scope, "nc -l -v -s 10.10.10.99 4444", primary_target="10.10.10.10"

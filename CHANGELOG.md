@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.0.6
+
+- Resolved the current CodeQL standard quality findings by making intentional exception fallbacks explicit and removing unused test and hypothesis variables.
+
+## 2.0.5
+
+- Restored exact-repeat detection for execution history entries with receipt paths and added unambiguous command-length metadata while retaining compatibility with existing history files.
+
+## 2.0.4
+
+- Hard-blocked callback and research endpoints when supplied as primary assessment targets while preserving their approved secondary-only use, including burst execution.
+
+## 2.0.3
+
+- Fixed raw-terminal compound-command classification so every pipeline, logical, semicolon, and newline segment is checked independently, and package/source exemptions require every URL in the segment to use an approved source host.
+
+## 2.0.2
+
+- Restricted all GitHub Actions workflow tokens to read-only repository contents, resolving the three least-privilege code-scanning alerts without changing workflow behavior.
+
+## 2.0.1
+
+- Upgraded the pytest development dependency to 9.0.3 or later to address CVE-2025-71176 insecure temporary-directory handling.
+
 ## 2.0.0
 
 - Added model-visible `violin_status` diagnostics, phase-aware 10/20-command sync windows, a 350-iteration profile budget, and atomic `violin_review_batch` reconciliation with optional receipt-backed finding output.

@@ -169,12 +169,10 @@ def _on_session_finalize_hook(session_id=None, eng_dir=None, **kwargs) -> None:
     we leave a continuity marker so a fresh session can re-read pending state.
     """
     if eng_dir:
-        try:
+        with contextlib.suppress(Exception):
             pending = state.has_pending_sync(str(eng_dir))
             if pending:
                 state.set_heartbeat_pending(
                     str(eng_dir),
                     "session finalized with a pending sync lock; run violin_review_batch",
                 )
-        except Exception:
-            pass
