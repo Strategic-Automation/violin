@@ -30,6 +30,9 @@ _SCOPE = """targets:
   roles:
     web: 10.10.10.10
 exclusions: {}
+assessment_hosts:
+  callback_hosts: [listener.example]
+research_hosts: [github.com]
 authorized_parties: ["test owner"]
 authorisation:
   confirmed: true
@@ -215,6 +218,30 @@ def test_exec_burst_clean_review_or_approved(eng, monkeypatch):
     assert len(rec["commands"]) == 2
     # Only the LAST command arms the gate -> exactly one pending-sync lock.
     assert state.has_pending_sync(str(eng)) is not None
+
+
+@pytest.mark.parametrize("secondary_only_host", ["listener.example", "github.com"])
+def test_exec_burst_denies_secondary_only_primary_target(eng, monkeypatch, secondary_only_host):
+    rec = _patch_burst(monkeypatch, str(eng))
+    data = json.loads(
+        service.handle_exec_burst(
+            {
+                "eng_dir": str(eng),
+                "scope": str(eng / "scope" / "scope.yaml"),
+                "phase": "recon",
+                "commands": [f"curl https://{secondary_only_host}"],
+                "target": secondary_only_host,
+                "session_id": "ts",
+                "skill_loaded_file": str(eng / "state" / ".skill-loaded-ts"),
+                "label": "secondary-only-primary",
+            }
+        )
+    )
+
+    assert data["status"] == "denied"
+    assert data["executed"] == 0
+    assert "secondary-only endpoint" in data["reason"]
+    assert rec["commands"] == []
 
 
 def test_exec_burst_fail_closed_on_blocked_command(eng, monkeypatch):

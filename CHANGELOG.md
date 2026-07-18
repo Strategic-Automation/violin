@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.4
+
+- Hard-blocked callback and research endpoints when supplied as primary assessment targets while preserving their approved secondary-only use, including burst execution.
+
 ## 2.0.3
 
 - Fixed raw-terminal compound-command classification so every pipeline, logical, semicolon, and newline segment is checked independently, and package/source exemptions require every URL in the segment to use an approved source host.

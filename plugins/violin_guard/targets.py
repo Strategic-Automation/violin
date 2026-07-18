@@ -78,9 +78,16 @@ class _TargetPolicy:
             candidate, self.allowed_networks
         )
 
+    def is_secondary_only(self, candidate: str) -> bool:
+        return _matches_host(candidate, self.callback_hosts | self.research_hosts)
+
     def check_primary(self, candidate: str, result: TargetCheckResult) -> None:
         if self.is_excluded(candidate):
             result.errors.append(f"excluded target {candidate} must not be touched")
+        elif self.is_secondary_only(candidate):
+            result.errors.append(
+                f"secondary-only endpoint {candidate} must not be used as a primary target"
+            )
         elif self.is_assessment_target(candidate):
             return
         elif _is_ip_network(candidate):
@@ -96,9 +103,7 @@ class _TargetPolicy:
     def check_secondary(self, candidate: str, result: TargetCheckResult) -> None:
         if self.is_excluded(candidate):
             result.errors.append(f"excluded target {candidate} must not be touched")
-        elif self.is_assessment_target(candidate) or candidate in (
-            self.callback_hosts | self.research_hosts
-        ):
+        elif self.is_assessment_target(candidate) or self.is_secondary_only(candidate):
             return
         elif _is_ip_network(candidate):
             result.errors.append(f"out-of-scope target {candidate} (not present in scope.yaml)")
