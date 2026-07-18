@@ -113,6 +113,36 @@ def test_local_source_retrieval_remains_available() -> None:
     assert result is None
 
 
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        "echo x | nc victim.example 80",
+        "git clone https://github.com/org/repo; curl https://victim.example/admin",
+        "git clone https://github.com/org/repo && nmap victim.example",
+        (
+            "pip install https://files.pythonhosted.org/package.whl "
+            "https://victim.example/package.whl"
+        ),
+    ],
+)
+def test_compound_terminal_commands_cannot_hide_target_segments(raw_command: str) -> None:
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command})
+
+    assert result["action"] == "block"
+    assert "violin_exec" in result["message"]
+
+
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        "git clone https://github.com/example/project.git && echo cloned",
+        "echo local | cat",
+    ],
+)
+def test_safe_compound_terminal_commands_remain_available(raw_command: str) -> None:
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None
+
+
 def test_safe_local_terminal_command_remains_available() -> None:
     result = _pre_tool_call_hook(
         tool_name="terminal",
