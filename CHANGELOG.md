@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1
+
+- Upgraded the pytest development dependency to 9.0.3 or later to address CVE-2025-71176 insecure temporary-directory handling.
+
 ## 2.0.0
 
 - Added model-visible `violin_status` diagnostics, phase-aware 10/20-command sync windows, a 350-iteration profile budget, and atomic `violin_review_batch` reconciliation with optional receipt-backed finding output.
