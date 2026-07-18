@@ -21,6 +21,7 @@ from typing import Any
 from . import state
 from .history import append_history
 from .phases import normalize_phase
+from .runtime_backend import resolve_backend
 
 __all__ = [
     "execute",
@@ -111,7 +112,8 @@ def _command_argv(
         raise ValueError("Docker backend unavailable: docker executable not found")
 
     relative = cwd.relative_to(eng_dir).as_posix()
-    docker_cwd = "/engagement" if relative == "." else f"/engagement/{relative}"
+    docker_root = f"/engagements/{eng_dir.name}"
+    docker_cwd = docker_root if relative == "." else f"{docker_root}/{relative}"
     prefix = ["docker", "exec", "-i", "-w", docker_cwd, container]
     return prefix + list(argv) if argv is not None else prefix + ["sh", "-lc", command]
 
@@ -296,7 +298,7 @@ def execute(
     *,
     eng_dir: str,
     phase: str,
-    backend: str = "local",
+    backend: str = "auto",
     timeout_seconds: Any = DEFAULT_TIMEOUT,
     cwd: str = "",
     label: str = "",
@@ -309,6 +311,7 @@ def execute(
     engagement = _resolve_engagement(eng_dir)
     workdir = _resolve_cwd(engagement, cwd)
     timeout = _timeout(timeout_seconds)
+    resolution = resolve_backend(backend, engagement, container=docker_container)
     execution_id = str(uuid.uuid4())
     started_at = _utc_now()
     stem = f"{started_at[:19].replace(':', '')}-{execution_id[:8]}-{_label(label)}"
@@ -327,7 +330,8 @@ def execute(
         "schema_version": SCHEMA_VERSION,
         "execution_id": execution_id,
         "status": "starting",
-        "backend": backend,
+        "backend": resolution.resolved,
+        "runtime": resolution.to_dict(),
         "command": command,
         "phase": phase,
         "cwd": str(workdir),
@@ -363,7 +367,7 @@ def execute(
                 popen_kwargs["start_new_session"] = True
 
             process_argv = _command_argv(
-                command, backend, workdir, engagement, docker_container, argv=argv
+                command, resolution.resolved, workdir, engagement, resolution.container, argv=argv
             )
             proc = subprocess.Popen(process_argv, **popen_kwargs)
 

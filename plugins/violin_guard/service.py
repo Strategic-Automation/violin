@@ -9,7 +9,7 @@ import shlex
 from functools import wraps
 from pathlib import Path
 
-from . import bootstrap, execution, findings, hypotheses, ptt, state
+from . import bootstrap, execution, findings, hypotheses, ptt, runtime_backend, state
 from . import command as cmd_module
 from .adapters import (
     build_ffuf,
@@ -446,7 +446,7 @@ def handle_exec(a, **kwargs):
             command=a["command"],
             eng_dir=a["eng_dir"],
             phase=a["phase"],
-            backend=a.get("backend", "local"),
+            backend=a.get("backend", "auto"),
             timeout_seconds=a.get("timeout_seconds", 180),
             cwd=a.get("cwd", ""),
             label=a.get("label", ""),
@@ -479,7 +479,7 @@ def handle_exec_burst(a, **kwargs):
     session_id = a.get("session_id", "")
     skill_loaded_file = a.get("skill_loaded_file", "")
     label = a.get("label", "")
-    backend = a.get("backend", "local")
+    backend = a.get("backend", "auto")
     timeout_seconds = a.get("timeout_seconds", 180)
     cwd = a.get("cwd", "")
     continue_on_error = bool(a.get("continue_on_error", False))
@@ -714,6 +714,7 @@ def handle_status(a, **kwargs):
             "loaded": skill_loaded,
             "marker": str(marker) if marker else None,
         },
+        runtime=runtime_backend.runtime_readiness(eng_dir),
     )
 
 
