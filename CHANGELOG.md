@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.3
+
+- Fixed raw-terminal compound-command classification so every pipeline, logical, semicolon, and newline segment is checked independently, and package/source exemptions require every URL in the segment to use an approved source host.
+
 ## 2.0.2
 
 - Restricted all GitHub Actions workflow tokens to read-only repository contents, resolving the three least-privilege code-scanning alerts without changing workflow behavior.
