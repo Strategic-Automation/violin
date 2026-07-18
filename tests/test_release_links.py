@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from plugins.violin_guard.core.release import resolve_reference
+from plugins.violin_guard.release import resolve_reference
 
 ROOT = Path(__file__).resolve().parent.parent
 GUARD_ROOT = ROOT

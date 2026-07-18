@@ -1,9 +1,18 @@
 # Changelog
 
-## Unreleased
+## 2.0.0
 
+- Added model-visible `violin_status` diagnostics, phase-aware 10/20-command sync windows, a 350-iteration profile budget, and atomic `violin_review_batch` reconciliation with optional receipt-backed finding output.
+- Fixed explicit PTT task creation so the requested phase controls the row's actual table placement, and unified CLI/plugin PTT review state.
+- Removed message-count heartbeat locks; executed-command heartbeat checks remain phase-aware and are suppressed during exploit-heavy phases.
+- Made the existing `violin_exec` contract explicit for every installed non-interactive Kali/Parrot CLI tool, and removed the partial target-tool name list from raw-terminal classification in favor of generic target-literal detection.
+- Reorganised the guard into focused top-level modules under `plugins/violin_guard/`, with separate history, result, execution, state, target, and service responsibilities.
+- Split web-injection and access-control playbooks into the on-demand `web-attacks` and `access-control` skills while keeping `pentest` as the engagement orchestrator.
+- Required an explicit primary target at the command boundary and added operator-approved callback hosts that cannot be promoted to assessment targets.
+- Added guarded listener execution and audited pending-batch rebinding without weakening the required PTT review and synchronization checkpoint.
+- Added engagement-bound audit receipts for Hermes `execute_code` calls, while documenting terminal detection as best-effort rather than scope enforcement.
 - Replaced regex-based target parsing with Python standard-library shell, URL, IP/CIDR, and MIME parsers; this keeps scope enforcement dependency-free while reducing parser ambiguity.
-- Moved target parsing and target-scope enforcement into `core/targets.py`, leaving the command guard focused on policy orchestration.
+- Kept target parsing and target-scope enforcement in `plugins/violin_guard/targets.py`, leaving `command.py` focused on policy orchestration.
 - Allowed `violin_record_ptt` to start one untouched phase-bound task, removing the initial active-task deadlock while retaining fail-closed batch reviews.
 - Made hypothesis parsing field-order independent and fixed template rewrites so recorded hypotheses are never written inside the template comment.
 - Clarified typed nmap all-port input: use `ports: "1-65535"`, not the `-p-` flag form.

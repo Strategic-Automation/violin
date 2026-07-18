@@ -5,6 +5,8 @@ Model-visible contracts only — no implementation logic.
 
 from __future__ import annotations
 
+from . import state
+
 CHECK_COMMAND_SCHEMA = {
     "description": "Run a check-command gate (typed wrapper over violin_guard.py check-command).",
     "parameters": {
@@ -14,10 +16,11 @@ CHECK_COMMAND_SCHEMA = {
             "eng_dir": {"type": "string"},
             "phase": {"type": "string"},
             "command": {"type": "string"},
+            "target": {"type": "string", "description": "Explicit primary target host/IP/URL"},
             "session_id": {"type": "string"},
             "skill_loaded_file": {"type": "string"},
         },
-        "required": ["eng_dir", "phase", "command"],
+        "required": ["eng_dir", "phase", "command", "target"],
         "additionalProperties": False,
     },
 }
@@ -31,6 +34,11 @@ RECORD_PTT_SCHEMA = {
             "id": {"type": "string"},
             "status": {"type": "string"},
             "note": {"type": "string"},
+            "title": {
+                "type": "string",
+                "description": "Required when explicitly creating a new PTT task",
+            },
+            "phase": {"type": "string", "description": "Phase for an explicitly created PTT task"},
         },
         "required": ["eng_dir", "id"],
         "additionalProperties": False,
@@ -75,46 +83,102 @@ RECORD_HYPOTHESIS_SCHEMA = {
                 "description": "Why a rejected hypothesis is safe to stop pursuing",
             },
         },
-        "required": ["eng_dir", "service", "port"],
+        "required": ["eng_dir"],
         "additionalProperties": True,
     },
 }
 
 EXEC_SCHEMA = {
-    "description": "Authorize and execute one target command. Requires one unambiguous [~] PTT task. The tool itself appends exact command history; it never updates PTT progress. After the bounded command window, review results, update the active PTT row explicitly, and call violin_sync_done. Hard BLOCK and sync_required never create a process.",
+    "description": "Authorize and execute one target command using any installed non-interactive Kali/Parrot CLI tool; there is no binary allowlist. Requires one unambiguous [~] PTT task. Scope, phase, hypothesis, history, evidence, timeout, and sync gates still apply, and runtime requirements such as installation, root, hardware, services, GUI, or a TTY are not bypassed. The tool appends exact command history but never updates PTT progress. Hard BLOCK and sync_required never create a process.",
     "parameters": {
         "type": "object",
         "properties": {
             "eng_dir": {"type": "string"},
             "scope": {"type": "string"},
             "phase": {"type": "string"},
-            "command": {"type": "string", "description": "Exact on-target command"},
+            "command": {
+                "type": "string",
+                "description": "Exact on-target command for any installed CLI executable",
+            },
+            "target": {"type": "string", "description": "Explicit primary target host/IP/URL"},
             "session_id": {"type": "string"},
             "skill_loaded_file": {"type": "string"},
             "backend": {"type": "string", "enum": ["local", "docker"], "default": "local"},
             "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
             "cwd": {"type": "string", "description": "Engagement-relative working directory"},
             "label": {"type": "string"},
+            "background": {
+                "type": "boolean",
+                "default": False,
+                "description": "Run as a tracked background process; use status/cancel for lifecycle management",
+            },
         },
-        "required": ["eng_dir", "scope", "phase", "command"],
+        "required": ["eng_dir", "phase", "command", "target"],
         "additionalProperties": False,
     },
 }
 
-SYNC_DONE_SCHEMA = {
-    "description": "Verify explicit batch reconciliation. Command history is written automatically, but the active PTT row must be reviewed and updated after the batch; the executor cannot satisfy this checkpoint. Clears the lock only when both artifacts are fresh.",
+REVIEW_BATCH_SCHEMA = {
+    "description": "Review the current completed batch, optionally create one receipt-backed finding, update the active PTT task, and release the sync lock. All inputs are validated before mutation; the lock clears last.",
     "parameters": {
         "type": "object",
         "properties": {
-            "eng_dir": {"type": "string", "description": "Engagement directory"},
+            "eng_dir": {"type": "string"},
+            "id": {"type": "string", "description": "Active PTT task id"},
+            "status": {
+                "type": "string",
+                "enum": ["[~]", "[x]", "[!]", "[-]"],
+            },
+            "note": {"type": "string", "description": "Truthful result/evidence review"},
+            "finding": {
+                "type": "object",
+                "description": "Optional structured finding derived only from this batch",
+                "properties": {
+                    "finding_id": {"type": "string", "description": "Optional FIND-NNN id"},
+                    "title": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["Critical", "High", "Medium", "Low", "Info"],
+                    },
+                    "description": {"type": "string"},
+                    "impact": {"type": "string"},
+                    "remediation": {"type": "string"},
+                },
+                "required": ["title", "severity", "description", "impact", "remediation"],
+                "additionalProperties": False,
+            },
         },
-        "required": ["eng_dir"],
+        "required": ["eng_dir", "id", "status", "note"],
+        "additionalProperties": False,
+    },
+}
+
+REBIND_PENDING_BATCH_SCHEMA = {
+    "description": "Explicitly rebind a completed pending batch to the sole active phase-compatible PTT task. This does not review or unlock the batch.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {"type": "string"},
+            "batch_id": {"type": "string"},
+            "current_task_id": {"type": "string"},
+            "replacement_task_id": {"type": "string"},
+            "note": {"type": "string", "description": "Operator reason for rebinding"},
+            "confirm": {"type": "boolean", "description": "Must be explicitly true"},
+        },
+        "required": [
+            "eng_dir",
+            "batch_id",
+            "current_task_id",
+            "replacement_task_id",
+            "note",
+            "confirm",
+        ],
         "additionalProperties": False,
     },
 }
 
 HEARTBEAT_DONE_SCHEMA = {
-    "description": "Call AFTER heartbeat review: re-read skills/pentest/SKILL.md and review scope.yaml / state/ptt.md / hypotheses.md / state/history.md. Cadence is 20 target commands or 30 message ticks; exploitation/post-exploitation suppresses heartbeat. Clears heartbeat lock so violin_exec may release the next command.",
+    "description": f"Call AFTER heartbeat review: re-read skills/pentest/SKILL.md and review scope.yaml / state/ptt.md / hypotheses.md / state/history.md. Cadence is {state.COMMAND_INTERVAL} executed target commands; exploitation/post-exploitation/PRIVESC/FLAGS suppress heartbeat. Clears heartbeat lock so violin_exec may release the next command.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -127,7 +191,7 @@ HEARTBEAT_DONE_SCHEMA = {
 
 EXEC_BURST_SCHEMA = {
     "name": "violin_exec_burst",
-    "description": "Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch, update the active PTT row explicitly, then call violin_sync_done. Use for recon and exploit/race batches; never raw terminal for targets.",
+    "description": "Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Use for recon and exploit/race batches; never raw terminal for targets.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -141,6 +205,10 @@ EXEC_BURST_SCHEMA = {
                 "description": "optional path to a newline-delimited file of commands",
             },
             "scope": {"type": "string", "description": "path to scope.yaml"},
+            "target": {
+                "type": "string",
+                "description": "Explicit primary target shared by the batch",
+            },
             "phase": {
                 "type": "string",
                 "description": "engagement phase: recon|vuln-research|exploitation|post-exploitation",
@@ -160,7 +228,7 @@ EXEC_BURST_SCHEMA = {
             "cwd": {"type": "string", "description": "Engagement-relative working directory"},
             "continue_on_error": {"type": "boolean", "default": False},
         },
-        "required": ["scope", "phase"],
+        "required": ["eng_dir", "phase", "target"],
     },
 }
 
@@ -218,29 +286,13 @@ _ADAPTER_COMMON = {
     "extra_args": {"type": "array", "items": {"type": "string"}, "maxItems": 20},
 }
 
-NMAP_SCHEMA = {
-    "description": "Run a typed, scope-checked nmap scan through violin_exec.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            **_ADAPTER_COMMON,
-            "scan_type": {"type": "string", "enum": ["-sV", "-sC", "-sCV", "-sn", "-Pn"]},
-            "ports": {
-                "type": "string",
-                "description": "Port specification, e.g. 80,443 or 1-65535; do not include -p",
-            },
-        },
-        "required": ["eng_dir", "scope", "phase", "target"],
-        "additionalProperties": False,
-    },
-}
 
 HTTPX_SCHEMA = {
     "description": "Run typed HTTP probing through violin_exec.",
     "parameters": {
         "type": "object",
         "properties": _ADAPTER_COMMON,
-        "required": ["eng_dir", "scope", "phase", "target"],
+        "required": ["eng_dir", "phase", "target"],
         "additionalProperties": False,
     },
 }
@@ -254,7 +306,7 @@ NUCLEI_SCHEMA = {
             "templates": {"type": "string"},
             "severity": {"type": "string"},
         },
-        "required": ["eng_dir", "scope", "phase", "target"],
+        "required": ["eng_dir", "phase", "target"],
         "additionalProperties": False,
     },
 }
@@ -269,7 +321,36 @@ FFUF_SCHEMA = {
             "wordlist": {"type": "string"},
             "headers": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["eng_dir", "scope", "phase", "url", "wordlist"],
+        "required": ["eng_dir", "phase", "url", "wordlist"],
+        "additionalProperties": False,
+    },
+}
+
+LISTENER_SCHEMA = {
+    "description": "Start a tracked local netcat listener with deterministic flags for a known implementation.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "eng_dir": {"type": "string"},
+            "scope": {"type": "string"},
+            "phase": {"type": "string"},
+            "target": {"type": "string", "description": "In-scope assessment target"},
+            "session_id": {"type": "string"},
+            "skill_loaded_file": {"type": "string"},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "bind_host": {"type": "string"},
+            "keep_open": {"type": "boolean", "default": False},
+            "binary": {"type": "string", "default": "nc"},
+            "variant": {
+                "type": "string",
+                "enum": ["openbsd", "traditional", "ncat"],
+                "description": "Optional known variant; otherwise detected once from binary help/version output",
+            },
+            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+            "cwd": {"type": "string"},
+            "label": {"type": "string"},
+        },
+        "required": ["eng_dir", "phase", "target", "port"],
         "additionalProperties": False,
     },
 }
@@ -305,7 +386,7 @@ TARGET_SCHEMA = {
 
 STATUS_SCHEMA = {
     "name": "violin_status",
-    "description": "One-shot engagement health read: bootstrap completeness, skill-load freshness, pending doc-sync, heartbeat-pending, sync credit remaining, and command/message counts. Mutates no state.",
+    "description": "Cheap one-shot explanation of the current task and phase, per-phase command requirements, pending batch commands, blockers, exact next actions, skill-load state, heartbeat state, and phase-aware sync credit. Mutates no state.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -318,7 +399,7 @@ STATUS_SCHEMA = {
                 "description": "explicit skill-load marker path (else $ENG_DIR/.skill-loaded)",
             },
         },
-        "required": [],
+        "required": ["eng_dir"],
         "additionalProperties": False,
     },
 }
