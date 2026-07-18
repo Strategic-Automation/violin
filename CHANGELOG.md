@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.6
+
+- Resolved the current CodeQL standard quality findings by making intentional exception fallbacks explicit and removing unused test and hypothesis variables.
+
 ## 2.0.5
 
 - Restored exact-repeat detection for execution history entries with receipt paths and added unambiguous command-length metadata while retaining compatibility with existing history files.

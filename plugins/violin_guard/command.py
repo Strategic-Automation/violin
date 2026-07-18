@@ -338,7 +338,6 @@ def check_hypothesis_freshness(
                 "or 'source unavailable' are valid outcomes when truthful."
             )
             return result
-        relevant = researched
 
     # Check for stale hypotheses (no update in 48h)
     stale = 0
