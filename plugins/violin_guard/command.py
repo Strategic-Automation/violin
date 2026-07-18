@@ -427,7 +427,9 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
         if active_task and not ptt.task_matches_phase(active_task, phase):
             result.add_error(
                 f"active PTT task {active_task.id} belongs to {active_task.phase or 'no phase'}; "
-                f"requested phase is {phase.value}"
+                f"requested phase is {phase.value}. Next: call violin_status, then close or "
+                "pause the current task and start one under the requested Phase heading with "
+                "violin_record_ptt"
             )
 
     # 5. History staleness (duplicate detection)
@@ -449,14 +451,15 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     # 7. Sync/heartbeat state
     sync_pending = state.get_pending_sync(str(eng_dir))
     if sync_pending:
-        credit = state.sync_credit_remaining(str(eng_dir))
+        credit = state.sync_credit_remaining(str(eng_dir), phase.value)
         last_command = (sync_pending.get("commands") or [{}])[-1].get(
             "command", sync_pending.get("command", "prior command")
         )
         if credit == 0:
             result.add_error(
                 f"prior command's artifacts not synced: {last_command} "
-                f"(phase: {sync_pending.get('phase')})"
+                f"(phase: {sync_pending.get('phase')}). Next: review the batch evidence and call "
+                "violin_review_batch with the active PTT task and a truthful note"
             )
         else:
             result.add_info(
@@ -465,10 +468,16 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
             )
 
     # 8. Sync-credit window exhausted
-    credit = state.sync_credit_remaining(str(eng_dir))
-    result.infos.append(f"sync credit remaining: {credit}/{state.DEFAULT_SYNC_CREDIT}")
+    credit = state.sync_credit_remaining(str(eng_dir), phase.value)
+    credit_limit = int(
+        (sync_pending or {}).get("credit_limit") or state.sync_credit_limit(phase.value)
+    )
+    result.infos.append(f"sync credit remaining: {credit}/{credit_limit}")
     if credit == 0:
-        result.add_error("sync-credit window exhausted — call violin_sync_done to reset")
+        result.add_error(
+            "sync-credit window exhausted; review the saved batch evidence, then call "
+            "violin_review_batch"
+        )
 
     # 9. Heartbeat gate (set after every COMMAND_INTERVAL executed commands).
     # Execution owns the command count and creates the heartbeat lock after the
@@ -479,8 +488,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
         reason = state.get_heartbeat_reason(str(eng_dir))
         detail = f": {reason}" if reason else ""
         result.add_error(
-            f"heartbeat pending{detail} — review engagement state, then run "
-            "violin_heartbeat_done"
+            f"heartbeat pending{detail} — review engagement state, then run violin_heartbeat_done"
         )
 
     return result

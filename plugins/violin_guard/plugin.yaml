@@ -9,7 +9,7 @@ provides_tools:
   - violin_exec
   - violin_exec_status
   - violin_exec_cancel
-  - violin_sync_done
+  - violin_review_batch
   - violin_rebind_pending_batch
   - violin_heartbeat_done
   - violin_exec_burst

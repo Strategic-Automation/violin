@@ -17,8 +17,15 @@ from filelock import FileLock
 
 DEFAULT_SYNC_CREDIT = 5
 COMMAND_INTERVAL = 50
-MESSAGE_INTERVAL = 60
 MAX_BURST_COMMANDS = 20
+PHASE_SYNC_CREDIT = {
+    "RECON": 10,
+    "VULN_RESEARCH": 10,
+    "EXPLOITATION": 20,
+    "POST_EXPLOITATION": 20,
+    "PRIVESC": 20,
+    "FLAGS": 20,
+}
 
 # Local tools
 LOCAL_TOOLS = {"echo", "true", "false", "printf", "pwd", "ls", "cat", "date"}
@@ -141,16 +148,22 @@ def _sync_path(eng_dir: str | Path) -> Path:
     return _state_dir(eng_dir) / _SYNC_FILE
 
 
-def sync_credit_remaining(eng_dir: str | Path) -> int:
+def sync_credit_limit(phase: str | None = None) -> int:
+    key = str(phase or "").strip().upper().replace("-", "_")
+    return PHASE_SYNC_CREDIT.get(key, DEFAULT_SYNC_CREDIT)
+
+
+def sync_credit_remaining(eng_dir: str | Path, phase: str | None = None) -> int:
     data = read_json(_sync_path(eng_dir))
-    return max(0, data.get("credit", DEFAULT_SYNC_CREDIT))
+    return max(0, data.get("credit", sync_credit_limit(phase)))
 
 
-def spend_sync_credit(eng_dir: str | Path) -> int:
+def spend_sync_credit(eng_dir: str | Path, phase: str) -> int:
     path = _sync_path(eng_dir)
 
     def spend(data: dict[str, Any]) -> int:
-        credit = max(0, data.get("credit", DEFAULT_SYNC_CREDIT) - 1)
+        starting_credit = data.get("credit", sync_credit_limit(phase))
+        credit = max(0, starting_credit - 1)
         data["credit"] = credit
         return credit
 
@@ -182,6 +195,7 @@ def mark_pending_sync(
             or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "ptt_task_id": task_id,
             "ptt_reviewed": False,
+            "credit_limit": old.get("credit_limit") or sync_credit_limit(command_phase),
         }
 
     mutate_json(path, mark)
@@ -192,7 +206,7 @@ def clear_pending_sync(eng_dir: str | Path) -> None:
 
     def clear(data: dict[str, Any]) -> None:
         data.pop("pending", None)
-        data["credit"] = DEFAULT_SYNC_CREDIT
+        data.pop("credit", None)
 
     mutate_json(path, clear)
 

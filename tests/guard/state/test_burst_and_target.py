@@ -319,3 +319,53 @@ def test_plugin_exposes_new_tools():
     tool_names = set(manifest["provides_tools"])
     assert "violin_exec_burst" in tool_names
     assert "violin_target" in tool_names
+    assert "violin_review_batch" in tool_names
+    assert (
+        not {
+            "violin_sync_done",
+            "violin_review_and_release",
+            "violin_finding",
+        }
+        & tool_names
+    )
+
+
+def test_status_skill_section_reports_load_state_and_exit_code(eng):
+    state.record_session_id(eng, "ts")
+    loaded = _run("status", "--eng-dir", str(eng), "--section", "skill")
+    loaded_data = json.loads(loaded.stdout)
+    assert loaded.returncode == 0
+    assert loaded_data["loaded"] is True
+
+    marker = Path(loaded_data["marker"])
+    marker.unlink()
+    missing = _run("status", "--eng-dir", str(eng), "--section", "skill")
+    missing_data = json.loads(missing.stdout)
+    assert missing.returncode == 1
+    assert missing_data["loaded"] is False
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "review-and-release",
+        "finding",
+        "sync-done",
+        "record-history",
+        "message-tick",
+        "skill-status",
+        "check-skill-loaded",
+    ],
+)
+def test_removed_cli_commands_are_absent(removed):
+    result = _run(removed, "--help")
+    assert result.returncode != 0
+    assert "invalid choice" in result.stderr
+
+
+def test_review_batch_cli_exposes_lifecycle_and_optional_finding_fields():
+    result = _run("review-batch", "--help")
+    assert result.returncode == 0
+    assert "--status" in result.stdout
+    assert "--note" in result.stdout
+    assert "--finding-title" in result.stdout

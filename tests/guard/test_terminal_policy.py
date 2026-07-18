@@ -132,6 +132,15 @@ def test_local_script_paths_are_not_treated_as_hosts() -> None:
     assert _pre_tool_call_hook(tool_name="terminal", args={"command": "sh deploy.sh"}) is None
 
 
+def test_local_file_path_containing_an_ip_is_not_treated_as_a_socket() -> None:
+    assert (
+        _pre_tool_call_hook(
+            tool_name="terminal", args={"command": "cat /tmp/file-with-10.10.14.233.txt"}
+        )
+        is None
+    )
+
+
 def test_non_terminal_tools_are_not_affected() -> None:
     result = _pre_tool_call_hook(
         tool_name="violin_exec",

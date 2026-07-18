@@ -30,7 +30,7 @@ REGISTERED_TOOLS = [
     "violin_exec",
     "violin_exec_status",
     "violin_exec_cancel",
-    "violin_sync_done",
+    "violin_review_batch",
     "violin_rebind_pending_batch",
     "violin_heartbeat_done",
     "violin_exec_burst",
@@ -58,7 +58,12 @@ def register(ctx) -> None:
         ("violin_exec", schemas.EXEC_SCHEMA, service.handle_exec, "⚡"),
         ("violin_exec_status", schemas.EXEC_STATUS_SCHEMA, service.handle_exec_status, "i"),
         ("violin_exec_cancel", schemas.EXEC_CANCEL_SCHEMA, service.handle_exec_cancel, "x"),
-        ("violin_sync_done", schemas.SYNC_DONE_SCHEMA, service.handle_sync_done, "✅"),
+        (
+            "violin_review_batch",
+            schemas.REVIEW_BATCH_SCHEMA,
+            service.handle_review_batch,
+            "✅",
+        ),
         (
             "violin_rebind_pending_batch",
             schemas.REBIND_PENDING_BATCH_SCHEMA,
@@ -160,7 +165,7 @@ def _on_session_reset_hook(session_id=None, eng_dir=None, **kwargs) -> None:
 def _on_session_finalize_hook(session_id=None, eng_dir=None, **kwargs) -> None:
     """Hook: session finalize.
 
-    Closeout gates are explicit (violin_sync_done / close command). On finalize
+    Closeout gates are explicit (violin_review_batch / close command). On finalize
     we leave a continuity marker so a fresh session can re-read pending state.
     """
     if eng_dir:
@@ -169,7 +174,7 @@ def _on_session_finalize_hook(session_id=None, eng_dir=None, **kwargs) -> None:
             if pending:
                 state.set_heartbeat_pending(
                     str(eng_dir),
-                    "session finalized with a pending sync lock; run violin_sync_done",
+                    "session finalized with a pending sync lock; run violin_review_batch",
                 )
         except Exception:
             pass

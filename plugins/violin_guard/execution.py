@@ -245,7 +245,7 @@ def _monitor_background(
 
 def _commit_started_command(engagement: Path, command: str, phase: str, ptt_task_id: str) -> int:
     if state.is_local_bookkeeping_command(command):
-        return state.sync_credit_remaining(str(engagement))
+        return state.sync_credit_remaining(str(engagement), phase)
     return _commit_guard_state(engagement, command, phase, ptt_task_id)
 
 
@@ -454,7 +454,7 @@ def execute(
 
 def _commit_guard_state(eng_dir: Path, command: str, phase: str, ptt_task_id: str = "") -> int:
     state.record_ok_check(str(eng_dir), command, phase)
-    remaining = state.spend_sync_credit(str(eng_dir))
+    remaining = state.spend_sync_credit(str(eng_dir), phase)
     state.mark_pending_sync(str(eng_dir), command, phase, ptt_task_id)
     count = state.tick_command(str(eng_dir))
     from .phases import suppresses_heartbeat

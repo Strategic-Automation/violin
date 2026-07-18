@@ -2,6 +2,7 @@
 # Hermes default and does not require a profile-specific provider or API key.
 
 agent:
+  max_turns: 350
   service_tier: normal
   verbose: false
   reasoning_effort: medium

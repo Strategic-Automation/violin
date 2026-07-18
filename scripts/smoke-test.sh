@@ -36,6 +36,14 @@ fail()  { echo "  [✗] $1"; ((FAIL+=1)); FAILURES+="  - $1"$'\n'; }
 header(){ echo ""; echo "━━━ $1 ━━━"; }
 summary(){ echo ""; echo "────────────────────────────────────────"; echo "  PASS: $PASS   FAIL: $FAIL"; echo "────────────────────────────────────────"; }
 
+seed_history_fixture(){
+  python3 - "$1" "$2" "$3" <<'PY'
+import sys
+from plugins.violin_guard import history
+history.append_history(sys.argv[1], sys.argv[2], sys.argv[3], 0)
+PY
+}
+
 # =============================================================================
 # 1. YAML Validity
 # =============================================================================
@@ -285,34 +293,18 @@ else
   fail "record-ptt did not reject bad PT id (exit=$bad_id_exit)"
 fi
 
-# (e) record-history appends a line and exits 0
-set +e
-hist_out=$(python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_GUARD" --command "nmap -sV 10.129.245.218" --exit-code 0 --phase RECON 2>&1)
-hist_exit=$?
-set -e
-if [ "$hist_exit" -eq 0 ]; then
-  pass "record-history appends entry and exits 0"
-else
-  fail "record-history failed (exit=$hist_exit): $hist_out"
-fi
-
-# (f) history.md has the new entry on disk
-if grep -q 'RECON' "$SMOKE_GUARD/state/history.md" 2>/dev/null; then
-  pass "history.md contains the RECON entry"
-else
-  fail "history.md did not receive the recorded entry"
-fi
-
-# (g) record-history with empty command exits 1
-set +e
-empty_hist=$(python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_GUARD" --command "" --exit-code 0 2>&1)
-empty_hist_exit=$?
-set -e
-if [ "$empty_hist_exit" -eq 1 ] && echo "$empty_hist" | grep -qi "required"; then
-  pass "record-history rejects empty --command"
-else
-  fail "record-history did not reject empty command (exit=$empty_hist_exit)"
-fi
+# (e) Removed administrative/model-facing commands are absent.
+for removed in review-and-release finding sync-done record-history message-tick skill-status check-skill-loaded; do
+  set +e
+  removed_out=$(python3 scripts/violin_guard.py "$removed" --help 2>&1)
+  removed_exit=$?
+  set -e
+  if [ "$removed_exit" -ne 0 ] && echo "$removed_out" | grep -qi "invalid choice"; then
+    pass "removed CLI command is absent: $removed"
+  else
+    fail "removed CLI command is still accepted: $removed"
+  fi
+done
 
 # (h) Stale-PTT detection: check-bootstrap warns when all rows are pristine
 # Use a SEPARATE fresh engagement (test (a) already updated PT-001 in $SMOKE_GUARD)
@@ -331,18 +323,6 @@ if [ "$stale_exit" -eq 2 ] && echo "$stale_out" | grep -qi "never been updated";
   pass "Stale PTT detection warns on pristine PTT (exit 2)"
 else
   fail "Stale-PTT detection unexpected (exit=$stale_exit): $stale_out"
-fi
-
-# (i) record-history without a pre-existing history.md does not create one and exits 1
-rm -f "$SMOKE_GUARD/state/history.md"
-set +e
-nohist_out=$(python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_GUARD" --command "test" --exit-code 0 2>&1)
-nohist_exit=$?
-set -e
-if [ "$nohist_exit" -eq 1 ] && echo "$nohist_out" | grep -qi "not found"; then
-  pass "record-history errors when history.md is missing"
-else
-  fail "record-history did not error on missing history.md (exit=$nohist_exit)"
 fi
 
 # Cleanup
@@ -375,7 +355,7 @@ cat > "$SMOKE_FRESH/hypotheses.md" <<'MD'
 - **Updated:** $(date '+%Y-%m-%d %H:%M')
 MD
 echo "# Command History — fresh" > "$SMOKE_FRESH/state/history.md"
-python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_FRESH" --command "nmap 10.129.45.113" --exit-code 0 --phase RECON >/dev/null 2>&1
+seed_history_fixture "$SMOKE_FRESH" "nmap 10.129.45.113" RECON
 # PTT "Last updated" set to now
 sed -i "s|<YYYY-MM-DD HH:MM>|$(date '+%Y-%m-%d %H:%M')|" "$SMOKE_FRESH/state/ptt.md"
 # Mark one RECON row done so desync detection has a baseline
@@ -416,9 +396,6 @@ else
   fail "Fresh engagement: target command unexpectedly blocked (exit=$fresh_ok_exit): $fresh_ok"
 fi
 
-# Clear the doc-sync gate so the next test hits the skill-load gate, not the sync gate
-python3 scripts/violin_guard.py sync-done --eng-dir "$SMOKE_FRESH" >/dev/null 2>&1
-
 # (b) Target-touching command WITHOUT --session-id/--skill-loaded-file is BLOCKED (Gap #1 fix)
 set +e
 fresh_noskill=$(python3 scripts/violin_guard.py check-command --scope "$SMOKE_FRESH/scope/scope.yaml" --eng-dir "$SMOKE_FRESH" --phase recon --command "nmap 10.129.45.113" 2>&1)
@@ -456,7 +433,7 @@ cat > "$SMOKE_STALEPTT/hypotheses.md" <<'MD'
 - **Updated:** 2026-07-08 00:00
 MD
 echo "# Command History" > "$SMOKE_STALEPTT/state/history.md"
-python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_STALEPTT" --command "curl 10.129.45.113" --exit-code 0 --phase EXPLOITATION >/dev/null 2>&1
+seed_history_fixture "$SMOKE_STALEPTT" "curl 10.129.45.113" EXPLOITATION
 python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEPTT" --id PT-040 --status "[~]" --note "exploiting" >/dev/null 2>&1
 touch "$SMOKE_STALEPTT/state/.skill-loaded-stale"
 cat > "$SMOKE_STALEPTT/scope/scope.yaml" <<'YAML'
@@ -511,7 +488,7 @@ cat > "$SMOKE_STALEHYP/hypotheses.md" <<'MD'
 - **Updated:** 2026-07-08 00:00
 MD
 echo "# Command History" > "$SMOKE_STALEHYP/state/history.md"
-python3 scripts/violin_guard.py record-history --eng-dir "$SMOKE_STALEHYP" --command "curl 10.129.45.113" --exit-code 0 --phase EXPLOITATION >/dev/null 2>&1
+seed_history_fixture "$SMOKE_STALEHYP" "curl 10.129.45.113" EXPLOITATION
 python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEHYP" --id PT-040 --status "[~]" --note "exploiting" >/dev/null 2>&1
 touch "$SMOKE_STALEHYP/state/.skill-loaded-sh"
 cat > "$SMOKE_STALEHYP/scope/scope.yaml" <<'YAML'
@@ -547,9 +524,9 @@ fi
 rm -rf "$SMOKE_FRESH"
 
 # =============================================================================
-# 3.8 Plugin Gate Lifecycle — violin_exec (check-command + doc-sync) & violin_sync_done
+# 3.8 Canonical Batch Review Lifecycle
 # =============================================================================
-header "3.8 Plugin Gate Lifecycle (violin_exec + violin_sync_done)"
+header "3.8 Canonical Batch Review Lifecycle (violin_review_batch)"
 
 GATES_DIR="engagements/_smoke-gates-$$"
 mkdir -p "$GATES_DIR"/{scope,state,evidence}
@@ -594,81 +571,53 @@ authorisation:
   confirmed_at: '2026-07-08T00:00:00Z'
 YAML
 
-# Seed a valid PTT row (moved past [ ]) — do NOT pre-record the history command,
-# because the first exec should be a fresh command (no duplicate warning).
-# The record-history happens AFTER the first exec in the real workflow.
-python3 scripts/violin_guard.py record-ptt --eng-dir "$GATES_DIR" --id PT-001 --status "[x]" --note "bootstrap" >/dev/null 2>&1
-# Pre-seed a DIFFERENT command in history so the history guard doesn't fire "no recorded commands" REVIEW
-python3 scripts/violin_guard.py record-history --eng-dir "$GATES_DIR" --command "curl http://10.129.45.113" --exit-code 0 --phase RECON >/dev/null 2>&1
-# Note: first exec will be a different command (nmap -sV) so no duplicate warning
-
-# Drive the plugin handlers directly (the layer that wraps the guard scripts).
-# This asserts the full lifecycle: fresh exec -> approved -> pending sync locks
-# the next exec -> sync_done clears -> next exec approved.
+# Seed the active PTT row whose identity review-batch must preserve.
+python3 scripts/violin_guard.py record-ptt --eng-dir "$GATES_DIR" --id PT-010 --status "[~]" --note "active recon" >/dev/null 2>&1
+# Drive the canonical service handler directly.
 python3 - "$GATES_DIR" <<'PY'
-import sys, json, os
-from datetime import datetime
-eng_dir = sys.argv[1]
-repo = os.getcwd()
-import importlib.util
-pkg_spec = importlib.util.spec_from_file_location("vgpkg", os.path.join(repo, "plugins/violin_guard/__init__.py"))
-pkg = importlib.util.module_from_spec(pkg_spec)
-pkg.__path__ = [os.path.join(repo, "plugins/violin_guard")]
-pkg.__package__ = "vgpkg"
-sys.modules["vgpkg"] = pkg
-def load_sub(name, path):
-    spec = importlib.util.spec_from_file_location(f"vgpkg.{name}", path)
-    m = importlib.util.module_from_spec(spec); m.__package__ = "vgpkg"
-    sys.modules[f"vgpkg.{name}"] = m; spec.loader.exec_module(m); return m
-tools = load_sub("tools", os.path.join(repo, "plugins/violin_guard/tools.py"))
+import json
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
-def st(handler, **kw):
-    return json.loads(handler(kw))["status"]
+from plugins.violin_guard import history, service, state
 
-now = datetime.now().strftime("%Y-%m-%d %H:%M")
-base = dict(eng_dir=eng_dir, scope=f"{eng_dir}/scope/scope.yaml",
-            phase="recon", command="nmap -sV 10.129.45.113",  # Different from any pre-recorded
-            skill_loaded_file=f"{eng_dir}/state/.skill-loaded-gate")
+engagement = Path(sys.argv[1])
+command = "nmap -sV 10.129.45.113"
+receipt = engagement / "evidence" / "executions" / "review.json"
+receipt.parent.mkdir(parents=True, exist_ok=True)
+state.atomic_json(receipt, {
+    "command": command,
+    "phase": "RECON",
+    "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    "exit_code": 0,
+    "evidence_paths": {"manifest": receipt.relative_to(engagement).as_posix()},
+})
+history.append_history(
+    engagement, command, "RECON", 0, receipt.relative_to(engagement).as_posix()
+)
+state.mark_pending_sync(engagement, command, "RECON", "PT-010")
 
-# Step 1: fresh engagement -> exec must be APPROVED (no pending sync)
-# Uses a DISTINCT command from any pre-recorded history
-s1 = st(tools.handle_exec, **base)
-assert s1 == "approved", f"step1 expected approved, got {s1}"
-print("    ok: fresh violin_exec -> approved")
-
-# Step 2: next exec without violin_sync_done -> SYNC_REQUIRED (doc-sync gate)
-s2 = st(tools.handle_exec, **base)
-assert s2 == "sync_required", f"step2 expected sync_required, got {s2}"
-print("    ok: second violin_exec before sync -> sync_required")
-
-# Step 3: LLM updates artifacts, then violin_sync_done -> OK (freshness verified)
-with open(f"{eng_dir}/state/history.md", "a") as f:
-    f.write(f"\n- nmap -sV 10.129.45.113 (exit 0) [{now}]\n")
-pt = f"{eng_dir}/state/ptt.md"
-t = open(pt).read()
-open(pt, "w").write(t.replace("Last updated:", f"Last updated: {now}") if "Last updated:" in t else t)
-s3 = st(tools.handle_sync_done, eng_dir=eng_dir)
-assert s3 == "ok", f"step3 expected ok, got {s3}"
-print("    ok: violin_sync_done after artifact update -> ok")
-
-# Step 4: exec after sync -> APPROVED again (use a DIFFERENT command from step 1/2)
-base2 = dict(base, command="gobuster dir -u http://10.129.45.113 -w wordlist.txt")
-s4 = st(tools.handle_exec, **base2)
-assert s4 == "approved", f"step4 expected approved, got {s4}"
-print("    ok: violin_exec after sync -> approved")
-
-# Step 5: hypothesis recording through the plugin core service.
-s5 = st(tools.handle_record_hypothesis, eng_dir=eng_dir, service="SMB",
-        port="445", title="anon access", status="researching")
-assert s5 == "ok", f"step5 expected ok, got {s5}"
-print("    ok: violin_record_hypothesis -> ok")
+reviewed = json.loads(service.handle_review_batch({
+    "eng_dir": str(engagement),
+    "id": "PT-010",
+    "status": "[~]",
+    "note": "Reviewed the completed recon receipt",
+}))
+assert reviewed["status"] == "ok", reviewed
+assert reviewed["released"] is True
+assert not state.has_pending_sync(engagement)
+assert "[reviewed-batch:" in (engagement / "state" / "ptt.md").read_text()
+for removed in ("handle_sync_done", "handle_review_and_release", "handle_finding"):
+    assert not hasattr(service, removed), removed
+print("    ok: violin_review_batch reviewed PTT and released the batch")
 print("GATES_OK")
 PY
 gates_exit=$?
 if [ "$gates_exit" -eq 0 ]; then
-  pass "3.8 Plugin gate lifecycle: exec->sync_required->sync_done->exec + hypothesis routing all correct"
+  pass "3.8 Canonical review lifecycle: receipt->PTT review->batch release"
 else
-  fail "3.8 Plugin gate lifecycle failed (see python output above)"
+  fail "3.8 Canonical review lifecycle failed (see python output above)"
 fi
 
 rm -rf "$GATES_DIR"

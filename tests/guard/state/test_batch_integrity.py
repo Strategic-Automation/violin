@@ -19,13 +19,11 @@ def _engagement(tmp_path: Path) -> Path:
     return eng
 
 
-def test_review_reconciles_a_direct_ptt_active_task_edit(tmp_path: Path) -> None:
+def test_record_ptt_refuses_to_reconcile_a_pending_batch(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
     command = "nmap -p 80 10.10.10.10"
     history.append_history(eng, command, "RECON", 0, "evidence/executions/test.json")
     state.mark_pending_sync(eng, command, "RECON", "PT-010")
-    batch_id = state.get_pending_sync(eng)["batch_id"]
-
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
         ptt_path.read_text(encoding="utf-8")
@@ -35,11 +33,12 @@ def test_review_reconciles_a_direct_ptt_active_task_edit(tmp_path: Path) -> None
     )
     result = json.loads(
         service.handle_record_ptt(
-            {"eng_dir": str(eng), "id": "PT-011", "status": "[~]", "note": f"review {batch_id}"}
+            {"eng_dir": str(eng), "id": "PT-011", "status": "[~]", "note": "review"}
         )
     )
-    assert result["status"] == "ok"
-    assert state.get_pending_sync(eng)["ptt_task_id"] == "PT-011"
+    assert result["status"] == "error"
+    assert "violin_review_batch" in result["error"]
+    assert state.get_pending_sync(eng)["ptt_task_id"] == "PT-010"
 
 
 def test_appending_work_invalidates_an_earlier_review(tmp_path: Path) -> None:
@@ -86,8 +85,6 @@ def test_confirmed_rebind_is_audited_but_does_not_review_or_unlock(tmp_path: Pat
     assert pending["ptt_task_id"] == "PT-011"
     assert pending["ptt_reviewed"] is False
     assert state.has_pending_sync(eng)
-    sync = json.loads(service.handle_sync_done({"eng_dir": str(eng)}))
-    assert sync["status"] == "sync_required"
     sync_data = json.loads((eng / "state" / "sync.json").read_text(encoding="utf-8"))
     assert sync_data["rebind_audit"][-1]["old_task_id"] == "PT-010"
     assert sync_data["rebind_audit"][-1]["new_task_id"] == "PT-011"

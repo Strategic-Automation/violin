@@ -82,7 +82,7 @@ def _fake_target_executor(monkeypatch):
     def fake_execute(command, *, eng_dir, phase, **kwargs):
         engagement = Path(eng_dir)
         history.append_history(engagement, command, phase, 0, "evidence/executions/test.json")
-        remaining = state.spend_sync_credit(str(engagement))
+        remaining = state.spend_sync_credit(str(engagement), phase)
         # Mirror real execution: tick command counter, mark pending sync, set heartbeat if interval reached
         from plugins.violin_guard.phases import normalize_phase, suppresses_heartbeat
 
@@ -157,11 +157,13 @@ def test_meta_loaded():
     for name in (
         "handle_exec",
         "handle_check_command",
-        "handle_sync_done",
+        "handle_review_batch",
         "handle_record_ptt",
         "handle_record_hypothesis",
     ):
         assert hasattr(TOOLS, name), f"plugin must expose {name}"
+    for removed in ("handle_sync_done", "handle_review_and_release", "handle_finding"):
+        assert not hasattr(TOOLS, removed), f"plugin must not expose removed handler {removed}"
 
 
 def test_recon_does_not_require_hypothesis(tmp_path):
@@ -576,7 +578,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     )
     assert ptt_path.read_text(encoding="utf-8") == ptt_before
 
-    window = state.DEFAULT_SYNC_CREDIT
+    window = state.sync_credit_limit("recon")
     for i in range(2, window + 1):
         command_val = f"nmap -sV 10.10.10.10 -p {i}"
         out = json.loads(TOOLS.handle_exec({**args, "command": command_val}))
@@ -599,7 +601,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     assert history_text.count("exit_code=0 | command=nmap") == window
 
     reviewed = json.loads(
-        TOOLS.handle_record_ptt(
+        TOOLS.handle_review_batch(
             {
                 "eng_dir": str(eng),
                 "id": "PT-010",
@@ -610,8 +612,6 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
     )
     assert reviewed["status"] == "ok", reviewed
     assert f"[reviewed-batch:{batch_id}]" in ptt_path.read_text(encoding="utf-8")
-    synced = json.loads(TOOLS.handle_sync_done({"eng_dir": str(eng)}))
-    assert synced["status"] == "ok", synced
     resumed = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 99"}))
     assert resumed["status"] in ("ok", "approved", "review"), resumed
 
@@ -655,7 +655,7 @@ def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, 
     }
 
     ptt_before = ptt_path.read_text(encoding="utf-8")
-    total = state.DEFAULT_SYNC_CREDIT
+    total = state.sync_credit_limit("exploitation")
     for i in range(total):
         command_val = f"curl http://10.10.10.10/probe?variant={i}"
         out = json.loads(TOOLS.handle_exec({**args, "command": command_val}))
@@ -684,17 +684,13 @@ def test_heartbeat_gate_every_n_commands(monkeypatch, tmp_path):
     for _ in range(state.COMMAND_INTERVAL - 1):
         state.tick_command(str(eng))
 
-    threshold = json.loads(
-        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 20"})
-    )
+    threshold = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 20"}))
     assert threshold["status"] == "ok", threshold
     assert threshold["executed"] is True
     assert state.read_counts(str(eng))["commands"] == state.COMMAND_INTERVAL
     assert state.has_heartbeat_pending(str(eng))
 
-    blocked = json.loads(
-        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 21"})
-    )
+    blocked = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 21"}))
     assert blocked["status"] == "denied", blocked
     assert blocked["executed"] is False
     assert state.read_counts(str(eng))["commands"] == state.COMMAND_INTERVAL
@@ -702,23 +698,22 @@ def test_heartbeat_gate_every_n_commands(monkeypatch, tmp_path):
     cleared = json.loads(TOOLS.handle_heartbeat_done({"eng_dir": str(eng)}))
     assert cleared["status"] == "ok", cleared
 
-    resumed = json.loads(
-        TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 21"})
-    )
+    resumed = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 21"}))
     assert resumed["status"] == "ok", resumed
     assert resumed["executed"] is True
     assert state.read_counts(str(eng))["commands"] == state.COMMAND_INTERVAL + 1
 
 
-def test_message_tick_triggers_heartbeat(monkeypatch, tmp_path):
-    """Every MESSAGE_INTERVAL calls, heartbeat is required."""
+def test_message_ticks_are_diagnostic_and_do_not_trigger_heartbeat(monkeypatch, tmp_path):
+    """LLM message volume must not create a stale guard lock."""
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
 
     # Build a session object via pre_llm_call (which increments message tick)
     from plugins.violin_guard import _pre_llm_call_hook
 
-    for _ in range(state.MESSAGE_INTERVAL - 1):
+    for _ in range(100):
         _pre_llm_call_hook(session_id="ts", eng_dir=str(eng), phase="recon")
 
-    assert _pre_llm_call_hook(session_id="ts", eng_dir=str(eng), phase="recon") is None
+    assert not state.has_heartbeat_pending(str(eng))
+    assert state.read_counts(str(eng))["messages"] == 100

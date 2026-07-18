@@ -201,6 +201,9 @@ flowchart LR
 - **Evidence-first** — every finding backed by reproducible tool output, screenshots, request/response pairs
 - **Exploit-first validation** — no hypothesis advances to Validated without a verification command
 - **Stateful recovery** — phase summaries and checkpoints restore the current engagement after context compression without starting a new conversation
+- **Self-explaining guard** — `violin_status` (or `python scripts/violin_guard.py status --eng-dir "$ENG_DIR"`) shows the active task and phase, pending commands and their required phases, phase requirements, skill state, blockers, and exact next actions without running a command
+- **Phase-aware work windows** — RECON/VULN_RESEARCH allow 10 guarded commands per reviewed batch; EXPLOITATION/POST_EXPLOITATION/PRIVESC/FLAGS allow 20, and the Hermes profile budget is 350 tool iterations
+- **One-call reconciliation** — `violin_review_batch` validates the completed batch, optionally writes its receipt-backed finding, updates the active PTT row once, and clears the batch lock last
 
 Full safety policy: `skills/pentest/references/standards.md`. Forbidden actions: `.hermes.md` §Forbidden Behaviour.
 
@@ -241,6 +244,8 @@ python scripts/violin_guard.py check-release
 ```
 
 Validates the plugin manifest and registered tools, isolated Hermes-style plugin import, stale skill references, Ruff, and the full pytest suite.
+
+Hermes skills are loaded on demand. Start the profile with `hermes chat --skills pentest` when the launcher supports arguments; otherwise load `pentest` immediately, then confirm the engagement marker with `python scripts/violin_guard.py status --eng-dir "$ENG_DIR" --section skill`. Hermes does not currently expose a distribution-level setting that can truthfully force-load a profile skill.
 
 ---
 

@@ -2,6 +2,9 @@
 
 ## 2.0.0
 
+- Added model-visible `violin_status` diagnostics, phase-aware 10/20-command sync windows, a 350-iteration profile budget, and atomic `violin_review_batch` reconciliation with optional receipt-backed finding output.
+- Fixed explicit PTT task creation so the requested phase controls the row's actual table placement, and unified CLI/plugin PTT review state.
+- Removed message-count heartbeat locks; executed-command heartbeat checks remain phase-aware and are suppressed during exploit-heavy phases.
 - Made the existing `violin_exec` contract explicit for every installed non-interactive Kali/Parrot CLI tool, and removed the partial target-tool name list from raw-terminal classification in favor of generic target-literal detection.
 - Reorganised the guard into focused top-level modules under `plugins/violin_guard/`, with separate history, result, execution, state, target, and service responsibilities.
 - Split web-injection and access-control playbooks into the on-demand `web-attacks` and `access-control` skills while keeping `pentest` as the engagement orchestrator.

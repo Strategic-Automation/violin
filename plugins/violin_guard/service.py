@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from functools import wraps
 from pathlib import Path
 
+from . import bootstrap, execution, findings, hypotheses, ptt, state
 from . import command as cmd_module
-from . import execution, hypotheses, ptt, state
 from .adapters import (
     build_ffuf,
     build_httpx,
@@ -19,6 +20,7 @@ from .adapters import (
 )
 from .command import CheckCommandArgs
 from .history import history_contains
+from .phases import Phase, requires_hypothesis, suppresses_heartbeat
 from .targets import resolve_target
 
 # ---------------------------------------------------------------------------
@@ -92,75 +94,30 @@ def handle_record_ptt(a, **kwargs):
     note = (a.get("note") or "").strip()
     status = a.get("status", "[~]")
 
-    # --- Self-certify guard (audit P0-sync) ---------------------------------
     if not task or not note:
-        raise ValueError("task id and non-empty review note required")
-    if not pending:
-        if not any(item.id == task for item in doc):
-            created = ptt.create_task(
-                _eng_path(eng_dir) / "state" / "ptt.md",
-                task,
-                a.get("title") or task,
-                a.get("phase") or "RECON",
-                note,
-            )
-            doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
-            if status == "[ ]":
-                return _json("ok", task_id=created.id, task_created=True)
-        existing = next((item for item in doc if item.id == task), None)
-        if existing and status in {"[x]", "[-]"}:
-            if existing.status != "[~]":
-                raise ValueError("only the active [~] task may be closed outside a batch")
-            ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
-            return _json("ok", task_id=task, task_closed=True)
-        return _start_ptt_task(_eng_path(eng_dir) / "state" / "ptt.md", doc, task, status, note)
-    validation = ptt.validate_ptt(doc)
-    if validation.errors:
-        raise ValueError("PTT must have exactly one valid active task before review")
-    active = ptt.find_active_task(doc)
-    captured_task = pending.get("ptt_task_id")
-    if not captured_task:
+        raise ValueError("task id and non-empty lifecycle note required")
+    if pending:
         raise ValueError(
-            "pending batch has no captured PTT task; refusing legacy self-certification"
+            "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
         )
-    # A human may update ptt.md directly after a batch.  If there is one
-    # phase-compatible active task, reconcile that deliberate state edit
-    # here instead of forcing an opaque multi-step rebind ceremony.
-    if active and active.id != captured_task:
-        phases = {
-            str(item.get("phase") or pending.get("phase") or "")
-            for item in pending.get("commands") or []
-        } - {""}
-        if all(ptt.task_matches_phase(active, phase) for phase in phases):
-            state.rebind_pending_sync(
-                eng_dir,
-                expected_batch_id=str(pending.get("batch_id") or ""),
-                current_task_id=str(captured_task),
-                replacement_task_id=active.id,
-                note="automatic rebind after direct PTT edit",
-            )
-            pending = state.get_pending_sync(eng_dir) or pending
-            captured_task = active.id
-    if task != captured_task:
-        raise ValueError(f"reviewed task {task!r} does not match batch task {captured_task!r}")
-    if not active or active.id != captured_task:
-        raise ValueError(
-            f"reviewed task {task!r} is not the active task; resolve the active task first"
+    if not any(item.id == task for item in doc):
+        created = ptt.create_task(
+            _eng_path(eng_dir) / "state" / "ptt.md",
+            task,
+            a.get("title") or task,
+            a.get("phase") or "RECON",
+            note,
         )
-    batch_id = pending.get("batch_id")
-    if batch_id and batch_id not in note:
-        note = f"{note} [reviewed-batch:{batch_id}]"
-    for item in pending.get("commands") or []:
-        cmd = item.get("command")
-        if cmd and not history_contains(eng_dir, cmd):
-            raise ValueError(
-                f"pending command not yet in history.md: {cmd!r}; "
-                "the batch must finish before review"
-            )
-
-    ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
-    state.mark_ptt_reviewed(eng_dir, task, note)
-    return _json("ok", task_id=task, batch_id=pending.get("batch_id"))
+        doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
+        if status == "[ ]":
+            return _json("ok", task_id=created.id, task_created=True)
+    existing = next((item for item in doc if item.id == task), None)
+    if existing and status in {"[x]", "[-]"}:
+        if existing.status != "[~]":
+            raise ValueError("only the active [~] task may be closed outside a batch")
+        ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
+        return _json("ok", task_id=task, task_closed=True)
+    return _start_ptt_task(_eng_path(eng_dir) / "state" / "ptt.md", doc, task, status, note)
 
 
 def _start_ptt_task(ptt_path: Path, tasks, task_id: str, status: str, note: str) -> str:
@@ -210,24 +167,150 @@ def _scope_hosts(eng_dir: str) -> set[str] | None:
     return scope_hosts(data) or None
 
 
+def _task_row_contains(path: Path, task_id: str, marker: str) -> bool:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^\|\s*(PT-[\w-]+)\s*\|", line.strip())
+        if match and match.group(1) == task_id:
+            return marker in line
+    return False
+
+
+def _validate_review_batch(a: dict, pending: dict) -> dict:
+    eng_dir = str(a.get("eng_dir") or "")
+    task_id = str(a.get("id") or "").strip()
+    note = str(a.get("note") or "").strip()
+    status = str(a.get("status") or "").strip()
+    if not task_id or not note:
+        raise ValueError("active task id and non-empty review note are required")
+    if status not in {"[~]", "[x]", "[!]", "[-]"}:
+        raise ValueError("status must be one of [~], [x], [!], or [-]")
+
+    batch_id = str(pending.get("batch_id") or "").strip()
+    captured_task = str(pending.get("ptt_task_id") or "").strip()
+    if not batch_id or not captured_task:
+        raise ValueError("pending batch is missing its batch or PTT task identity")
+    if task_id != captured_task:
+        raise ValueError(f"reviewed task {task_id!r} does not match batch task {captured_task!r}")
+
+    ptt_path = _eng_path(eng_dir) / "state" / "ptt.md"
+    tasks = ptt.parse_ptt(ptt_path)
+    selected = next((item for item in tasks if item.id == task_id), None)
+    if selected is None:
+        raise ValueError(f"batch task {task_id!r} is missing from the PTT")
+    marker = f"[reviewed-batch:{batch_id}]"
+    already_recorded = selected.status == status and _task_row_contains(ptt_path, task_id, marker)
+    if not already_recorded:
+        validation = ptt.validate_ptt(tasks)
+        if validation.errors:
+            raise ValueError("PTT must have exactly one valid active task before batch review")
+        active = ptt.find_active_task(tasks)
+        if not active or active.id != task_id:
+            raise ValueError(f"batch task {task_id!r} must be the sole active [~] task")
+        phases = {
+            str(item.get("phase") or pending.get("phase") or "")
+            for item in pending.get("commands") or []
+        } - {""}
+        incompatible = sorted(
+            phase for phase in phases if not ptt.task_matches_phase(active, phase)
+        )
+        if incompatible:
+            raise ValueError(
+                f"batch task {task_id!r} is not phase-compatible with " + ", ".join(incompatible)
+            )
+
+    for item in pending.get("commands") or []:
+        command = str(item.get("command") or "")
+        if command and not history_contains(eng_dir, command):
+            raise ValueError(
+                f"pending command not yet in exact history: {command!r}; "
+                "wait for execution completion before review"
+            )
+
+    finding = a.get("finding")
+    if finding is not None:
+        if not isinstance(finding, dict):
+            raise ValueError("finding must be an object when supplied")
+        findings._validate_from_pending_batch(
+            eng_dir,
+            pending,
+            title=str(finding.get("title") or ""),
+            severity=str(finding.get("severity") or ""),
+            description=str(finding.get("description") or ""),
+            impact=str(finding.get("impact") or ""),
+            remediation=str(finding.get("remediation") or ""),
+            finding_id=str(finding.get("finding_id") or ""),
+        )
+    return {
+        "batch_id": batch_id,
+        "task_id": task_id,
+        "status": status,
+        "note": note,
+        "marker": marker,
+        "already_recorded": already_recorded,
+        "ptt_path": ptt_path,
+        "finding": finding,
+    }
+
+
 @_serialise_errors
-def handle_sync_done(a, **kwargs):
+def handle_review_batch(a, **kwargs):
+    """Review one completed batch, optionally record a finding, and release its lock."""
+
+    eng_dir = str(a.get("eng_dir") or "").strip()
+    if not eng_dir:
+        raise ValueError("eng_dir is required")
+    engagement = _eng_path(eng_dir)
+    review_lock = engagement / "state" / "review-batch.json"
     try:
-        p = state.get_pending_sync(a["eng_dir"])
-        if not p:
-            return _json("ok", message="nothing pending")
-        if not p.get("ptt_reviewed"):
-            return _json("sync_required", error="explicit PTT review required")
-        for item in p.get("commands") or []:
-            if not history_contains(a["eng_dir"], item.get("command", "")):
+        with state.lock_file(review_lock):
+            pending = state.get_pending_sync(engagement)
+            if not pending:
                 return _json(
-                    "sync_required",
-                    error="all pending commands must exist in exact history before sync",
+                    "ok",
+                    batch_id=None,
+                    task_id=None,
+                    task_status=None,
+                    released=True,
+                    finding=None,
+                    finding_path=None,
+                    message="nothing pending",
                 )
-        state.clear_pending_sync(a["eng_dir"])
-        return _json("ok", batch_id=p.get("batch_id"))
-    except Exception as e:
-        return _json("error", error=str(e))
+            context = _validate_review_batch(a, pending)
+            finding_result = None
+            finding = context["finding"]
+            if finding is not None:
+                finding_result = findings._create_from_pending_batch(
+                    engagement,
+                    pending=pending,
+                    title=str(finding.get("title") or ""),
+                    severity=str(finding.get("severity") or ""),
+                    description=str(finding.get("description") or ""),
+                    impact=str(finding.get("impact") or ""),
+                    remediation=str(finding.get("remediation") or ""),
+                    finding_id=str(finding.get("finding_id") or ""),
+                )
+            if not context["already_recorded"]:
+                review_note = f"{context['note']} {context['marker']}"
+                ptt.update_task(
+                    context["ptt_path"], context["task_id"], context["status"], review_note
+                )
+            state.clear_pending_sync(engagement)
+            return _json(
+                "ok",
+                batch_id=context["batch_id"],
+                task_id=context["task_id"],
+                task_status=context["status"],
+                released=True,
+                finding=finding_result,
+                finding_path=finding_result.get("path") if finding_result else None,
+            )
+    except (OSError, ValueError) as exc:
+        return _json(
+            "blocked",
+            released=False,
+            error=str(exc),
+            next_action="Resolve the reported batch, PTT, history, or finding issue and retry violin_review_batch",
+        )
 
 
 def _rebind_fields(a) -> tuple[str, str, str, str, str]:
@@ -516,11 +599,121 @@ def handle_target(a, **kwargs):
 
 @_serialise_errors
 def handle_status(a, **kwargs):
+    if not str(a.get("eng_dir") or "").strip():
+        raise ValueError("eng_dir is required")
+    eng_dir = state.resolve_eng_dir(a.get("eng_dir", ""))
+    bootstrap_result = bootstrap.check_bootstrap(eng_dir, auto_repair=False)
+    tasks = ptt.parse_ptt(eng_dir / "state" / "ptt.md")
+    ptt_result = ptt.validate_ptt(tasks)
+    active = ptt.find_active_task(tasks) if not ptt_result.errors else None
+    current_phase = active.phase if active else None
+    pending = state.get_pending_sync(eng_dir)
+    credit_limit = int(
+        (pending or {}).get("credit_limit") or state.sync_credit_limit(current_phase)
+    )
+    credit = state.sync_credit_remaining(eng_dir, current_phase)
+    counts = state.read_counts(eng_dir)
+    session_id = state.resolve_session_id(eng_dir)
+    marker = eng_dir / "state" / f".skill-loaded-{session_id}" if session_id else None
+    skill_loaded = bool(marker and marker.is_file())
+
+    blockers = [
+        {
+            "code": "bootstrap",
+            "reason": error,
+            "next_action": "Run check-bootstrap and repair the named engagement artifact",
+        }
+        for error in bootstrap_result.errors
+    ]
+    if not session_id:
+        blockers.append(
+            {
+                "code": "skill_session_unknown",
+                "reason": "No session id is recorded for the skill-load gate",
+                "next_action": "Load pentest, then create its marker for the current session",
+            }
+        )
+    elif not skill_loaded:
+        blockers.append(
+            {
+                "code": "skill_not_loaded",
+                "reason": f"Pentest skill marker is missing for session {session_id}",
+                "next_action": f"Load pentest, then create {marker}",
+            }
+        )
+    blockers.extend(
+        {
+            "code": "ptt",
+            "reason": error,
+            "next_action": "Use violin_record_ptt to leave exactly one phase-compatible [~] task",
+        }
+        for error in ptt_result.errors
+    )
+    if pending and credit == 0:
+        blockers.append(
+            {
+                "code": "sync_required",
+                "reason": "The bounded command batch is complete and still locked",
+                "next_action": (
+                    "Review its evidence, then call violin_review_batch with the active task"
+                ),
+            }
+        )
+    heartbeat_pending = state.has_heartbeat_pending(eng_dir)
+    if heartbeat_pending and not (current_phase and suppresses_heartbeat(Phase(current_phase))):
+        blockers.append(
+            {
+                "code": "heartbeat_required",
+                "reason": state.get_heartbeat_reason(eng_dir) or "Periodic review is pending",
+                "next_action": "Review engagement state, then call violin_heartbeat_done",
+            }
+        )
+
+    phase_requirements = {
+        phase.value: {
+            "ptt_phase": "EXPLOITATION" if phase is Phase.POST_EXPLOITATION else phase.value,
+            "hypothesis_required": requires_hypothesis(phase),
+            "sync_window": state.sync_credit_limit(phase.value),
+            "heartbeat_enabled": not suppresses_heartbeat(phase),
+        }
+        for phase in Phase
+    }
+    pending_commands = [
+        {"command": item.get("command", ""), "required_phase": item.get("phase", "")}
+        for item in (pending or {}).get("commands") or []
+    ]
     return _json(
-        "ok",
-        sync_pending=state.has_pending_sync(a["eng_dir"]),
-        sync_credit_remaining=state.sync_credit_remaining(a["eng_dir"]),
-        command_count=state.read_counts(a["eng_dir"])["commands"],
+        "blocked" if blockers else "ok",
+        engagement=str(eng_dir),
+        current_task=active.id if active else None,
+        current_task_title=active.title if active else None,
+        current_phase=current_phase,
+        command_phase_rule=(
+            "Every target command must declare the active task phase; POST_EXPLOITATION uses an "
+            "EXPLOITATION PTT task"
+        ),
+        phase_requirements=phase_requirements,
+        blockers=blockers,
+        pending_batch={
+            "batch_id": (pending or {}).get("batch_id"),
+            "task_id": (pending or {}).get("ptt_task_id"),
+            "ptt_reviewed": bool((pending or {}).get("ptt_reviewed")),
+            "commands": pending_commands,
+        }
+        if pending
+        else None,
+        sync_credit_remaining=credit,
+        sync_credit_limit=credit_limit,
+        heartbeat_pending=heartbeat_pending,
+        heartbeat_reason=state.get_heartbeat_reason(eng_dir),
+        command_count=counts["commands"],
+        message_count=counts["messages"],
+        skill={
+            "name": "pentest",
+            "session_id": session_id or None,
+            "loaded": skill_loaded,
+            "marker": str(marker) if marker else None,
+        },
     )
 
 

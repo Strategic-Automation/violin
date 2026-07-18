@@ -200,7 +200,7 @@ def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
 
 
 def create_task(path: Path, task_id: str, title: str, phase: str, note: str = "") -> PttTask:
-    """Append an explicitly requested untouched task to the canonical phase."""
+    """Insert an explicitly requested untouched task into its canonical phase table."""
     if not re.fullmatch(r"PT-[\w-]+", task_id):
         raise ValueError("task id must use the PT- prefix")
     canonical_phase = normalize_phase(phase).value
@@ -208,12 +208,67 @@ def create_task(path: Path, task_id: str, title: str, phase: str, note: str = ""
     if any(task.id == task_id for task in tasks):
         raise ValueError(f"PTT task {task_id!r} already exists")
     content = path.read_text(encoding="utf-8") if path.exists() else "# Pentesting Task Tree\n"
-    heading = f"## Phase: {canonical_phase}"
-    if heading not in content:
-        content = (
-            content.rstrip()
-            + f"\n\n{heading}\n\n| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+    lines = content.splitlines()
+    phase_heading_index = None
+    for index, line in enumerate(lines):
+        match = re.match(r"^##\s+Phase:\s*(?P<phase>.+?)\s*$", line.strip(), re.IGNORECASE)
+        if not match:
+            continue
+        raw_phase = re.split(r"\s*\(", match.group("phase"), maxsplit=1)[0].strip()
+        try:
+            heading_phase = normalize_phase(raw_phase).value
+        except ValueError:
+            continue
+        if heading_phase == canonical_phase:
+            phase_heading_index = index
+            break
+
+    if phase_heading_index is None:
+        lines.extend(
+            [
+                "",
+                f"## Phase: {canonical_phase}",
+                "",
+                "| ID | Status | Task | Notes |",
+                "|---|---|---|---|",
+            ]
         )
-    content = content.rstrip() + f"\n| {task_id} | [ ] | {title.strip()} | {note.strip()} |\n"
-    path.write_text(content, encoding="utf-8")
+        phase_heading_index = len(lines) - 4
+
+    next_heading_index = next(
+        (
+            index
+            for index in range(phase_heading_index + 1, len(lines))
+            if re.match(r"^##\s+Phase:", lines[index].strip(), re.IGNORECASE)
+        ),
+        len(lines),
+    )
+    table_start = next(
+        (
+            index
+            for index in range(phase_heading_index + 1, next_heading_index)
+            if lines[index].lstrip().startswith("|")
+        ),
+        None,
+    )
+    if table_start is None:
+        raise ValueError(f"phase {canonical_phase} has no task table")
+
+    table_end = table_start
+    while table_end + 1 < next_heading_index and lines[table_end + 1].lstrip().startswith("|"):
+        table_end += 1
+    column_count = len([cell for cell in lines[table_start].strip().strip("|").split("|")])
+    if column_count < 4:
+        raise ValueError(f"phase {canonical_phase} task table must have at least four columns")
+
+    def clean_cell(value: str) -> str:
+        return value.strip().replace("|", "\\|").replace("\n", " ")
+
+    cells = [task_id, "[ ]", clean_cell(title)]
+    cells.extend([""] * (column_count - 4))
+    cells.append(clean_cell(note))
+    lines.insert(table_end + 1, "| " + " | ".join(cells) + " |")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary.replace(path)
     return next(task for task in parse_ptt(path) if task.id == task_id)

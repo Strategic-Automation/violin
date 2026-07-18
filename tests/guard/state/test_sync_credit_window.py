@@ -32,7 +32,9 @@ def test_network_clients_are_not_local_bookkeeping() -> None:
     assert state.is_local_bookkeeping_command("echo local-note")
 
 
-def test_five_commands_run_without_yolo_then_sixth_blocks(monkeypatch, tmp_path: Path) -> None:
+def test_phase_window_runs_without_yolo_then_next_command_blocks(
+    monkeypatch, tmp_path: Path
+) -> None:
     """The bounded window is an allowance, not five REVIEW responses."""
     eng = _engagement(tmp_path)
 
@@ -58,9 +60,10 @@ def test_five_commands_run_without_yolo_then_sixth_blocks(monkeypatch, tmp_path:
         "session_id": "test",
     }
 
-    for port in range(1, state.DEFAULT_SYNC_CREDIT + 1):
+    limit = state.sync_credit_limit("recon")
+    for port in range(1, limit + 1):
         result = json.loads(service.handle_exec({**args, "command": f"nmap -p {port} 10.10.10.10"}))
         assert result["status"] == "ok", result
 
-    sixth = json.loads(service.handle_exec({**args, "command": "nmap -p 99 10.10.10.10"}))
-    assert sixth["status"] == "sync_required", sixth
+    blocked = json.loads(service.handle_exec({**args, "command": "nmap -p 99 10.10.10.10"}))
+    assert blocked["status"] == "sync_required", blocked
