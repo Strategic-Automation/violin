@@ -75,6 +75,12 @@ def test_target_role_preserves_ipv6_url_hostname():
     assert resolve_target(scope, role="web", host_query=None, field="host") == "2001:db8::1"
 
 
+def test_target_role_preserves_malformed_url_for_review():
+    scope = {"targets": {"roles": {"web": "http://[broken"}}}
+
+    assert resolve_target(scope, role="web", host_query=None, field="host") == "http://[broken"
+
+
 def _run(*args):
     return subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "violin_guard.py"), *args],
@@ -143,13 +149,6 @@ def test_target_requires_eng_dir():
 
 
 # --- violin_exec_burst -----------------------------------------------------
-
-_GATE_OK = {
-    "status": "ok",
-    "errors": [],
-    "warnings": [],
-    "infos": [],
-}
 
 
 def _patch_burst(monkeypatch, eng_dir):

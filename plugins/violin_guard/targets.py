@@ -7,6 +7,7 @@ URL authorities, and ``ipaddress`` for IP/CIDR validation.
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import re
 import shlex
@@ -154,12 +155,10 @@ def normalise_target(value: str) -> str:
 
     raw = value.strip()
     raw = re.split(r"\s+\(", raw, maxsplit=1)[0].strip()
-    try:
+    with contextlib.suppress(ValueError):
         parsed = urlsplit(raw if "://" in raw else f"//{raw}")
         if parsed.hostname:
             return parsed.hostname.lower()
-    except ValueError:
-        pass
     return raw.lower()
 
 
@@ -220,12 +219,10 @@ def resolve_target(
 
     # Extract the requested field from a URL
     if "://" in target_val and field in ("ip", "host"):
-        try:
+        with contextlib.suppress(ValueError):
             parsed = urlsplit(target_val)
             if parsed.hostname:
                 return parsed.hostname
-        except Exception:
-            pass
 
     return target_val
 
@@ -291,12 +288,10 @@ def _parse_target_token(token: str) -> str | None:
     if not raw:
         return None
     unbracketed = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
-    try:
+    with contextlib.suppress(ValueError):
         if "/" in unbracketed:
             return str(ipaddress.ip_network(unbracketed, strict=False)).lower()
         return str(ipaddress.ip_address(unbracketed)).lower()
-    except ValueError:
-        pass
 
     try:
         parsed = urlsplit(raw if raw.startswith("//") or "://" in raw else f"//{raw}")

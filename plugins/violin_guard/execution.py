@@ -126,12 +126,10 @@ def _terminate_pid(pid: int) -> None:
             check=False,
         )
     else:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(pid, signal.SIGTERM)
             time.sleep(0.2)
             os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
 
 def _terminate_process(proc: subprocess.Popen) -> None:
@@ -144,8 +142,7 @@ def _terminate_process(proc: subprocess.Popen) -> None:
         proc.wait(timeout=1)
         return
     except (OSError, subprocess.TimeoutExpired):
-        pass
-    _terminate_pid(proc.pid)
+        _terminate_pid(proc.pid)
     if proc.poll() is None:
         with contextlib.suppress(OSError):
             proc.kill()
@@ -219,13 +216,11 @@ def _monitor_background(
             status_name = "timed_out"
             _terminate_process(proc)
             break
-        try:
+        with contextlib.suppress(OSError):
             if stdout_path.stat().st_size + stderr_path.stat().st_size > MAX_OUTPUT_BYTES:
                 status_name = "output_limited"
                 _terminate_process(proc)
                 break
-        except OSError:
-            pass
         time.sleep(0.1)
     try:
         exit_code = proc.wait(timeout=5)

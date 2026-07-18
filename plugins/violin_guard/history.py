@@ -68,10 +68,9 @@ def _recorded_command(line: str) -> str | None:
         try:
             expected_length = int(length_text)
         except ValueError:
-            pass
-        else:
-            if expected_length >= 0 and len(command) == expected_length:
-                return command
+            expected_length = -1
+        if expected_length >= 0 and len(command) == expected_length:
+            return command
 
     command, marker, _receipt = payload.rpartition(_RECEIPT_MARKER)
     return command if marker else payload
