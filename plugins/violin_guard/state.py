@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -114,9 +116,16 @@ def read_json(path: Path) -> dict[str, Any]:
 def atomic_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON atomically by replacing a temporary swap file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    for attempt in range(5):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def mutate_json(path: Path, mutation) -> Any:
@@ -357,7 +366,17 @@ def tick_message(eng_dir: str | Path) -> int:
         data["messages"] = data.get("messages", 0) + 1
         return data["messages"]
 
-    return mutate_json(path, tick)
+    # Windows can briefly deny the replace/read sequence immediately after a
+    # prior hook writes this same file.  Lifecycle hooks intentionally do not
+    # fail the model turn, so retry here rather than silently dropping a tick.
+    for attempt in range(3):
+        try:
+            return mutate_json(path, tick)
+        except OSError:
+            if attempt == 2:
+                raise
+            time.sleep(0.02 * (attempt + 1))
+    raise RuntimeError("unreachable")
 
 
 def record_ok_check(eng_dir: str | Path, command: str, phase: str) -> None:

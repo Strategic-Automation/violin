@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,7 @@ from .adapters import (
 from .command import CheckCommandArgs
 from .history import history_contains
 from .phases import Phase, requires_hypothesis, suppresses_heartbeat
+from .skill_receipts import HermesSkillViewAdapter, bind_task, complete_delivery, prepare_delivery
 from .targets import resolve_target
 
 # ---------------------------------------------------------------------------
@@ -93,13 +95,72 @@ def handle_record_ptt(a, **kwargs):
     task = a.get("id")
     note = (a.get("note") or "").strip()
     status = a.get("status", "[~]")
+    skill = str(a.get("skill") or "").strip()
+    technique = str(a.get("technique") or "").strip()
 
     if not task or not note:
         raise ValueError("task id and non-empty lifecycle note required")
+    if not skill or not technique:
+        raise ValueError("skill and technique are required before a PTT update")
     if pending:
         raise ValueError(
             "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
         )
+    selected = next((item for item in doc if item.id == task), None)
+    selected_phase = selected.phase if selected else str(a.get("phase") or "RECON")
+    try:
+        phase = ptt.normalize_phase(selected_phase)
+    except ValueError as exc:
+        raise ValueError(f"PTT task {task!r} must sit below a valid Phase heading") from exc
+    hypothesis_id = str(a.get("hypothesis_id") or "").strip()
+    if requires_hypothesis(phase) and not hypothesis_id:
+        raise ValueError(f"hypothesis_id is required for {phase.value} PTT work")
+    vulnerability_class = ""
+    if hypothesis_id:
+        normalized = hypothesis_id.removeprefix("H-").lstrip("0") or "0"
+        matched = next(
+            (
+                h
+                for h in hypotheses.parse_hypotheses(_eng_path(eng_dir) / "hypotheses.md")
+                if h.id.lstrip("0") == normalized
+            ),
+            None,
+        )
+        vulnerability_class = matched.vuln_class if matched else ""
+    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
+    reservation = prepare_delivery(
+        eng_dir,
+        session_id=state.resolve_session_id(eng_dir) or "ptt",
+        skill=skill,
+        bundle_digest=digest,
+        phase=phase.value,
+        vulnerability_class=vulnerability_class or None,
+    )
+    if reservation.owner:
+        viewed = HermesSkillViewAdapter().view(skill, task_id=task)
+        completed = complete_delivery(eng_dir, reservation, viewed)
+        return _json(
+            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
+            transition_applied=False,
+            skill={
+                "name": skill,
+                "digest": digest,
+                "content": viewed.content,
+                "error": viewed.error,
+            },
+        )
+    if reservation.status == "preparing":
+        return _json(
+            "skill_preparing", transition_applied=False, skill={"name": skill, "digest": digest}
+        )
+    binding = bind_task(
+        eng_dir,
+        task_id=task,
+        delivery_id=reservation.id,
+        hypothesis_id=hypothesis_id,
+        technique=technique,
+    )
+    note = _with_skill_token(note, skill, digest)
     if not any(item.id == task for item in doc):
         created = ptt.create_task(
             _eng_path(eng_dir) / "state" / "ptt.md",
@@ -112,12 +173,22 @@ def handle_record_ptt(a, **kwargs):
         if status == "[ ]":
             return _json("ok", task_id=created.id, task_created=True)
     existing = next((item for item in doc if item.id == task), None)
+    if existing and existing.status == "[~]" and status == "[~]":
+        ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, "[~]", note)
+        return _json("ok", task_id=task, task_refreshed=True, binding=binding)
     if existing and status in {"[x]", "[-]"}:
         if existing.status != "[~]":
             raise ValueError("only the active [~] task may be closed outside a batch")
         ptt.update_task(_eng_path(eng_dir) / "state" / "ptt.md", task, status, note)
         return _json("ok", task_id=task, task_closed=True)
     return _start_ptt_task(_eng_path(eng_dir) / "state" / "ptt.md", doc, task, status, note)
+
+
+def _with_skill_token(note: str, skill: str, digest: str) -> str:
+    """Keep exactly one replaceable selection token in a PTT note."""
+    token = f"[skill:{skill}@{digest}]"
+    stripped = re.sub(r"\s*\[skill:[^\]]+\]", "", note).strip()
+    return f"{stripped} {token}".strip()
 
 
 def _start_ptt_task(ptt_path: Path, tasks, task_id: str, status: str, note: str) -> str:
@@ -275,6 +346,51 @@ def handle_review_batch(a, **kwargs):
                     finding_path=None,
                     message="nothing pending",
                 )
+            skill = str(a.get("skill") or "").strip()
+            if skill:
+                tasks = ptt.parse_ptt(engagement / "state" / "ptt.md")
+                task_id = str(a.get("id") or "").strip()
+                task = next((item for item in tasks if item.id == task_id), None)
+                if task is None:
+                    raise ValueError(f"batch task {task_id!r} is missing from the PTT")
+                hypothesis_id = str(a.get("hypothesis_id") or "").strip()
+                phase = ptt.normalize_phase(task.phase)
+                if requires_hypothesis(phase) and not hypothesis_id:
+                    raise ValueError(f"hypothesis_id is required for {phase.value} batch review")
+                digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
+                reservation = prepare_delivery(
+                    engagement,
+                    session_id=state.resolve_session_id(engagement) or "review",
+                    skill=skill,
+                    bundle_digest=digest,
+                    phase=phase.value,
+                )
+                if reservation.owner:
+                    viewed = HermesSkillViewAdapter().view(skill, task_id=task_id)
+                    completed = complete_delivery(engagement, reservation, viewed)
+                    return _json(
+                        "skill_prepared"
+                        if completed.status == "delivered"
+                        else "skill_unavailable",
+                        transition_applied=False,
+                        released=False,
+                        skill={
+                            "name": skill,
+                            "digest": digest,
+                            "content": viewed.content,
+                            "error": viewed.error,
+                        },
+                    )
+                if reservation.status == "preparing":
+                    return _json("skill_preparing", transition_applied=False, released=False)
+                bind_task(
+                    engagement,
+                    task_id=task_id,
+                    delivery_id=reservation.id,
+                    hypothesis_id=hypothesis_id,
+                    technique="batch-review",
+                )
+                a = {**a, "note": _with_skill_token(str(a.get("note") or ""), skill, digest)}
             context = _validate_review_batch(a, pending)
             finding_result = None
             finding = context["finding"]
