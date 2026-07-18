@@ -34,6 +34,15 @@ RECORD_PTT_SCHEMA = {
             "id": {"type": "string"},
             "status": {"type": "string"},
             "note": {"type": "string"},
+            "skill": {"type": "string", "description": "Required selected Violin skill"},
+            "technique": {
+                "type": "string",
+                "description": "Required concrete technique for this task",
+            },
+            "hypothesis_id": {
+                "type": "string",
+                "description": "Required for hypothesis-driven phases",
+            },
             "title": {
                 "type": "string",
                 "description": "Required when explicitly creating a new PTT task",
@@ -130,6 +139,11 @@ REVIEW_BATCH_SCHEMA = {
                 "enum": ["[~]", "[x]", "[!]", "[-]"],
             },
             "note": {"type": "string", "description": "Truthful result/evidence review"},
+            "skill": {"type": "string", "description": "Required selected review skill"},
+            "hypothesis_id": {
+                "type": "string",
+                "description": "Required for hypothesis-driven phases",
+            },
             "finding": {
                 "type": "object",
                 "description": "Optional structured finding derived only from this batch",

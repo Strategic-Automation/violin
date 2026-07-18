@@ -12,10 +12,12 @@ from plugins.violin_guard import (
     hypotheses,
     ptt,
     service,
+    state,
 )
 from plugins.violin_guard.command import CheckCommandArgs, CheckResult, check_scope_authorization
 from plugins.violin_guard.history import append_history, check_history_staleness
 from plugins.violin_guard.phases import Phase
+from plugins.violin_guard.skill_receipts import SkillViewResult
 from plugins.violin_guard.targets import check_scope_targets
 
 
@@ -56,7 +58,14 @@ def test_wildcard_scope_allows_subdomains(tmp_path: Path) -> None:
     ).errors
 
 
-def test_ptt_heading_parenthetical_and_explicit_task_create_close(tmp_path: Path) -> None:
+def test_ptt_heading_parenthetical_and_explicit_task_create_close(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        service,
+        "HermesSkillViewAdapter",
+        lambda: type("Ready", (), {"view": lambda *_a, **_k: SkillViewResult(True, "skill")})(),
+    )
     eng = _engagement(tmp_path)
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
@@ -75,15 +84,40 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(tmp_path: Path
                 "title": "extra check",
                 "phase": "recon",
                 "note": "planned",
+                "skill": "pentest",
+                "technique": "recon",
+            }
+        )
+    )
+    assert created["status"] == "skill_prepared"
+    created = json.loads(
+        service.handle_record_ptt(
+            {
+                "eng_dir": str(eng),
+                "id": "PT-900",
+                "status": "[ ]",
+                "title": "extra check",
+                "phase": "recon",
+                "note": "planned",
+                "skill": "pentest",
+                "technique": "recon",
             }
         )
     )
     assert created["task_created"] is True
-    closed = json.loads(
-        service.handle_record_ptt(
-            {"eng_dir": str(eng), "id": "PT-010", "status": "[x]", "note": "done"}
-        )
-    )
+    # A fresh session must prepare again; do not rely on cross-task reuse here.
+    state.record_session_id(eng, "close-session")
+    close_args = {
+        "eng_dir": str(eng),
+        "id": "PT-010",
+        "status": "[x]",
+        "note": "done",
+        "skill": "pentest",
+        "technique": "recon",
+    }
+    closed = json.loads(service.handle_record_ptt(close_args))
+    assert closed["status"] == "skill_prepared"
+    closed = json.loads(service.handle_record_ptt(close_args))
     assert closed["task_closed"] is True
 
 

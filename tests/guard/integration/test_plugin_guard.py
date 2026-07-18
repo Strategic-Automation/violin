@@ -397,7 +397,14 @@ def test_exploitation_requires_cve_and_exploit_research_attempts(tmp_path):
     assert not allowed.errors, allowed.errors
 
 
-def test_record_ptt_can_start_pristine_task(tmp_path):
+def test_record_ptt_can_start_pristine_task(tmp_path, monkeypatch):
+    from plugins.violin_guard.skill_receipts import SkillViewResult
+
+    monkeypatch.setattr(
+        TOOLS,
+        "HermesSkillViewAdapter",
+        lambda: type("Ready", (), {"view": lambda *_a, **_k: SkillViewResult(True, "skill")})(),
+    )
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
     ptt_path = eng / "state" / "ptt.md"
@@ -408,7 +415,27 @@ def test_record_ptt_can_start_pristine_task(tmp_path):
 
     result = json.loads(
         TOOLS.handle_record_ptt(
-            {"eng_dir": str(eng), "id": "PT-010", "status": "[~]", "note": "Start recon"}
+            {
+                "eng_dir": str(eng),
+                "id": "PT-010",
+                "status": "[~]",
+                "note": "Start recon",
+                "skill": "pentest",
+                "technique": "recon",
+            }
+        )
+    )
+    assert result["status"] == "skill_prepared", result
+    result = json.loads(
+        TOOLS.handle_record_ptt(
+            {
+                "eng_dir": str(eng),
+                "id": "PT-010",
+                "status": "[~]",
+                "note": "Start recon",
+                "skill": "pentest",
+                "technique": "recon",
+            }
         )
     )
     assert result["status"] == "ok", result

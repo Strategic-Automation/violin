@@ -33,7 +33,14 @@ def test_record_ptt_refuses_to_reconcile_a_pending_batch(tmp_path: Path) -> None
     )
     result = json.loads(
         service.handle_record_ptt(
-            {"eng_dir": str(eng), "id": "PT-011", "status": "[~]", "note": "review"}
+            {
+                "eng_dir": str(eng),
+                "id": "PT-011",
+                "status": "[~]",
+                "note": "review",
+                "skill": "pentest",
+                "technique": "recon",
+            }
         )
     )
     assert result["status"] == "error"
