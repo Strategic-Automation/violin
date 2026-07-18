@@ -12,6 +12,10 @@ from pathlib import Path
 
 from .state import lock_file, resolve_eng_dir
 
+_COMMAND_MARKER = " | command="
+_COMMAND_LENGTH_MARKER = " | command_length="
+_RECEIPT_MARKER = " | receipt="
+
 
 def _history_path(eng_dir: str | Path) -> Path:
     return resolve_eng_dir(eng_dir) / "state" / "history.md"
@@ -28,9 +32,12 @@ def append_history(
     path = _history_path(eng_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    line = f"- {stamp} | phase={phase} | exit_code={exit_code} | command={command}"
+    line = (
+        f"- {stamp} | phase={phase} | exit_code={exit_code} | command={command}"
+        f"{_COMMAND_LENGTH_MARKER}{len(command)}"
+    )
     if receipt_path:
-        line += f" | receipt={receipt_path}"
+        line += f"{_RECEIPT_MARKER}{receipt_path}"
     with lock_file(path), path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
 
@@ -43,11 +50,31 @@ def history_contains(eng_dir: str | Path, command: str) -> bool:
     hist = _history_path(eng_dir)
     if not hist.exists():
         return False
-    marker = f" | command={command}"
     for line in hist.read_text(encoding="utf-8").splitlines():
-        if line.endswith(marker) or f"{marker} | receipt=" in line:
+        if _recorded_command(line) == command:
             return True
     return False
+
+
+def _recorded_command(line: str) -> str | None:
+    """Read one command field, including legacy records without a length."""
+
+    if _COMMAND_MARKER not in line:
+        return None
+    payload = line.split(_COMMAND_MARKER, 1)[1]
+    command, marker, metadata = payload.rpartition(_COMMAND_LENGTH_MARKER)
+    if marker:
+        length_text = metadata.split(_RECEIPT_MARKER, 1)[0]
+        try:
+            expected_length = int(length_text)
+        except ValueError:
+            pass
+        else:
+            if expected_length >= 0 and len(command) == expected_length:
+                return command
+
+    command, marker, _receipt = payload.rpartition(_RECEIPT_MARKER)
+    return command if marker else payload
 
 
 def check_history_staleness(
@@ -77,8 +104,7 @@ def check_history_staleness(
     # that field exactly instead of using substring matching, which can reject
     # a command merely because it contains the previous command text.
     last_line = lines[-1]
-    marker = " | command="
-    recorded_command = last_line.split(marker, 1)[1] if marker in last_line else None
+    recorded_command = _recorded_command(last_line)
     if recorded_command == command and not allow_pending_repeat:
         errors.append(
             f"command appears to be an exact repeat of the last recorded command: {last_line}"

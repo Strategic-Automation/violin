@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.5
+
+- Restored exact-repeat detection for execution history entries with receipt paths and added unambiguous command-length metadata while retaining compatibility with existing history files.
+
 ## 2.0.4
 
 - Hard-blocked callback and research endpoints when supplied as primary assessment targets while preserving their approved secondary-only use, including burst execution.
