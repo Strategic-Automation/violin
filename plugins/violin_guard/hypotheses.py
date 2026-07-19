@@ -46,6 +46,11 @@ _FIELD_NAMES = {
     "test response": "test_response",
     "verification status": "verification_status",
     "rejection reason": "rejection_reason",
+    "candidate source": "candidate_source",
+    "entry point": "entry_point",
+    "data flow": "data_flow",
+    "source evidence": "source_evidence",
+    "runtime evidence": "runtime_evidence",
     "updated": "updated",
 }
 
@@ -68,6 +73,11 @@ class Hypothesis:
     test_response: str = ""
     verification_status: str = ""
     rejection_reason: str = ""
+    candidate_source: str = ""
+    entry_point: str = ""
+    data_flow: str = ""
+    source_evidence: str = ""
+    runtime_evidence: str = ""
     updated: str = ""
 
     def canonical_status(self) -> str:
@@ -91,6 +101,11 @@ class Hypothesis:
             "test_response": self.test_response,
             "verification_status": self.verification_status,
             "rejection_reason": self.rejection_reason,
+            "candidate_source": self.candidate_source,
+            "entry_point": self.entry_point,
+            "data_flow": self.data_flow,
+            "source_evidence": self.source_evidence,
+            "runtime_evidence": self.runtime_evidence,
             "updated": self.updated,
         }
 
@@ -124,6 +139,15 @@ class Hypothesis:
             lines.append(f"- **Verification Status:** {self.verification_status}")
         if self.rejection_reason:
             lines.append(f"- **Rejection Reason:** {self.rejection_reason}")
+        for label, value in (
+            ("Candidate Source", self.candidate_source),
+            ("Entry Point", self.entry_point),
+            ("Data Flow", self.data_flow),
+            ("Source Evidence", self.source_evidence),
+            ("Runtime Evidence", self.runtime_evidence),
+        ):
+            if value:
+                lines.append(f"- **{label}:** {value}")
         lines.append(f"- **Updated:** {self.updated or now} UTC")
         return "\n".join(lines) + "\n"
 
@@ -258,6 +282,11 @@ def validate_hypothesis_record(
             f"target '{target}' is not in scope; record a hypothesis only for in-scope hosts"
         )
     errors.extend(_validate_rejection_fields(fields))
+    if (
+        _normalize_status(str(fields.get("status") or "Candidate")) == "Validated"
+        and not str(fields.get("runtime_evidence") or "").strip()
+    ):
+        errors.append("Validated requires runtime_evidence; source evidence alone is not proof")
     return errors
 
 
@@ -299,6 +328,11 @@ def update_hypothesis(
         test_response=(normalized_fields.get("test_response") or "").strip(),
         verification_status=(normalized_fields.get("verification_status") or "").strip(),
         rejection_reason=(normalized_fields.get("rejection_reason") or "").strip(),
+        candidate_source=(normalized_fields.get("candidate_source") or "").strip(),
+        entry_point=(normalized_fields.get("entry_point") or "").strip(),
+        data_flow=(normalized_fields.get("data_flow") or "").strip(),
+        source_evidence=(normalized_fields.get("source_evidence") or "").strip(),
+        runtime_evidence=(normalized_fields.get("runtime_evidence") or "").strip(),
         updated=(normalized_fields.get("updated") or "").strip(),
     )
     errors = validate_hypothesis_record(temp.to_dict(), in_scope_hosts=in_scope_hosts)
