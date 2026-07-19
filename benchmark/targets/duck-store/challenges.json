@@ -1,0 +1,20 @@
+{
+  "target": "duck-store.escape.tech",
+  "total_challenges": 14,
+  "challenges": [
+    {"id": "idor-user-detail",      "category": "access-control", "playbook": "idor-access-control",        "severity": "high",     "endpoint": "GET /api/v1/users/{uuid}",         "patterns": ["/api/v1/users/", "email", "UserDetail"]},
+    {"id": "idor-user-list",         "category": "access-control", "playbook": "idor-access-control",        "severity": "medium",   "endpoint": "GET /api/v1/users/",               "patterns": ["/api/v1/users/", "username", "id"]},
+    {"id": "priv-esc-role",          "category": "access-control", "playbook": "auth-bypass",                "severity": "critical", "endpoint": "PUT /api/v1/users/me/profile",     "patterns": ["role", "admin", "UserUpdate"]},
+    {"id": "ssrf-fetch-url",         "category": "server-side",    "playbook": "ssrf",                       "severity": "high",     "endpoint": "GET /api/v1/uploads/fetch-url",    "patterns": ["fetch-url", "ssrf"]},
+    {"id": "ssrf-image-import",      "category": "server-side",    "playbook": "ssrf",                       "severity": "high",     "endpoint": "POST /api/v1/uploads/import-image","patterns": ["import-image", "url"]},
+    {"id": "neg-quantity-cart",      "category": "business-logic", "playbook": "business-logic",             "severity": "medium",   "endpoint": "PUT /api/v1/cart/items/{id}",      "patterns": ["quantity", "-1", "cart"]},
+    {"id": "coupon-abuse",           "category": "business-logic", "playbook": "business-logic",             "severity": "medium",   "endpoint": "GET /api/v1/orders/coupons",       "patterns": ["coupon", "discount", "validate"]},
+    {"id": "referral-fraud",         "category": "business-logic", "playbook": "business-logic",             "severity": "low",      "endpoint": "POST /api/v1/auth/register",       "patterns": ["referral", "referrer", "credit"]},
+    {"id": "file-upload",            "category": "misconfiguration","playbook": "security-misconfiguration",  "severity": "high",     "endpoint": "POST /api/v1/uploads/avatar",      "patterns": ["upload", "avatar", "Content-Type"]},
+    {"id": "xss-testimonial",        "category": "injection",      "playbook": "xss",                        "severity": "high",     "endpoint": "POST /api/v1/testimonials/",       "patterns": ["testimonial", "guest_avatar_url"]},
+    {"id": "sqli-search",            "category": "injection",      "playbook": "sqli",                       "severity": "critical", "endpoint": "GET /api/v1/products/search/",     "patterns": ["search", "products", "sqli"]},
+    {"id": "injection-color-filter", "category": "injection",      "playbook": "sqli",                       "severity": "high",     "endpoint": "GET /api/v1/products/filter/by-color","patterns": ["filter", "by-color", "injection"]},
+    {"id": "admin-bypass",           "category": "access-control", "playbook": "access-control",             "severity": "critical", "endpoint": "GET /api/v1/admin/stats",          "patterns": ["/api/v1/admin", "DashboardStats"]},
+    {"id": "rate-limiting",          "category": "misconfiguration","playbook": "api-security",               "severity": "medium",   "endpoint": "POST /api/v1/auth/login",          "patterns": ["rate", "429", "brute"]}
+  ]
+}
