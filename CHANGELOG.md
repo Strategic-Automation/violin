@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.8
+
+- Expanded Duck Store benchmark challenges from 14 to 20 article-parity vulnerabilities, matching Redpick's verified findings across 7 categories with correct severity distribution.
+- Renamed benchmark engagement prompt from `anti-walkthrough.md` to `engage.md` and added a post-engagement `report.md` prompt that runs the scorer and generates a comprehensive benchmark report.
+
+## 2.0.7
+
+- Added a Duck Store benchmark harness: 4-file suite (`score.py`, `challenges.json`, `scope.yaml`, `engage.md`) to evaluate Violin against escape.tech's Duck Store with repeatable, evidence-gated scoring.
+- Rewrote `score.py` with 8 evidence-gated fixes from the first benchmark run: corrected PTT path (`state/ptt.md`), hypothesis status per-block parsing, word-boundary pattern matching, HTTP proof-signature quality gate, auditable per-challenge output, honest compliance reporting (empty history reports UNKNOWN), calibration dry-run mode, and coverage-vs-quality split in output.
+- Added explicit model section to `config.yaml`; profiles do not inherit the default model configuration.
+
 ## 2.0.6
 
 - Resolved the current CodeQL standard quality findings by making intentional exception fallbacks explicit and removing unused test and hypothesis variables.
