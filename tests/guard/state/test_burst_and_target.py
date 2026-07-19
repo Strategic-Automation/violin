@@ -23,6 +23,7 @@ from plugins.violin_guard import (  # noqa: E402
 )
 from plugins.violin_guard import service as tools  # noqa: E402
 from plugins.violin_guard.targets import resolve_target  # noqa: E402
+from tests.guard.receipt_fixture import bind_active_task  # noqa: E402
 
 _SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
@@ -102,6 +103,7 @@ def eng(tmp_path):
         ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(d, "ts")
     return d
 
 
@@ -302,6 +304,7 @@ def test_plugin_exec_burst_accepts_inline_commands(monkeypatch, tmp_path):
         ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(d, "ts")
     _patch_burst(monkeypatch, str(d))
     raw = service.handle_exec_burst(
         {

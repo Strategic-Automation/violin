@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.guard.receipt_fixture import bind_active_task
+
 ROOT = Path(__file__).resolve().parents[3]
 
 # Make `violin_guard` resolvable
@@ -149,6 +151,7 @@ def _init_e2e(tmp_path, skill_file):
         ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "ts")
     return eng
 
 
@@ -216,6 +219,7 @@ def test_recon_does_not_require_hypothesis(tmp_path):
         .replace("| PT-030 | [ ] |", "| PT-030 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "ts")
     research2 = command.check_command(
         command.CheckCommandArgs(
             command="nmap -sV 10.10.10.10",
@@ -655,6 +659,7 @@ def test_exploitation_gets_bounded_window_then_requires_ptt_review(monkeypatch, 
         .replace("| PT-042 | [ ] |", "| PT-042 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "ts")
     # Create a real hypothesis (not in comment) for exploitation phase
     recorded = json.loads(
         TOOLS.handle_record_hypothesis(

@@ -180,10 +180,6 @@ def init_engagement(
         scope_path = eng_dir / "scope" / "scope.yaml"
         scope_path.write_text(yaml.safe_dump(_ctf_scope(host), sort_keys=False), encoding="utf-8")
         result.add_info("wrote CTF scope")
-        if session_id:
-            marker = eng_dir / "state" / f".skill-loaded-{session_id}"
-            marker.write_text("skill-loaded: ctf bootstrap\n", encoding="utf-8")
-            result.add_info(f"marked skill loaded for session {session_id}")
 
     if result.errors or result.warnings:
         result.add_error("init-engagement produced an incomplete or non-compliant engagement")

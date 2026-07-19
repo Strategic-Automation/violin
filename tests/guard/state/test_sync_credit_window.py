@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from plugins.violin_guard import bootstrap, execution, ptt, service, state
+from tests.guard.receipt_fixture import bind_active_task
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -22,6 +23,7 @@ def _engagement(tmp_path: Path) -> Path:
         ptt_path.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "test")
     return eng
 
 
