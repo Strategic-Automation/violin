@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from . import state
+from . import hypotheses, state
+from .skill_receipts import get_review_readiness
 
 _FINDING_ID_RE = re.compile(r"FIND-(\d{3,})$")
 _SEVERITIES = {"critical", "high", "medium", "low", "info"}
@@ -63,6 +65,7 @@ def _validate_from_pending_batch(
     impact: str,
     remediation: str,
     finding_id: str = "",
+    hypothesis_id: str = "",
 ) -> dict[str, Any]:
     engagement = state.resolve_eng_dir(eng_dir)
     values = {
@@ -79,14 +82,38 @@ def _validate_from_pending_batch(
     identifier = finding_id.strip().upper()
     if identifier and not _FINDING_ID_RE.fullmatch(identifier):
         raise ValueError("finding_id must use FIND-NNN format")
+    if not identifier:
+        raise ValueError("finding_id is required so fp-check review can bind the evidence set")
     evidence = _batch_evidence(engagement, pending)
     if not evidence:
         raise ValueError("the current batch has no completed execution receipts to cite")
+    normalized_hypothesis = hypothesis_id.removeprefix("H-").zfill(3)
+    hypothesis = next(
+        (
+            item
+            for item in hypotheses.parse_hypotheses(engagement / "hypotheses.md")
+            if item.id == normalized_hypothesis
+        ),
+        None,
+    )
+    if (
+        not hypothesis
+        or hypothesis.canonical_status() != "Validated"
+        or not hypothesis.runtime_evidence
+    ):
+        raise ValueError("a finding requires a linked Validated hypothesis with runtime_evidence")
+    evidence_digest = "sha256:" + sha256("\n".join(sorted(evidence)).encode()).hexdigest()
+    review = get_review_readiness(
+        engagement, finding_id=identifier, evidence_digest=evidence_digest
+    )
+    if not review:
+        raise ValueError("fp-check review must be prepared for this evidence on an earlier turn")
     return {
         **values,
         "severity": severity_key,
         "finding_id": identifier,
         "evidence_paths": evidence,
+        "hypothesis_id": f"H-{hypothesis.id}",
     }
 
 
@@ -99,6 +126,7 @@ def _create_from_pending_batch(
     impact: str,
     remediation: str,
     finding_id: str = "",
+    hypothesis_id: str = "",
     pending: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     engagement = state.resolve_eng_dir(eng_dir)
@@ -114,6 +142,7 @@ def _create_from_pending_batch(
         impact=impact,
         remediation=remediation,
         finding_id=finding_id,
+        hypothesis_id=hypothesis_id,
     )
 
     directory = engagement / "evidence" / "findings"
@@ -147,6 +176,7 @@ def _create_from_pending_batch(
         f"- **Batch:** {batch_id or 'unknown'}",
         f"- **PTT task:** {pending.get('ptt_task_id') or 'unknown'}",
         f"- **Phase:** {pending.get('phase') or 'unknown'}",
+        f"- **Hypothesis:** {draft['hypothesis_id']}",
         "",
         "## Description",
         "",

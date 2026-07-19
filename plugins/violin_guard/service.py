@@ -29,6 +29,7 @@ from .skill_receipts import (
     binding_readiness,
     complete_delivery,
     prepare_delivery,
+    prepare_review_readiness,
 )
 from .targets import resolve_target
 
@@ -317,6 +318,7 @@ def _validate_review_batch(a: dict, pending: dict) -> dict:
             impact=str(finding.get("impact") or ""),
             remediation=str(finding.get("remediation") or ""),
             finding_id=str(finding.get("finding_id") or ""),
+            hypothesis_id=str(finding.get("hypothesis_id") or ""),
         )
     return {
         "batch_id": batch_id,
@@ -370,7 +372,7 @@ def handle_review_batch(a, **kwargs):
                     session_id=state.resolve_session_id(engagement) or "review",
                     skill=skill,
                     bundle_digest=digest,
-                    phase=phase.value,
+                    phase="RETROSPECTIVE" if skill == "fp-check" else phase.value,
                 )
                 if reservation.owner:
                     viewed = HermesSkillViewAdapter().view(skill, task_id=task_id)
@@ -391,6 +393,24 @@ def handle_review_batch(a, **kwargs):
                     )
                 if reservation.status == "preparing":
                     return _json("skill_preparing", transition_applied=False, released=False)
+                if skill == "fp-check" and a.get("finding"):
+                    finding_id = str((a.get("finding") or {}).get("finding_id") or "").upper()
+                    evidence = findings._batch_evidence(engagement, pending)
+                    evidence_digest = (
+                        "sha256:" + hashlib.sha256("\n".join(sorted(evidence)).encode()).hexdigest()
+                    )
+                    prepare_review_readiness(
+                        engagement,
+                        finding_id=finding_id,
+                        evidence_digest=evidence_digest,
+                        delivery_id=reservation.id,
+                    )
+                    return _json(
+                        "review_prepared",
+                        transition_applied=False,
+                        released=False,
+                        finding_id=finding_id,
+                    )
                 bind_task(
                     engagement,
                     task_id=task_id,
@@ -412,6 +432,7 @@ def handle_review_batch(a, **kwargs):
                     impact=str(finding.get("impact") or ""),
                     remediation=str(finding.get("remediation") or ""),
                     finding_id=str(finding.get("finding_id") or ""),
+                    hypothesis_id=str(finding.get("hypothesis_id") or ""),
                 )
             if not context["already_recorded"]:
                 review_note = f"{context['note']} {context['marker']}"

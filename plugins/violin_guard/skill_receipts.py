@@ -28,6 +28,7 @@ __all__ = [
     "get_binding",
     "binding_readiness",
     "get_delivery",
+    "get_review_readiness",
     "record_binding_turn",
     "record_delivery_turn",
     "prepare_delivery",
@@ -386,3 +387,10 @@ def prepare_review_readiness(
         return receipt
 
     return _mutate(eng_dir, prepare)
+
+
+def get_review_readiness(
+    eng_dir: str | Path, *, finding_id: str, evidence_digest: str
+) -> dict[str, Any] | None:
+    data, _ = _load(_path(eng_dir))
+    return (data.get("review_readiness") or {}).get(f"{finding_id}:{evidence_digest}")
