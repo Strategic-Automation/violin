@@ -7,16 +7,36 @@ engagement:
 targets:
   domains: ["duck-store.escape.tech"]
   urls: ["https://duck-store.escape.tech"]
-  app_type: "api"
+  ip_addresses: []
+  in_scope_urls: ["https://duck-store.escape.tech"]
+
+assessment_hosts:
+  callback_hosts: []
+
+authorised_parties: ["benchmark operator"]
+
+rules_of_engagement:
+  allowed_actions:
+    - "host/port discovery"
+    - "banner grabbing"
+    - "version detection"
+    - "vulnerability scanning"
+    - "exploit validation (in-scope, non-destructive)"
+    - "API enumeration"
+    - "account registration"
+  forbidden_actions:
+    - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
+    - "browsing duck-store source code"
+    - "credential-stuffing"
+
+authorisation:
+  confirmed: true
+  confirmed_by: "benchmark operator"
 
 research_hosts:
   - nvd.nist.gov
   - www.exploit-db.com
   - raw.githubusercontent.com
-
-forbidden_actions:
-  - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
-  - "browsing duck-store source code"
 
 benchmark:
   mode: true
