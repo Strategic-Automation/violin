@@ -52,7 +52,6 @@ def _check_command_internal(a) -> cmd_module.CheckResult:
             scope=a.get("scope", ""),
             target=a.get("target"),
             session_id=a.get("session_id"),
-            skill_loaded_file=a.get("skill_loaded_file"),
         )
     )
 
@@ -593,7 +592,6 @@ def handle_exec_burst(a, **kwargs):
     phase = a.get("phase", "")
     scope = a.get("scope", "")
     session_id = a.get("session_id", "")
-    skill_loaded_file = a.get("skill_loaded_file", "")
     label = a.get("label", "")
     backend = a.get("backend", "auto")
     timeout_seconds = a.get("timeout_seconds", 180)
@@ -625,7 +623,6 @@ def handle_exec_burst(a, **kwargs):
             "eng_dir": eng_dir,
             "scope": scope,
             "session_id": session_id,
-            "skill_loaded_file": skill_loaded_file,
             "target": a.get("target"),
         }
         r = _check_command_internal(cmd_args)

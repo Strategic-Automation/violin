@@ -11,6 +11,7 @@ from plugins.violin_guard import (
     register,
 )
 from plugins.violin_guard import command as guard_command
+from tests.guard.receipt_fixture import bind_active_task
 
 _SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
@@ -191,6 +192,7 @@ def _engagement(tmp_path):
         ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "test")
     return eng
 
 

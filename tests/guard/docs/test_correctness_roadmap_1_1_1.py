@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.guard.receipt_fixture import bind_active_task
+
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -83,6 +85,7 @@ def _init_e2e(tmp_path, skill_file, allowed=("recon", "vuln-research", "exploita
         ptt.read_text(encoding="utf-8").replace("| PT-010 | [ ] |", "| PT-010 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "ts")
     return eng
 
 
@@ -215,6 +218,7 @@ def test_post_exploitation_requires_scope_and_skill_load(tmp_path):
         .replace("| PT-042 | [ ] |", "| PT-042 | [~] |"),
         encoding="utf-8",
     )
+    bind_active_task(eng, "ts")
 
     res = command.check_command(
         command.CheckCommandArgs(

@@ -16,6 +16,7 @@ from . import bootstrap, hypotheses, ptt, state
 from . import history as history_mod
 from .phases import Phase, normalize_phase, requires_hypothesis, suppresses_heartbeat
 from .results import GuardResult
+from .skill_receipts import get_binding
 from .targets import (
     check_scope_targets,
     extract_target_candidates,
@@ -33,6 +34,7 @@ __all__ = [
     "validate_scope",
     "check_scope_authorization",
     "check_skill_load",
+    "check_skill_binding",
     "check_hypothesis_freshness",
 ]
 
@@ -259,6 +261,25 @@ def check_skill_load(eng_dir: Path, session_id: str, mandatory: bool = True) -> 
     return result
 
 
+def check_skill_binding(
+    eng_dir: Path, task_id: str, session_id: str, phase: Phase
+) -> SkillLoadResult:
+    """Require a delivered, current-context receipt binding for target work."""
+    result = SkillLoadResult()
+    binding = get_binding(eng_dir, task_id)
+    if not binding:
+        result.add_error(f"skill receipt binding missing for active task {task_id}")
+        return result
+    if binding.get("session_id") != session_id:
+        result.add_error("skill receipt binding belongs to a different session")
+    current = state.read_json(eng_dir / "state" / "skills.json").get("context", {})
+    if binding.get("context_generation") != current.get("generation"):
+        result.add_error("skill receipt binding is stale after context reset")
+    if not result.errors:
+        result.add_info(f"skill receipt binding verified: {binding.get('skill')}")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Hypothesis freshness gate
 # ---------------------------------------------------------------------------
@@ -405,15 +426,10 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     artifact_result = check_local_artifact_paths(args.command)
     result.infos.extend(artifact_result.infos)
 
-    # 3. Skill-load gate (mandatory)
+    # 3. Session identity (legacy markers may infer identity, but never authorize work).
     session_id = state.resolve_session_id(eng_dir, args.session_id)
     if not session_id:
-        result.add_error("session_id is required for the skill-load gate")
-    if session_id:
-        skill_result = check_skill_load(eng_dir, session_id, mandatory=True)
-        result.errors.extend(skill_result.errors)
-        result.warnings.extend(skill_result.warnings)
-        result.infos.extend(skill_result.infos)
+        result.add_error("session_id is required for the skill receipt gate")
 
     # 4. PTT active task
     ptt_path = eng_dir / "state" / "ptt.md"
@@ -430,6 +446,11 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
                 "pause the current task and start one under the requested Phase heading with "
                 "violin_record_ptt"
             )
+        if active_task and session_id:
+            binding_result = check_skill_binding(eng_dir, active_task.id, session_id, phase)
+            result.errors.extend(binding_result.errors)
+            result.warnings.extend(binding_result.warnings)
+            result.infos.extend(binding_result.infos)
 
     # 5. History staleness (duplicate detection)
     pending = state.get_pending_sync(str(eng_dir)) or {}
