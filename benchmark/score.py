@@ -15,8 +15,6 @@ Fixes A–F, P5, D5 applied:
 import json
 import re
 import sys
-import shutil
-import textwrap
 from pathlib import Path
 
 SCORER_DIR = Path(__file__).resolve().parent
@@ -115,8 +113,8 @@ _REQUEST_SIGNATURE = re.compile(
 
 def build_pattern(challenge_id: str, patterns: list[str]) -> re.Pattern | None:
     """Build a word-boundary OR pattern from challenge patterns (Fix D).
-    
-    Uses \b for word-like patterns (alphanumeric), and (?<![a-z0-9])... 
+
+    Uses \b for word-like patterns (alphanumeric), and (?<![a-z0-9])...
     lookbehind for URL/endpoint patterns where / breaks word boundaries."""
     if not patterns:
         return None
@@ -187,7 +185,7 @@ _WALKTHROUGH_RE = re.compile(
 def check_compliance(hist_text: str, evidence_count: int) -> tuple[int, bool]:
     """Return (violation_count, is_unknown)."""
     lines = [
-        l for l in hist_text.splitlines() if l.strip() and not l.startswith("#")
+        line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")
     ]
     if not lines or len(lines) < 3:
         return (0, True)  # UNKNOWN — not enough history to assess
@@ -227,9 +225,9 @@ def score_engagement(eng_dir: Path) -> dict:
             hist_text = hp.read_text()
             break
     hist_lines = [
-        l for l in hist_text.splitlines() if l.strip() and not l.startswith("#")
+        line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")
     ]
-    hist_blocks = sum(1 for l in hist_lines if "BLOCK:" in l.upper())
+    hist_blocks = sum(1 for line in hist_lines if "BLOCK:" in line.upper())
 
     # Evidence count
     ev_dir = eng_dir / "evidence"
