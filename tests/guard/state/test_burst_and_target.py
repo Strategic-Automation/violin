@@ -361,17 +361,20 @@ def test_plugin_exposes_new_tools():
 
 def test_status_skill_section_reports_load_state_and_exit_code(eng):
     state.record_session_id(eng, "ts")
+    bind_active_task(eng, "ts")
     loaded = _run("status", "--eng-dir", str(eng), "--section", "skill")
     loaded_data = json.loads(loaded.stdout)
     assert loaded.returncode == 0
-    assert loaded_data["loaded"] is True
+    assert loaded_data["binding_ready"] is True
+    assert loaded_data["legacy_marker_status"] == "obsolete"
 
-    marker = Path(loaded_data["marker"])
+    marker = Path(loaded_data["legacy_marker"])
     marker.unlink()
     missing = _run("status", "--eng-dir", str(eng), "--section", "skill")
     missing_data = json.loads(missing.stdout)
-    assert missing.returncode == 1
-    assert missing_data["loaded"] is False
+    assert missing.returncode == 0
+    assert missing_data["binding_ready"] is True
+    assert missing_data["legacy_marker_status"] == "absent"
 
 
 @pytest.mark.parametrize(

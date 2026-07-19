@@ -134,7 +134,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.section == "skill":
         skill = out.get("skill", {})
         print(json.dumps(skill, indent=2))
-        return 0 if skill.get("loaded") else 1
+        return 0 if skill.get("binding_ready") else 1
     print(json.dumps(out, indent=2))
     return 0 if out["status"] == "ok" else 1
 
