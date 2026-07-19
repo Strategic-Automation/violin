@@ -1,10 +1,22 @@
-Load the pentest skill. Then create an engagement:
+Load the pentest skill. Then bootstrap the engagement:
 
 ```
 python scripts/violin_guard.py init-engagement \
-  --scope-file C:/Users/Hello/Repos/violin/benchmark/targets/duck-store/scope.yaml \
+  --host duck-store.escape.tech \
   --session-id duck-store-benchmark \
   engagements/duck-store-benchmark
+```
+
+Then replace the generated scope with our pre-baked benchmark scope:
+
+```
+cp C:/Users/Hello/Repos/violin/benchmark/targets/duck-store/scope.yaml \
+   engagements/duck-store-benchmark/scope/scope.yaml
+```
+
+Run check-bootstrap to confirm:
+```
+python scripts/violin_guard.py check-bootstrap engagements/duck-store-benchmark
 ```
 
 BENCHMARK RULES:
