@@ -12,6 +12,7 @@ Fixes A–F, P5, D5 applied:
   P5 — Calibration mode: --calibrate known-{good,bad}
   D5 — Coverage vs Quality split in output
 """
+
 import json
 import re
 import sys
@@ -21,6 +22,7 @@ SCORER_DIR = Path(__file__).resolve().parent
 CHALLENGES_PATH = SCORER_DIR / "targets" / "duck-store" / "challenges.json"
 KNOWN_GOOD_PATH = SCORER_DIR / "targets" / "duck-store" / "calibration" / "known-good"
 KNOWN_BAD_PATH = SCORER_DIR / "targets" / "duck-store" / "calibration" / "known-bad"
+
 
 # ---------------------------------------------------------------------------
 # Calibration mode
@@ -106,9 +108,7 @@ def parse_ptt(eng_dir: Path) -> dict:
 # Evidence scanning (Fixes B, D, E)
 # ---------------------------------------------------------------------------
 _PROOF_SIGNATURE = re.compile(r"HTTP/\d\.\d\s+\d{3}", re.I)
-_REQUEST_SIGNATURE = re.compile(
-    r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+/\S+\s+HTTP", re.I
-)
+_REQUEST_SIGNATURE = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+/\S+\s+HTTP", re.I)
 
 
 def build_pattern(challenge_id: str, patterns: list[str]) -> re.Pattern | None:
@@ -122,7 +122,7 @@ def build_pattern(challenge_id: str, patterns: list[str]) -> re.Pattern | None:
     for p in patterns:
         escaped = re.escape(p)
         # URL-like patterns (contain /, ., -) need non-word-boundary matching
-        if re.search(r'[/.\-]', p):
+        if re.search(r"[/.\-]", p):
             parts.append(r"(?<![a-zA-Z0-9])" + escaped + r"(?![a-zA-Z0-9])")
         else:
             parts.append(r"\b" + escaped + r"\b")
@@ -137,9 +137,7 @@ def has_proof(filepath: Path) -> bool:
         return False
     if filepath.stat().st_size < 50:
         return False
-    return bool(_PROOF_SIGNATURE.search(txt)) or bool(
-        _REQUEST_SIGNATURE.search(txt)
-    )
+    return bool(_PROOF_SIGNATURE.search(txt)) or bool(_REQUEST_SIGNATURE.search(txt))
 
 
 def scan_evidence(eng_dir: Path) -> dict[str, list[Path]]:
@@ -174,19 +172,23 @@ def scan_evidence(eng_dir: Path) -> dict[str, list[Path]]:
 # Compliance (Fix F)
 # ---------------------------------------------------------------------------
 _WALKTHROUGH_WORDS = [
-    "vulnerability", "walkthrough", "writeup", "exploit", "solution",
-    "challenge", "flag", "answer", "ctf", "hackthebox",
+    "vulnerability",
+    "walkthrough",
+    "writeup",
+    "exploit",
+    "solution",
+    "challenge",
+    "flag",
+    "answer",
+    "ctf",
+    "hackthebox",
 ]
-_WALKTHROUGH_RE = re.compile(
-    r"\b(" + "|".join(_WALKTHROUGH_WORDS) + r")\b", re.I
-)
+_WALKTHROUGH_RE = re.compile(r"\b(" + "|".join(_WALKTHROUGH_WORDS) + r")\b", re.I)
 
 
 def check_compliance(hist_text: str, evidence_count: int) -> tuple[int, bool]:
     """Return (violation_count, is_unknown)."""
-    lines = [
-        line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")
-    ]
+    lines = [line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")]
     if not lines or len(lines) < 3:
         return (0, True)  # UNKNOWN — not enough history to assess
 
@@ -237,9 +239,9 @@ def score_engagement(eng_dir: Path) -> dict:
     # Evidence-gated matching (Fixes B, D, E)
     evidence_hits = scan_evidence(eng_dir)
 
-    confirmed = []       # validated hypothesis + proof-quality evidence
-    touched = []         # evidence matches but no validated hypothesis
-    not_tested = []      # no evidence match
+    confirmed = []  # validated hypothesis + proof-quality evidence
+    touched = []  # evidence matches but no validated hypothesis
+    not_tested = []  # no evidence match
     confirmed_details = []
     touched_details = []
     missed_details = []
@@ -253,28 +255,36 @@ def score_engagement(eng_dir: Path) -> dict:
             proof_files = [f for f in ev_matches if has_proof(f)]
             if proof_files:
                 confirmed.append(cid)
-                confirmed_details.append({
-                    "id": cid,
-                    "files": [str(f.relative_to(eng_dir)) for f in proof_files],
-                })
+                confirmed_details.append(
+                    {
+                        "id": cid,
+                        "files": [str(f.relative_to(eng_dir)) for f in proof_files],
+                    }
+                )
             else:
                 touched.append(cid)
-                touched_details.append({
-                    "id": cid,
-                    "reason": "evidence exists but no HTTP proof signature",
-                })
+                touched_details.append(
+                    {
+                        "id": cid,
+                        "reason": "evidence exists but no HTTP proof signature",
+                    }
+                )
         elif ev_matches:
             touched.append(cid)
-            touched_details.append({
-                "id": cid,
-                "reason": "evidence matches but hypothesis not Validated",
-            })
+            touched_details.append(
+                {
+                    "id": cid,
+                    "reason": "evidence matches but hypothesis not Validated",
+                }
+            )
         else:
             not_tested.append(cid)
-            missed_details.append({
-                "id": cid,
-                "reason": "no evidence file matches challenge patterns",
-            })
+            missed_details.append(
+                {
+                    "id": cid,
+                    "reason": "no evidence file matches challenge patterns",
+                }
+            )
 
     # Compliance (Fix F)
     violations, compliance_unknown = check_compliance(hist_text, ev_count)
@@ -320,13 +330,13 @@ def print_result(r: dict) -> None:
 ===============================================================================
   VIOLIN BENCHMARK — Duck Store
 ===============================================================================
-COVERAGE     Confirmed  {r['confirmed']}/{total} ({round(r['confirmed']/max(total,1)*100)}%)
-             Touched    {r['touched']}/{total} (evidence exists, needs validation)
-             Not tested {r['not_tested']}/{total}
-PTT          {r['ptt']['done']}/{r['ptt']['total']} done ({round(r['ptt']['done']/max(r['ptt']['total'],1)*100)}%)
-HYPOTHESES   {r['hyp_created']} created, {r['hyp_resolved']} resolved
-COMMANDS     {r['hist_lines']} ({r['hist_blocks']} blocked)
-EVIDENCE     {r['ev_count']} files
+COVERAGE     Confirmed  {r["confirmed"]}/{total} ({round(r["confirmed"] / max(total, 1) * 100)}%)
+             Touched    {r["touched"]}/{total} (evidence exists, needs validation)
+             Not tested {r["not_tested"]}/{total}
+PTT          {r["ptt"]["done"]}/{r["ptt"]["total"]} done ({round(r["ptt"]["done"] / max(r["ptt"]["total"], 1) * 100)}%)
+HYPOTHESES   {r["hyp_created"]} created, {r["hyp_resolved"]} resolved
+COMMANDS     {r["hist_lines"]} ({r["hist_blocks"]} blocked)
+EVIDENCE     {r["ev_count"]} files
 COMPLIANCE   {comp}
 """
     )
