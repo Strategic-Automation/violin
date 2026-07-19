@@ -42,6 +42,14 @@ RECORD_PTT_SCHEMA = {
                 "type": "string",
                 "description": "Required for hypothesis-driven phases",
             },
+            "outcome": {
+                "type": "string",
+                "enum": ["progress", "validated", "rejected", "no_progress", "blocked"],
+            },
+            "evidence_paths": {"type": "array", "items": {"type": "string"}},
+            "next_action": {"type": "string"},
+            "next_technique": {"type": "string"},
+            "research_attempted": {"type": "boolean"},
             "title": {
                 "type": "string",
                 "description": "Required when explicitly creating a new PTT task",
@@ -147,6 +155,14 @@ REVIEW_BATCH_SCHEMA = {
                 "type": "string",
                 "description": "Required for hypothesis-driven phases",
             },
+            "outcome": {
+                "type": "string",
+                "enum": ["progress", "validated", "rejected", "no_progress", "blocked"],
+            },
+            "evidence_paths": {"type": "array", "items": {"type": "string"}},
+            "next_action": {"type": "string"},
+            "next_technique": {"type": "string"},
+            "research_attempted": {"type": "boolean"},
             "finding": {
                 "type": "object",
                 "description": "Optional structured finding derived only from this batch",

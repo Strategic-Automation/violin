@@ -439,6 +439,18 @@ def handle_review_batch(a, **kwargs):
                 ptt.update_task(
                     context["ptt_path"], context["task_id"], context["status"], review_note
                 )
+            semantic = state.record_semantic_review(
+                engagement,
+                task_id=context["task_id"],
+                hypothesis_id=str(a.get("hypothesis_id") or ""),
+                skill=skill or "review",
+                technique=str(a.get("technique") or "batch-review"),
+                outcome=str(a.get("outcome") or "progress"),
+                evidence_paths=[str(item) for item in (a.get("evidence_paths") or [])],
+                next_action=str(a.get("next_action") or "review evidence"),
+                next_technique=str(a.get("next_technique") or ""),
+                research_attempted=bool(a.get("research_attempted")),
+            )
             state.clear_pending_sync(engagement)
             return _json(
                 "ok",
@@ -449,6 +461,7 @@ def handle_review_batch(a, **kwargs):
                 finding=finding_result,
                 finding_path=finding_result.get("path") if finding_result else None,
                 binding_task_id=(context["task_id"] if skill else None),
+                semantic_progress=semantic,
             )
     except (OSError, ValueError) as exc:
         return _json(
