@@ -1,0 +1,25 @@
+engagement:
+  client: "escape.tech (benchmark)"
+  tester: "Violin Benchmark"
+  date: ""
+  duration: "1 session"
+
+targets:
+  domains: ["duck-store.escape.tech"]
+  urls: ["https://duck-store.escape.tech"]
+  app_type: "api"
+
+research_hosts:
+  - nvd.nist.gov
+  - www.exploit-db.com
+  - raw.githubusercontent.com
+
+forbidden_actions:
+  - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
+  - "browsing duck-store source code"
+
+benchmark:
+  mode: true
+  openapi_spec: "https://duck-store.escape.tech/openapi.json"
+  register_account: true
+  anti_walkthrough: true
