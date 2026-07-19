@@ -1,19 +1,19 @@
 engagement:
   client: "escape.tech (benchmark)"
   tester: "Violin Benchmark"
-  date: ""
+  date: "2026-07-19"
   duration: "1 session"
 
 targets:
+  ip_addresses: ["duck-store.escape.tech"]
   domains: ["duck-store.escape.tech"]
   urls: ["https://duck-store.escape.tech"]
-  ip_addresses: []
   in_scope_urls: ["https://duck-store.escape.tech"]
 
 assessment_hosts:
   callback_hosts: []
 
-authorised_parties: ["benchmark operator"]
+authorized_parties: ["benchmark operator"]
 
 rules_of_engagement:
   allowed_actions:
