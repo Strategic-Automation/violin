@@ -226,13 +226,13 @@ violin/
 │   ├── smoke-test.ps1      # Windows supplemental smoke
 │   └── kali.sh             # Docker Kali helper
 └── skills/
-    ├── pentest/            # Orchestrator, workflow, shared policy, and templates
+    ├── pentest/            # Engagement orchestrator (23 playbooks, 10 refs, 11 templates)
     │   ├── SKILL.md
-    │   ├── playbooks/      # 23 operational and vulnerability-class playbooks
+    │   ├── playbooks/      # 7 operational + 16 vulnerability-class playbooks
     │   ├── references/     # 10 reference files
-    │   └── templates/      # 11 engagement, evidence, and methodology helpers
-    ├── web-attacks/        # Routed skill + 5 injection/web playbooks
-    └── access-control/     # Routed skill + 3 authentication/authorisation playbooks
+    │   └── templates/      # 11 templates (reports, evidence, methodology, contracts)
+    ├── web-attacks/        # Routed skill — 5 injection/web playbooks (SQLi, XSS, SSRF, cmdi, traversal)
+    └── access-control/     # Routed skill — 3 auth/authorisation playbooks (auth-bypass, IDOR, JWT)
 ```
 
 ---
