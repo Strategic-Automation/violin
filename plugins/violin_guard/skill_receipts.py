@@ -26,7 +26,10 @@ __all__ = [
     "bind_task",
     "complete_delivery",
     "get_binding",
+    "binding_readiness",
     "get_delivery",
+    "record_binding_turn",
+    "record_delivery_turn",
     "prepare_delivery",
     "prepare_review_readiness",
 ]
@@ -300,6 +303,60 @@ def bind_task(
 def get_binding(eng_dir: str | Path, task_id: str) -> dict[str, Any] | None:
     data, _ = _load(_path(eng_dir))
     return data["bindings"].get(task_id)
+
+
+def binding_readiness(
+    eng_dir: str | Path, *, task_id: str, session_id: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Return the active receipt binding, or a precise fail-closed reason."""
+
+    data, recovered = _load(_path(eng_dir))
+    if recovered:
+        return None, "skill receipt state is unavailable; prepare the selected skill again"
+    context = data.get("context") or {}
+    binding = (data.get("bindings") or {}).get(task_id)
+    if not binding:
+        return None, "the active PTT task has no delivered skill binding"
+    if str(context.get("session_id") or "") != session_id:
+        return None, "the skill binding belongs to a different session"
+    if int(binding.get("context_generation", -1)) != int(context.get("generation") or 0):
+        return None, "the skill binding is stale after a context reset"
+    delivery = (data.get("deliveries") or {}).get(binding.get("delivery_id"))
+    if not delivery or delivery.get("status") != "delivered":
+        return None, "the bound skill delivery is not ready"
+    if delivery.get("bundle_digest") != binding.get("bundle_digest"):
+        return None, "the bound skill digest no longer matches its delivery"
+    return {**binding, "delivered_turn_id": delivery.get("delivered_turn_id")}, None
+
+
+def record_delivery_turn(eng_dir: str | Path, *, delivery_id: str, turn_id: str) -> None:
+    """Associate a successful ``skill_view`` result with its Hermes turn."""
+
+    if not turn_id:
+        return
+
+    def record(data: dict[str, Any]) -> None:
+        entry = data["deliveries"].get(delivery_id)
+        if entry and entry.get("status") == "delivered":
+            entry["delivered_turn_id"] = turn_id
+            entry["updated_at"] = _now()
+
+    _mutate(eng_dir, record)
+
+
+def record_binding_turn(eng_dir: str | Path, *, task_id: str, turn_id: str) -> None:
+    """Associate a binding commit with its Hermes turn."""
+
+    if not turn_id:
+        return
+
+    def record(data: dict[str, Any]) -> None:
+        binding = data["bindings"].get(task_id)
+        if binding:
+            binding["bound_turn_id"] = turn_id
+            binding["bound_at"] = _now()
+
+    _mutate(eng_dir, record)
 
 
 def prepare_review_readiness(

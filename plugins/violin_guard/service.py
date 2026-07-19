@@ -22,7 +22,14 @@ from .adapters import (
 from .command import CheckCommandArgs
 from .history import history_contains
 from .phases import Phase, requires_hypothesis, suppresses_heartbeat
-from .skill_receipts import HermesSkillViewAdapter, bind_task, complete_delivery, prepare_delivery
+from .skill_policy import resolve_skill_route
+from .skill_receipts import (
+    HermesSkillViewAdapter,
+    bind_task,
+    binding_readiness,
+    complete_delivery,
+    prepare_delivery,
+)
 from .targets import resolve_target
 
 # ---------------------------------------------------------------------------
@@ -146,6 +153,7 @@ def handle_record_ptt(a, **kwargs):
                 "digest": digest,
                 "content": viewed.content,
                 "error": viewed.error,
+                "delivery_id": reservation.id,
             },
         )
     if reservation.status == "preparing":
@@ -378,6 +386,7 @@ def handle_review_batch(a, **kwargs):
                             "digest": digest,
                             "content": viewed.content,
                             "error": viewed.error,
+                            "delivery_id": reservation.id,
                         },
                     )
                 if reservation.status == "preparing":
@@ -418,6 +427,7 @@ def handle_review_batch(a, **kwargs):
                 released=True,
                 finding=finding_result,
                 finding_path=finding_result.get("path") if finding_result else None,
+                binding_task_id=(context["task_id"] if skill else None),
             )
     except (OSError, ValueError) as exc:
         return _json(
@@ -728,7 +738,13 @@ def handle_status(a, **kwargs):
     counts = state.read_counts(eng_dir)
     session_id = state.resolve_session_id(eng_dir)
     marker = eng_dir / "state" / f".skill-loaded-{session_id}" if session_id else None
-    skill_loaded = bool(marker and marker.is_file())
+    legacy_marker = str(marker) if marker and marker.is_file() else None
+    binding, binding_reason = (
+        binding_readiness(eng_dir, task_id=active.id, session_id=session_id)
+        if active and session_id
+        else (None, "no active task or session")
+    )
+    route = resolve_skill_route(current_phase or "RECON")
 
     blockers = [
         {
@@ -742,16 +758,16 @@ def handle_status(a, **kwargs):
         blockers.append(
             {
                 "code": "skill_session_unknown",
-                "reason": "No session id is recorded for the skill-load gate",
-                "next_action": "Load pentest, then create its marker for the current session",
+                "reason": "No session id is recorded for receipt-backed skill delivery",
+                "next_action": "Use violin_record_ptt to select and prepare a routed skill",
             }
         )
-    elif not skill_loaded:
+    elif active and binding_reason:
         blockers.append(
             {
-                "code": "skill_not_loaded",
-                "reason": f"Pentest skill marker is missing for session {session_id}",
-                "next_action": f"Load pentest, then create {marker}",
+                "code": "skill_binding_required",
+                "reason": binding_reason,
+                "next_action": "Prepare the routed skill, then repeat the PTT update next turn",
             }
         )
     blockers.extend(
@@ -822,10 +838,14 @@ def handle_status(a, **kwargs):
         command_count=counts["commands"],
         message_count=counts["messages"],
         skill={
-            "name": "pentest",
             "session_id": session_id or None,
-            "loaded": skill_loaded,
-            "marker": str(marker) if marker else None,
+            "binding": binding,
+            "binding_ready": binding_reason is None,
+            "binding_reason": binding_reason,
+            "route_candidates": list(route.allowed),
+            "legacy_marker": legacy_marker,
+            "legacy_marker_status": "obsolete" if legacy_marker else "absent",
+            "recovery": "Select a route candidate with violin_record_ptt and retry next turn",
         },
         runtime=runtime_backend.runtime_readiness(eng_dir),
     )

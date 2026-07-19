@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from plugins.violin_guard import bootstrap, history, ptt, service, state
+from tests.guard.receipt_fixture import bind_active_task
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -30,6 +31,7 @@ def _engagement(tmp_path: Path) -> Path:
     (eng / "state" / ".skill-loaded-test-session").write_text(
         "skill-loaded: pentest\n", encoding="utf-8"
     )
+    bind_active_task(eng, "test-session")
     return eng
 
 
@@ -89,7 +91,8 @@ def test_status_explains_current_phase_pending_commands_and_skill(tmp_path: Path
     assert result["current_phase"] == "RECON"
     assert result["pending_batch"]["commands"][0]["required_phase"] == "RECON"
     assert result["phase_requirements"]["EXPLOITATION"]["sync_window"] == 20
-    assert result["skill"]["loaded"] is True
+    assert result["skill"]["binding_ready"] is True
+    assert result["skill"]["legacy_marker_status"] in {"absent", "obsolete"}
 
 
 @pytest.mark.parametrize("task_status", ["[~]", "[x]", "[!]", "[-]"])

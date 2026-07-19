@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 
 from plugins.violin_guard import (
+    _on_session_reset_hook,
     _post_tool_call_hook,
+    _pre_llm_call_hook,
     _pre_tool_call_hook,
     bootstrap,
     register,
@@ -172,14 +174,68 @@ def test_local_file_path_containing_an_ip_is_not_treated_as_a_socket() -> None:
     )
 
 
-def test_non_terminal_tools_are_not_affected() -> None:
+def test_target_tools_require_an_engagement_binding() -> None:
     result = _pre_tool_call_hook(
         tool_name="violin_exec",
         args={"command": "nmap -sV 10.10.10.10"},
         session_id="test-session",
     )
 
-    assert result is None
+    assert result["action"] == "block"
+    assert "engagement associated" in result["message"]
+
+
+def test_skill_delivery_turn_blocks_target_and_browser_until_next_turn(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    _pre_llm_call_hook(session_id="test", eng_dir=str(eng))
+    _post_tool_call_hook(
+        tool_name="violin_record_ptt",
+        args={"eng_dir": str(eng), "id": "PT-010"},
+        result='{"status":"ok","task_id":"PT-010"}',
+        turn_id="turn-bind",
+    )
+
+    blocked = _pre_tool_call_hook(
+        tool_name="violin_exec",
+        args={"eng_dir": str(eng), "session_id": "test"},
+        session_id="test",
+        turn_id="turn-bind",
+    )
+    assert blocked["action"] == "block"
+    assert "next turn" in blocked["message"]
+
+    browser_blocked = _pre_tool_call_hook(
+        tool_name="browser_navigate",
+        args={"url": "https://10.10.10.10"},
+        session_id="test",
+        turn_id="turn-bind",
+    )
+    assert browser_blocked["action"] == "block"
+
+    assert (
+        _pre_tool_call_hook(
+            tool_name="browser_navigate",
+            args={"url": "https://10.10.10.10"},
+            session_id="test",
+            turn_id="turn-next",
+        )
+        is None
+    )
+
+
+def test_session_reset_invalidates_active_skill_binding(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    _pre_llm_call_hook(session_id="test", eng_dir=str(eng))
+    _on_session_reset_hook(session_id="test")
+
+    blocked = _pre_tool_call_hook(
+        tool_name="violin_exec",
+        args={"eng_dir": str(eng), "session_id": "test"},
+        session_id="test",
+        turn_id="after-reset",
+    )
+    assert blocked["action"] == "block"
+    assert "stale after a context reset" in blocked["message"]
 
 
 def _engagement(tmp_path):
