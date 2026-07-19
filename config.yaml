@@ -1,6 +1,11 @@
 # Model/provider intentionally omitted: Violin inherits the user's configured
 # Hermes default and does not require a profile-specific provider or API key.
 
+model:
+  default: tencent/hy3:free
+  provider: nous
+  base_url: https://inference-api.nousresearch.com/v1
+
 agent:
   max_turns: 350
   service_tier: normal
