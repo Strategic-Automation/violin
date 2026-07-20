@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.9
+
+- Collapsed newlines in history.md so multi-line commands match the pending-batch comparison with sync.json.
+- Skipped tokens after credential flags (`-u`, `--user`, `-p`, `-H`, `-dc-ip`) in target extraction so dotted usernames are not mistaken for assessment targets.
+- Added tool environment notes to exploitation playbook covering impacket version, bloodyAD GenericWrite limits, and xfreerdp/evil-winrm TTY requirements.
+
 ## 2.0.8
 
 - Expanded Duck Store benchmark challenges from 14 to 20 article-parity vulnerabilities, matching Redpick's verified findings across 7 categories with correct severity distribution.

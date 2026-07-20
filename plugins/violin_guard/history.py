@@ -32,9 +32,10 @@ def append_history(
     path = _history_path(eng_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    normalised = " ".join(command.splitlines())  # collapse newlines for single-line history
     line = (
-        f"- {stamp} | phase={phase} | exit_code={exit_code} | command={command}"
-        f"{_COMMAND_LENGTH_MARKER}{len(command)}"
+        f"- {stamp} | phase={phase} | exit_code={exit_code} | command={normalised}"
+        f"{_COMMAND_LENGTH_MARKER}{len(normalised)}"
     )
     if receipt_path:
         line += f"{_RECEIPT_MARKER}{receipt_path}"
@@ -46,12 +47,16 @@ def history_contains(eng_dir: str | Path, command: str) -> bool:
     """Return True if ``command`` appears anywhere in history.md.
 
     Used by the self-certify guard to prove a batch finished before review.
+    Newlines are collapsed for comparison because sync.json JSON-escaped
+    ``\\n`` decodes to literal newlines while history.md stores the
+    single-line space-collapsed form.
     """
     hist = _history_path(eng_dir)
     if not hist.exists():
         return False
+    normalised = " ".join(command.splitlines())
     for line in hist.read_text(encoding="utf-8").splitlines():
-        if _recorded_command(line) == command:
+        if _recorded_command(line) == normalised:
             return True
     return False
 

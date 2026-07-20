@@ -120,17 +120,51 @@ def extract_target_candidates(command: str) -> list[str]:
     return list(dict.fromkeys(_target_candidates(command)))
 
 
-def _target_candidates(command: str) -> list[str]:
-    """Return network targets parsed from a shell command."""
+_CREDENTIAL_FLAGS = frozenset(
+    {
+        "-u",
+        "--user",
+        "-p",
+        "--password",
+        "-H",
+        "--hash",
+        "-k",
+        "--kerberos",
+        "-dc-ip",
+        "--domain",
+        "-d",
+        "-debug",
+        "-ts",  # impacket noise flags
+    }
+)
+_CREDENTIAL_FLAG_PREFIXES = ("--user=", "--password=", "-u=", "-p=", "-H=", "--hash=")
 
+
+def _target_candidates(command: str) -> list[str]:
+    """Return network targets parsed from a shell command.
+
+    Skips tokens after credential flags (``-u``, ``--user``, ``-p``,
+    ``-H``, ``-dc-ip``, etc.) so usernames with dots are not mistaken
+    for target hosts.
+    """
     candidates: list[str] = []
     skip_path_value = False
+    skip_credential_value = False
     for token in _command_tokens(command):
         if skip_path_value:
             skip_path_value = False
             continue
+        if skip_credential_value:
+            skip_credential_value = False
+            continue
         if token in _PATH_VALUE_FLAGS:
             skip_path_value = True
+            continue
+        if token in _CREDENTIAL_FLAGS:
+            skip_credential_value = True
+            continue
+        # --user=j.arbuckle inline form
+        if any(token.startswith(prefix) for prefix in _CREDENTIAL_FLAG_PREFIXES):
             continue
         if token in _REDIRECTION_OPERATORS or _is_path_option(token):
             continue

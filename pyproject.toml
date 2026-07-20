@@ -1,6 +1,6 @@
 [project]
 name = "violin"
-version = "2.0.6"
+version = "2.0.9"
 description = "Supervised agentic Hermes penetration-testing profile"
 requires-python = ">=3.11"
 dependencies = ["filelock>=3.13,<4"]
