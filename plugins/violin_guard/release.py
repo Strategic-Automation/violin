@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -181,8 +182,8 @@ def check_release() -> ReleaseCheckResult:
                 result.add_info("ruff check passed")
         except FileNotFoundError:
             result.add_warning("ruff not installed; skipped")
+        basetemp = _pytest_basetemp(repo_path)
         try:
-            basetemp = _pytest_basetemp(repo_path)
             pytest = subprocess.run(
                 [
                     python,
@@ -206,6 +207,8 @@ def check_release() -> ReleaseCheckResult:
                 result.add_info("test suite passed")
         except FileNotFoundError:
             result.add_warning("pytest not installed; skipped")
+        finally:
+            shutil.rmtree(basetemp, ignore_errors=True)
     else:
         result.add_info("heavy checks skipped (VIOLIN_CHECK_RELEASE_SKIP_HEAVY=1)")
 
