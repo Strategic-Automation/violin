@@ -123,6 +123,7 @@ def handle_record_ptt(a, **kwargs):
     if requires_hypothesis(phase) and not hypothesis_id:
         raise ValueError(f"hypothesis_id is required for {phase.value} PTT work")
     vulnerability_class = ""
+    candidate_source = ""
     if hypothesis_id:
         normalized = hypothesis_id.removeprefix("H-").lstrip("0") or "0"
         matched = next(
@@ -134,6 +135,7 @@ def handle_record_ptt(a, **kwargs):
             None,
         )
         vulnerability_class = matched.vuln_class if matched else ""
+        candidate_source = matched.candidate_source if matched else ""
     digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
     reservation = prepare_delivery(
         eng_dir,
@@ -142,6 +144,7 @@ def handle_record_ptt(a, **kwargs):
         bundle_digest=digest,
         phase=phase.value,
         vulnerability_class=vulnerability_class or None,
+        candidate_source=candidate_source or None,
     )
     if reservation.owner:
         viewed = HermesSkillViewAdapter().view(skill, task_id=task)
