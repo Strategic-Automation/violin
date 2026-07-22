@@ -167,6 +167,12 @@ def _post_tool_call_hook(tool_name=None, args=None, result=None, duration_ms=0, 
     if tool_name == "execute_code" and isinstance(args, dict):
         with contextlib.suppress(Exception):
             code_execution_audit.record_completion(args.get("code"), result, duration_ms)
+    if tool_name in {"web_search", "web_extract"}:
+        session_id = str(kwargs.get("session_id") or "")
+        eng_dir = _SESSION_ENGAGEMENTS.get(session_id)
+        if eng_dir:
+            with contextlib.suppress(Exception):
+                state.record_research_attempt(eng_dir, tool_name, not bool(result is None))
     if tool_name not in {"violin_record_ptt", "violin_review_batch"}:
         return
     args = args if isinstance(args, dict) else {}

@@ -332,7 +332,8 @@ def record_semantic_review(
             next_technique.strip().lower()
             and next_technique.strip().lower() != technique.strip().lower()
         )
-        if lock and research_attempted and pivoted:
+        research_after_lock = bool((data.get("research_attempts") or []) and lock)
+        if lock and research_after_lock and pivoted:
             data.pop("lock", None)
         elif count >= 5:
             data["lock"] = {
@@ -343,6 +344,25 @@ def record_semantic_review(
         return {"count": count, "warning": count >= 3, "locked": bool(data.get("lock"))}
 
     return mutate_json(path, record)
+
+
+def record_research_attempt(eng_dir: str | Path, tool_name: str, success: bool) -> None:
+    """Record an actual web research-tool attempt for semantic-lock recovery."""
+
+    path = _state_dir(eng_dir) / _SEMANTIC_FILE
+
+    def record(data: dict[str, Any]) -> None:
+        attempts = data.setdefault("research_attempts", [])
+        attempts.append(
+            {
+                "tool": tool_name,
+                "success": success,
+                "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+        )
+        data["research_attempts"] = attempts[-20:]
+
+    mutate_json(path, record)
 
 
 def semantic_lock(eng_dir: str | Path) -> dict[str, Any] | None:
