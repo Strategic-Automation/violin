@@ -30,7 +30,6 @@ def cmd_check_command(args: argparse.Namespace) -> int:
         scope=args.scope,
         target=args.target or None,
         session_id=args.session_id or "",
-        skill_loaded_file=args.skill_loaded_file or "",
     )
     result = command.check_command(cmd_args)
     return _print_result(result)
@@ -213,7 +212,6 @@ def cmd_exec_burst(args: argparse.Namespace) -> int:
                 "commands": [],
                 "commands_file": args.commands_file or "",
                 "session_id": args.session_id or "",
-                "skill_loaded_file": args.skill_loaded_file or "",
                 "label": args.label or "",
                 "continue_on_error": args.continue_on_error,
             }
@@ -243,7 +241,6 @@ def main() -> int:
     p.add_argument("--scope", default="", help="defaults to <eng-dir>/scope/scope.yaml")
     p.add_argument("--target", default="", help="Explicit primary target host/IP/URL")
     p.add_argument("--session-id", default="")
-    p.add_argument("--skill-loaded-file", default="")
     p.set_defaults(func=cmd_check_command)
 
     # check-bootstrap
@@ -344,7 +341,6 @@ def main() -> int:
     p.add_argument("--target", required=True, help="Explicit primary target for the batch")
     p.add_argument("--commands-file", default="")
     p.add_argument("--session-id", default="")
-    p.add_argument("--skill-loaded-file", default="")
     p.add_argument("--label", default="")
     p.add_argument("--continue-on-error", action="store_true")
     p.set_defaults(func=cmd_exec_burst)
