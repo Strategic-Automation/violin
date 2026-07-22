@@ -29,11 +29,9 @@ __all__ = [
     "CheckResult",
     "ScopeResult",
     "HypothesisResult",
-    "SkillLoadResult",
     "check_command",
     "validate_scope",
     "check_scope_authorization",
-    "check_skill_load",
     "check_skill_binding",
     "check_hypothesis_freshness",
 ]
@@ -52,7 +50,6 @@ class CheckCommandArgs:
     scope: str = ""
     target: str | None = None
     session_id: str | None = None
-    skill_loaded_file: str | None = None
 
 
 @dataclass
@@ -74,11 +71,6 @@ class ScopeResult(CheckResult):
 @dataclass
 class HypothesisResult(CheckResult):
     hypothesis_count: int = 0
-
-
-@dataclass
-class SkillLoadResult(CheckResult):
-    marker_path: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -232,40 +224,9 @@ def check_local_artifact_paths(command: str) -> CheckResult:
     return result
 
 
-def check_skill_load(eng_dir: Path, session_id: str, mandatory: bool = True) -> SkillLoadResult:
-    """Verify skill-load marker exists for the session."""
-    result = SkillLoadResult()
-    marker = eng_dir / "state" / f".skill-loaded-{session_id}"
-    result.marker_path = str(marker)
-
-    if not marker.exists():
-        stale_markers = sorted((eng_dir / "state").glob(".skill-loaded-*"))
-        stale_hint = ""
-        if stale_markers:
-            names = ", ".join(candidate.name for candidate in stale_markers[:3])
-            stale_hint = (
-                f"; found marker(s) for another session: {names}. "
-                f"After loading the skill, create the canonical marker: {marker}"
-            )
-        if mandatory:
-            result.add_error(f"skill-load gate not satisfied: marker missing{stale_hint}")
-        else:
-            result.add_warning(f"skill-load marker missing (non-mandatory mode){stale_hint}")
-        return result
-
-    content = marker.read_text(encoding="utf-8").strip()
-    if "skill-loaded:" not in content:
-        result.add_warning("skill-load marker exists but format is unexpected")
-
-    result.add_info(f"skill-load marker verified: {marker}")
-    return result
-
-
-def check_skill_binding(
-    eng_dir: Path, task_id: str, session_id: str, phase: Phase
-) -> SkillLoadResult:
+def check_skill_binding(eng_dir: Path, task_id: str, session_id: str, phase: Phase) -> CheckResult:
     """Require a delivered, current-context receipt binding for target work."""
-    result = SkillLoadResult()
+    result = CheckResult()
     binding = get_binding(eng_dir, task_id)
     if not binding:
         result.add_error(f"skill receipt binding missing for active task {task_id}")

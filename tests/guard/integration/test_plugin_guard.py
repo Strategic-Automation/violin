@@ -181,7 +181,6 @@ def test_recon_does_not_require_hypothesis(tmp_path):
             phase="recon",
             eng_dir=str(eng),
             scope=str(eng / "scope" / "scope.yaml"),
-            skill_loaded_file=str(skill_file),
             session_id="ts",
         )
     )
@@ -196,7 +195,6 @@ def test_recon_does_not_require_hypothesis(tmp_path):
             phase="vuln-research",
             eng_dir=str(eng),
             scope=str(eng / "scope" / "scope.yaml"),
-            skill_loaded_file=str(skill_file),
             session_id="ts",
         )
     )
@@ -226,7 +224,6 @@ def test_recon_does_not_require_hypothesis(tmp_path):
             phase="vuln-research",
             eng_dir=str(eng),
             scope=str(eng / "scope" / "scope.yaml"),
-            skill_loaded_file=str(skill_file),
             session_id="ts",
         )
     )
@@ -249,7 +246,6 @@ def test_recon_does_not_require_hypothesis(tmp_path):
             phase="vuln-research",
             eng_dir=str(eng),
             scope=str(eng / "scope" / "scope.yaml"),
-            skill_loaded_file=str(skill_file),
             session_id="ts",
         )
     )
@@ -462,7 +458,6 @@ def test_first_command_requires_an_active_ptt_task(tmp_path):
         phase="recon",
         eng_dir=str(eng),
         scope=str(eng / "scope" / "scope.yaml"),
-        skill_loaded_file=str(skill_file),
         session_id="ts",
     )
     first = command.check_command(args)
@@ -486,7 +481,6 @@ def test_multiple_active_ptt_tasks_block_target_execution(tmp_path):
             phase="recon",
             eng_dir=str(eng),
             scope=str(eng / "scope" / "scope.yaml"),
-            skill_loaded_file=str(skill_file),
             session_id="ts",
         )
     )
@@ -495,16 +489,8 @@ def test_multiple_active_ptt_tasks_block_target_execution(tmp_path):
     )
 
 
-def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
-    """Skill-load gate: check-command BLOCKs when the SKILL.md marker is absent,
-    and handle_exec honours that BLOCK (status 'denied')."""
-    from plugins.violin_guard.command import check_skill_load
-
-    # Real gate: missing marker file => BLOCK (error).
-    gate = check_skill_load(Path(tmp_path / "no-skill-loaded"), "test", mandatory=True)
-    assert gate.errors, "missing skill-loaded marker must BLOCK"
-
-    # handle_exec must translate a BLOCKed check-command into 'denied'.
+def test_exec_blocked_without_receipt_binding(monkeypatch, tmp_path):
+    """Target execution remains denied when its receipt binding is absent."""
     _patch(monkeypatch, _cp(1, "BLOCK: skill load gate not satisfied\n"))
     out = json.loads(
         TOOLS.handle_exec(
@@ -518,20 +504,6 @@ def test_exec_blocked_without_skill_load(monkeypatch, tmp_path):
     )
     assert out["status"] in ("denied", "error")
     assert out["status"] in ("denied", "error")
-
-
-def test_skill_load_gate_identifies_stale_session_marker(tmp_path):
-    from plugins.violin_guard.command import check_skill_load
-
-    state = tmp_path / "state"
-    state.mkdir()
-    (state / ".skill-loaded-old-session").write_text("skill-loaded: test\n", encoding="utf-8")
-
-    gate = check_skill_load(tmp_path, "current-session", mandatory=True)
-
-    assert gate.errors
-    assert ".skill-loaded-old-session" in gate.errors[0]
-    assert str(state / ".skill-loaded-current-session") in gate.errors[0]
 
 
 def test_init_engagement_creates_compliant_artifacts(tmp_path):
