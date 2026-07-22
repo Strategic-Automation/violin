@@ -37,6 +37,7 @@ _SYNC_FILE = "sync.json"
 _HEARTBEAT_FILE = "heartbeat.json"
 _COUNTS_FILE = "counts.json"
 _SESSION_FILE = "session.json"
+_SEMANTIC_FILE = "semantic-progress.json"
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +291,62 @@ def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
         data["pending"] = pending
 
     mutate_json(path, mark)
+
+
+def record_semantic_review(
+    eng_dir: str | Path,
+    *,
+    task_id: str,
+    hypothesis_id: str,
+    skill: str,
+    technique: str,
+    outcome: str,
+    evidence_paths: list[str],
+    next_action: str,
+    next_technique: str,
+    research_attempted: bool = False,
+) -> dict[str, Any]:
+    """Track evidence-backed semantic progress and the five-review hard lock."""
+
+    path = _state_dir(eng_dir) / _SEMANTIC_FILE
+    key = "|".join((task_id, hypothesis_id, skill, technique.strip().lower()))
+    positive = outcome in {"progress", "validated", "rejected"} and bool(evidence_paths)
+
+    def record(data: dict[str, Any]) -> dict[str, Any]:
+        entries = data.setdefault("entries", {})
+        entry = entries.get(key, {"count": 0})
+        count = 0 if positive else int(entry.get("count") or 0) + 1
+        entry.update(
+            {
+                "count": count,
+                "outcome": outcome,
+                "evidence_paths": evidence_paths,
+                "next_action": next_action,
+                "next_technique": next_technique,
+                "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+        )
+        entries[key] = entry
+        lock = data.get("lock") or {}
+        pivoted = (
+            next_technique.strip().lower()
+            and next_technique.strip().lower() != technique.strip().lower()
+        )
+        if lock and research_attempted and pivoted:
+            data.pop("lock", None)
+        elif count >= 5:
+            data["lock"] = {
+                "key": key,
+                "count": count,
+                "reason": "five semantic no-progress reviews",
+            }
+        return {"count": count, "warning": count >= 3, "locked": bool(data.get("lock"))}
+
+    return mutate_json(path, record)
+
+
+def semantic_lock(eng_dir: str | Path) -> dict[str, Any] | None:
+    return read_json(_state_dir(eng_dir) / _SEMANTIC_FILE).get("lock")
 
 
 # ---------------------------------------------------------------------------

@@ -452,6 +452,13 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
             result.warnings.extend(binding_result.warnings)
             result.infos.extend(binding_result.infos)
 
+    semantic_lock = state.semantic_lock(eng_dir)
+    if semantic_lock:
+        result.add_error(
+            "semantic anti-stuck lock: five evidence-poor reviews require a recorded research "
+            "attempt plus a meaningful next_technique pivot before target execution"
+        )
+
     # 5. History staleness (duplicate detection)
     pending = state.get_pending_sync(str(eng_dir)) or {}
     pending_commands = {str(item.get("command") or "") for item in pending.get("commands") or []}
