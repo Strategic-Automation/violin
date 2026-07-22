@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .results import GuardResult
+from .skill_policy import catalog_snapshot, validate_catalog
 
 __all__ = [
     "GuardResult",
@@ -137,6 +138,28 @@ def check_release() -> ReleaseCheckResult:
             )
         else:
             result.add_info("provides_tools matches registered tools")
+
+    # 3c. Checked-in external-skill dependency manifest is deterministic.
+    snapshot_path = root.parent.parent / "skills.snapshot.json"
+    catalog_errors = validate_catalog()
+    if catalog_errors:
+        result.errors.extend(catalog_errors)
+    elif not snapshot_path.exists():
+        result.add_error("skills.snapshot.json not found")
+    else:
+        import json
+
+        try:
+            checked_in = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            expected = catalog_snapshot(root.parent.parent)
+            for entry in expected["skills"]:
+                entry.pop("path", None)
+            if checked_in != expected:
+                result.add_error("skills.snapshot.json does not match the approved skill catalog")
+            else:
+                result.add_info("external skill dependency snapshot matches catalog")
+        except (OSError, json.JSONDecodeError) as exc:
+            result.add_error(f"skills.snapshot.json is invalid: {exc}")
 
     # 4. Heavy checks (ruff + pytest), opt-out via env.
     if os.environ.get("VIOLIN_CHECK_RELEASE_SKIP_HEAVY") != "1":

@@ -67,6 +67,9 @@ memory:
   flush_min_turns: 8
 
 skills:
+  write_approval: true
+  guard_agent_created: true
+  creation_nudge_interval: 20
   disabled:
     - airtable
     - architecture-diagram
@@ -154,7 +157,7 @@ updates:
   backup_keep: 5
   non_interactive_local_changes: stash
 
-_config_version: 33
+_config_version: 34
 
 session_reset:
   mode: both

@@ -255,7 +255,7 @@ def main() -> int:
     p.add_argument("--host", default="")
     p.add_argument("--ctf", action="store_true", help="Create an HTB/CTF-ready scope and PTT")
     p.add_argument(
-        "--session-id", default="", help="Mark this session skill-loaded for CTF bootstrap"
+        "--session-id", default="", help="Record the Hermes session ID for receipt-backed CTF bootstrap"
     )
     p.set_defaults(func=cmd_init_engagement)
 
