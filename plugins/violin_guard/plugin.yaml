@@ -1,31 +1,32 @@
 name: violin-guard
-version: "2.0.6"
-description: Typed scope guards and an execute-and-record boundary with bounded synchronization windows.
+version: 2.0.8
+description: Typed scope guards and an execute-and-record boundary with bounded synchronization
+  windows.
 kind: standalone
 provides_tools:
-  - violin_check_command
-  - violin_record_ptt
-  - violin_record_hypothesis
-  - violin_exec
-  - violin_exec_status
-  - violin_exec_cancel
-  - violin_review_batch
-  - violin_rebind_pending_batch
-  - violin_heartbeat_done
-  - violin_exec_burst
-  - violin_target
-  - violin_status
-  - violin_search_exploit
-  - violin_httpx
-  - violin_nuclei
-  - violin_ffuf
-  - violin_listener
+- violin_check_command
+- violin_record_ptt
+- violin_record_hypothesis
+- violin_exec
+- violin_exec_status
+- violin_exec_cancel
+- violin_review_batch
+- violin_rebind_pending_batch
+- violin_heartbeat_done
+- violin_exec_burst
+- violin_target
+- violin_status
+- violin_search_exploit
+- violin_httpx
+- violin_nuclei
+- violin_ffuf
+- violin_listener
 hooks:
-  - pre_tool_call
-  - post_tool_call
-  - pre_llm_call
-  - on_session_reset
-  - on_session_finalize
+- pre_tool_call
+- post_tool_call
+- pre_llm_call
+- on_session_reset
+- on_session_finalize
 toolsets:
   violin_guard:
     description: Violin engagement guard tools

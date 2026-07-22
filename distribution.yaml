@@ -1,24 +1,25 @@
-# violin - supervised agentic Hermes pentest profile
 name: violin
-version: 2.0.6
-description: "A supervised agentic Hermes penetration testing profile for authorised Kali/Parrot-based security assessment, reconnaissance, exploit validation, and reporting workflows."
-hermes_requires: ">=0.18.0"
-author: "Violin contributors"
+version: 2.0.8
+description: A supervised agentic Hermes penetration testing profile for authorised
+  Kali/Parrot-based security assessment, reconnaissance, exploit validation, and reporting
+  workflows.
+hermes_requires: '>=0.18.0'
+author: Violin contributors
 license: MIT
 env_requires: []
 distribution_owned:
-  - distribution.yaml
-  - README.md
-  - CHANGELOG.md
-  - LICENSE
-  - SOUL.md
-  - .hermes.md
-  - CONTRIBUTING.md
-  - SECURITY.md
-  - config.yaml
-  - pyproject.toml
-  - skills/
-  - scripts/
-  - plugins/
-  - assets/
-  - .github/
+- distribution.yaml
+- README.md
+- CHANGELOG.md
+- LICENSE
+- SOUL.md
+- .hermes.md
+- CONTRIBUTING.md
+- SECURITY.md
+- config.yaml
+- pyproject.toml
+- skills/
+- scripts/
+- plugins/
+- assets/
+- .github/
