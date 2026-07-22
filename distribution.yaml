@@ -1,5 +1,5 @@
 name: violin
-version: 2.0.8
+version: 3.0.0
 description: A supervised agentic Hermes penetration testing profile for authorised
   Kali/Parrot-based security assessment, reconnaissance, exploit validation, and reporting
   workflows.

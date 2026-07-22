@@ -245,7 +245,7 @@ python scripts/violin_guard.py check-release
 
 Validates the plugin manifest and registered tools, isolated Hermes-style plugin import, stale skill references, Ruff, and the full pytest suite.
 
-Hermes skills are loaded on demand. Start the profile with `hermes chat --skills pentest` when the launcher supports arguments; otherwise load `pentest` immediately, then confirm the engagement marker with `python scripts/violin_guard.py status --eng-dir "$ENG_DIR" --section skill`. Hermes does not currently expose a distribution-level setting that can truthfully force-load a profile skill.
+Hermes skills are loaded on demand and enforced by Violin receipts. Start with `pentest`, then use `violin_record_ptt` to select the route-required skill. The first call prepares its real `skill_view` content without mutating the PTT; repeat the same transition on the next turn to bind it. `violin_status` reports the route, binding, context generation, recovery action, and any obsolete legacy marker. Target and browser activity are blocked in both the delivery and binding turns.
 
 ---
 

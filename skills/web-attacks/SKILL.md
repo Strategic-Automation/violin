@@ -1,6 +1,6 @@
 ---
 name: web-attacks
-description: "Use when web-application injection vuln classes surface (SQLi, XSS, command injection, SSRF, path traversal). Load the matching playbook/ file for detection, payloads, and evidence templates."
+description: "Use when an authorized engagement's PTT or hypothesis identifies web injection: SQLi, XSS, command injection, SSRF, or path traversal. Select it through the Violin receipt flow, then load only the matching playbook for safe validation and evidence."
 version: 1.0.0
 author: Violin
 license: MIT

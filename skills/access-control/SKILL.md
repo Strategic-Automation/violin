@@ -1,6 +1,6 @@
 ---
 name: access-control
-description: "Use when access-control vuln classes surface (authentication bypass, JWT attacks, IDOR). Load the matching playbook/ file for detection, token analysis, and evidence templates."
+description: "Use when an authorized engagement's PTT or hypothesis identifies authentication bypass, JWT weakness, IDOR, or broken authorization. Select it through the Violin receipt flow, then load the matching playbook for controlled validation and evidence."
 version: 1.0.0
 author: Violin
 license: MIT
