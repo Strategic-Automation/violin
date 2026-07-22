@@ -32,7 +32,8 @@ def test_semantic_reviews_warn_then_hard_lock_and_require_research_pivot(tmp_pat
 
     assert _review(tmp_path, research_attempted=True)["locked"]
     assert _review(tmp_path, next_technique="parameter-discovery")["locked"]
-    unlocked = _review(tmp_path, research_attempted=True, next_technique="parameter-discovery")
+    state.record_research_attempt(tmp_path, "web_search", True)
+    unlocked = _review(tmp_path, next_technique="parameter-discovery")
     assert not unlocked["locked"]
     assert state.semantic_lock(tmp_path) is None
 
