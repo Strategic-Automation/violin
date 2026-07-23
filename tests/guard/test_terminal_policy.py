@@ -174,6 +174,70 @@ def test_local_file_path_containing_an_ip_is_not_treated_as_a_socket() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        (
+            "python3 scripts/violin_guard.py init-engagement --ctf "
+            '--session-id htb1 --host 10.10.10.10 "$ENG_DIR"'
+        ),
+        (
+            "python $HOME/.hermes/profiles/violin/scripts/violin_guard.py "
+            'init-engagement --host victim.example "$ENG_DIR"'
+        ),
+    ],
+)
+def test_init_engagement_accepts_direct_scope_host(raw_command: str) -> None:
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None
+
+
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        (
+            "python3 scripts/violin_guard.py init-engagement --ctf "
+            '--host "$(cat /tmp/target)" "$ENG_DIR"'
+        ),
+        (
+            "python3 scripts/violin_guard.py init-engagement "
+            '--host "$TARGET" "$ENG_DIR"'
+        ),
+        (
+            "python3 scripts/violin_guard.py init-engagement "
+            '--host=`cat /tmp/target` "$ENG_DIR"'
+        ),
+    ],
+)
+def test_init_engagement_rejects_indirect_scope_host(raw_command: str) -> None:
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command})
+
+    assert result["action"] == "block"
+    assert "pass --host directly" in result["message"]
+
+
+def test_other_guard_commands_do_not_inherit_bootstrap_exception() -> None:
+    result = _pre_tool_call_hook(
+        tool_name="terminal",
+        args={
+            "command": (
+                "python3 scripts/violin_guard.py check-command "
+                "--target 10.10.10.10 --command whoami"
+            )
+        },
+    )
+
+    assert result["action"] == "block"
+
+
+def test_non_python_command_cannot_impersonate_bootstrap_exception() -> None:
+    result = _pre_tool_call_hook(
+        tool_name="terminal",
+        args={"command": "nmap scripts/violin_guard.py init-engagement --host 10.10.10.10"},
+    )
+
+    assert result["action"] == "block"
+
+
 def test_target_tools_require_an_engagement_binding() -> None:
     result = _pre_tool_call_hook(
         tool_name="violin_exec",
