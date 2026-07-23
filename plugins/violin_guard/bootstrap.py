@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from .results import GuardResult
-from .state import resolve_eng_dir
+from .state import record_session_id, resolve_eng_dir
 
 __all__ = [
     "init_engagement",
@@ -167,6 +167,7 @@ def init_engagement(
     host = (host or "").strip() or _derive_host(eng_dir)
 
     eng_dir.mkdir(parents=True, exist_ok=True)
+    record_session_id(eng_dir, session_id)
     for rel in _ARTIFACT_DIRECTORIES:
         (eng_dir / rel).mkdir(parents=True, exist_ok=True)
     for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():

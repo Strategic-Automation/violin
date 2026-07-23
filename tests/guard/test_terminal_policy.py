@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from plugins.violin_guard import (
@@ -11,8 +13,11 @@ from plugins.violin_guard import (
     _pre_tool_call_hook,
     bootstrap,
     register,
+    service,
+    state,
 )
 from plugins.violin_guard import command as guard_command
+from plugins.violin_guard.skill_receipts import SkillViewResult
 from tests.guard.receipt_fixture import bind_active_task
 
 _SCOPE = """targets:
@@ -236,6 +241,65 @@ def test_non_python_command_cannot_impersonate_bootstrap_exception() -> None:
     )
 
     assert result["action"] == "block"
+
+
+def test_ptt_pre_tool_hook_persists_real_runtime_session(tmp_path) -> None:
+    eng = tmp_path / "session-hook"
+    assert bootstrap.init_engagement(eng, session_id="bootstrap-alias") == 0
+
+    assert (
+        _pre_tool_call_hook(
+            tool_name="violin_record_ptt",
+            args={"eng_dir": str(eng), "session_id": "untrusted-argument"},
+            session_id="runtime-session",
+        )
+        is None
+    )
+    assert state.resolve_session_id(eng) == "runtime-session"
+
+
+def test_ptt_receipts_bind_to_real_runtime_session(tmp_path, monkeypatch) -> None:
+    eng = tmp_path / "runtime-receipt"
+    assert bootstrap.init_engagement(
+        eng,
+        host="10.10.10.10",
+        ctf=True,
+        session_id="bootstrap-alias",
+    ) == 0
+    monkeypatch.setattr(
+        service,
+        "HermesSkillViewAdapter",
+        lambda: type(
+            "Ready",
+            (),
+            {"view": lambda *_args, **_kwargs: SkillViewResult(True, "pentest skill")},
+        )(),
+    )
+    _pre_tool_call_hook(
+        tool_name="violin_record_ptt",
+        args={"eng_dir": str(eng)},
+        session_id="runtime-session",
+    )
+    ptt_args = {
+        "eng_dir": str(eng),
+        "id": "PT-CTF-001",
+        "status": "[~]",
+        "note": "starting service enumeration",
+        "skill": "pentest",
+        "technique": "service-enumeration",
+    }
+
+    prepared = json.loads(service.handle_record_ptt(ptt_args))
+    assert prepared["status"] == "skill_prepared"
+    bound = json.loads(service.handle_record_ptt(ptt_args))
+    assert bound["status"] == "ok"
+
+    receipts = json.loads((eng / "state" / "skills.json").read_text(encoding="utf-8"))
+    assert receipts["context"]["session_id"] == "runtime-session"
+    assert {item["session_id"] for item in receipts["deliveries"].values()} == {
+        "runtime-session"
+    }
+    assert receipts["bindings"]["PT-CTF-001"]["session_id"] == "runtime-session"
 
 
 def test_target_tools_require_an_engagement_binding() -> None:

@@ -149,6 +149,7 @@ def _pre_tool_call_hook(tool_name=None, args=None, **kwargs):
     eng_dir = str(args.get("eng_dir") or "")
     if session_id and eng_dir:
         _SESSION_ENGAGEMENTS[session_id] = eng_dir
+        state.record_session_id(eng_dir, session_id)
     if tool_name in _TARGET_TOOLS or tool_name in _BROWSER_TARGET_TOOLS:
         blocked = _check_turn_binding(tool_name, args, kwargs)
         if blocked:

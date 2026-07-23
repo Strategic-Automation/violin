@@ -527,6 +527,13 @@ def test_init_engagement_creates_compliant_artifacts(tmp_path):
     assert int(res) in (0, 2), "bootstrap must be complete (or REVIEW for pristine PTT) after init"
 
 
+def test_init_engagement_persists_explicit_session_id(tmp_path):
+    eng = tmp_path / "session-bootstrap"
+
+    assert bootstrap.init_engagement(str(eng), session_id="ctf-eu1") == 0
+    assert state.resolve_session_id(eng) == "ctf-eu1"
+
+
 def test_auto_repair_creates_missing_artifacts(tmp_path):
     """`check-bootstrap --auto-repair` self-heals missing required files."""
     import yaml
