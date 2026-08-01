@@ -282,7 +282,7 @@ def mark_pending_sync(
         if not task_id:
             raise ValueError("pending execution requires a captured active PTT task")
         data["pending"] = {
-            "batch_id": old.get("batch_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
+            "batch_id": old.get("batch_id") or str(uuid.uuid4()),
             "commands": commands,
             "phase": command_phase,
             "created_at": old.get("created_at")

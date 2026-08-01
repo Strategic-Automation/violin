@@ -2,6 +2,7 @@
 
 ## 3.0.0
 
+- Made background execution restart-safe by recording PID creation times and deadlines, refusing to signal reused PIDs, recovering matching processes, and marking missing processes as lost; new pending batches now use collision-resistant UUIDs.
 - Made burst execution atomic at admission: every command is preflighted before launch, required sync credit is reserved under one lock, and unused reservations are returned after partial batches.
 - Fixed target extraction for dotted identifiers and direct `/dev/tcp`/`/dev/udp` redirections, and prevented network-capable local-looking commands from bypassing execution accounting.
 - Made interrupted skill preparation recoverable with expiring reservations and stale-owner protection; batch review now remains tied to the delivered execution receipt.

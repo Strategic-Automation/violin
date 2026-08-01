@@ -145,6 +145,49 @@ def _terminate_process(proc: subprocess.Popen) -> None:
     _terminate_pid(proc.pid)
 
 
+def _process_create_time(proc: psutil.Process) -> float | None:
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return float(proc.create_time())
+    return None
+
+
+def _matching_process(record: dict[str, Any]) -> psutil.Process | None:
+    """Return the tracked process only when PID and creation time both match."""
+    pid = record.get("pid")
+    expected = record.get("pid_create_time")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(expected, int | float):
+        return None
+    try:
+        proc = psutil.Process(pid)
+        actual = proc.create_time()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return None
+    return proc if abs(float(actual) - float(expected)) <= 1.0 else None
+
+
+def _terminate_tracked_process(proc: psutil.Process) -> None:
+    """Terminate a process object already verified against its manifest identity."""
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        children = proc.children(recursive=True)
+        procs = children + [proc]
+        for child in procs:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                child.terminate()
+        _, alive = psutil.wait_procs(procs, timeout=2)
+        for child in alive:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                child.kill()
+
+
+def _deadline_expired(record: dict[str, Any]) -> bool:
+    deadline = record.get("deadline_at")
+    if not isinstance(deadline, str):
+        return False
+    with contextlib.suppress(ValueError):
+        return datetime.now(UTC) >= datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+    return False
+
+
 def _preview(path: Path) -> str:
     with path.open("rb") as handle:
         return handle.read(PREVIEW_BYTES).decode("utf-8", errors="replace")
@@ -401,7 +444,17 @@ def execute(
             )
             proc = subprocess.Popen(process_argv, **popen_kwargs)
 
-            record.update(status="running", pid=proc.pid)
+            created = _process_create_time(psutil.Process(proc.pid))
+            if created is None:
+                _terminate_process(proc)
+                raise RuntimeError("could not record process creation time")
+            deadline_at = datetime.fromtimestamp(datetime.now(UTC).timestamp() + timeout, UTC)
+            record.update(
+                status="running",
+                pid=proc.pid,
+                pid_create_time=created,
+                deadline_at=deadline_at.isoformat().replace("+00:00", "Z"),
+            )
             state.atomic_json(manifest_path, record)
 
             if background:
@@ -523,21 +576,36 @@ def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
     if not record:
         raise ValueError("execution not found")
     if record.get("background") and record.get("status") == "running":
-        pid = record.get("pid")
-        if isinstance(pid, int) and pid > 0 and not _pid_is_running(pid):
+        proc = _matching_process(record)
+        if proc is None:
+            # A live monitor can be finalizing a normally exited process at
+            # the same moment status observes that its PID has disappeared.
+            # Give that atomic writer a short opportunity before classifying
+            # an untracked process as lost (important after application restart).
+            time.sleep(0.1)
+            with state.lock_file(manifest_path):
+                refreshed = state.read_json(manifest_path)
+            if refreshed.get("status") != "running":
+                return refreshed
             record = _finalize_background(
                 engagement=engagement,
                 manifest_path=manifest_path,
                 command=record["command"],
                 phase=record["phase"],
                 exit_code=-1,
-                status_name="completed",
+                status_name="lost",
+            )
+        elif _deadline_expired(record):
+            _terminate_tracked_process(proc)
+            record = _finalize_background(
+                engagement=engagement,
+                manifest_path=manifest_path,
+                command=record["command"],
+                phase=record["phase"],
+                exit_code=-1,
+                status_name="timed_out",
             )
     return record
-
-
-def _pid_is_running(pid: int) -> bool:
-    return psutil.pid_exists(pid)
 
 
 def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
@@ -547,13 +615,21 @@ def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
     if record.get("status") not in {"starting", "running"}:
         return {**record, "cancel_requested": False, "message": "execution is not running"}
 
-    pid = record.get("pid")
-    if not isinstance(pid, int) or pid <= 0:
-        raise ValueError("running execution has no valid tracked PID")
+    proc = _matching_process(record)
+    if proc is None:
+        manifest_path = engagement / record["evidence_paths"]["manifest"]
+        return _finalize_background(
+            engagement=engagement,
+            manifest_path=manifest_path,
+            command=record["command"],
+            phase=record["phase"],
+            exit_code=-1,
+            status_name="lost",
+        )
 
     record["cancel_requested"] = True
     record["cancel_requested_at"] = _utc_now()
     state.atomic_json(manifest_path, record)
-    _terminate_pid(pid)
+    _terminate_tracked_process(proc)
 
     return {**record, "message": "cancellation requested for tracked process group"}

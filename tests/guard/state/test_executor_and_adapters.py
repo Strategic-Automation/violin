@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from pathlib import Path
@@ -59,6 +60,8 @@ def test_background_execution_is_tracked_until_completion(tmp_path):
 
     assert receipt["status"] == "running"
     assert isinstance(receipt["pid"], int)
+    assert isinstance(receipt["pid_create_time"], float)
+    assert receipt["deadline_at"].endswith("Z")
     deadline = time.monotonic() + 5
     current = receipt
     while current["status"] == "running" and time.monotonic() < deadline:
@@ -89,6 +92,14 @@ def test_background_execution_can_be_cancelled_by_execution_id(tmp_path):
         time.sleep(0.05)
         current = execution.status(str(eng), receipt["execution_id"])
     assert current["status"] == "cancelled"
+
+
+def test_process_identity_rejects_reused_pid():
+    proc = execution.psutil.Process(os.getpid())
+    record = {"pid": proc.pid, "pid_create_time": proc.create_time()}
+    assert execution._matching_process(record) is not None
+    record["pid_create_time"] += 10
+    assert execution._matching_process(record) is None
 
 
 def test_executor_rejects_cwd_escape(tmp_path):

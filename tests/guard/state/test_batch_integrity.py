@@ -57,6 +57,18 @@ def test_appending_work_invalidates_an_earlier_review(tmp_path: Path) -> None:
     assert state.get_pending_sync(eng)["ptt_reviewed"] is False
 
 
+def test_new_pending_batches_use_unique_uuid_ids(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    state.mark_pending_sync(eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010")
+    first = state.get_pending_sync(eng)["batch_id"]
+    state.clear_pending_sync(eng)
+    state.mark_pending_sync(eng, "nmap -p 443 10.10.10.10", "RECON", "PT-010")
+    second = state.get_pending_sync(eng)["batch_id"]
+    assert first != second
+    assert len(first) == 36
+    assert len(second) == 36
+
+
 def _completed_batch_with_active_replacement(eng: Path, replacement: str = "PT-011") -> str:
     command = "nmap -p 80 10.10.10.10"
     history.append_history(eng, command, "RECON", 0, "evidence/executions/test.json")
