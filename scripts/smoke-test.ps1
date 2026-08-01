@@ -1,39 +1,38 @@
-param(
-    [switch]$NoHermes
-)
-
 $ErrorActionPreference = "Stop"
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-Set-Location $RepoRoot
 
-Write-Host "Violin smoke test (PowerShell)"
-Write-Host "Repo: $RepoRoot"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$python = (Get-Command python -ErrorAction Stop).Source
+$smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("violin-smoke-" + [guid]::NewGuid().ToString("N"))
+$engagement = Join-Path $smokeRoot "engagement"
 
-python scripts/violin_guard.py check-release
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-if ($NoHermes) {
-    Write-Host "Skipping Hermes install smoke because -NoHermes was supplied."
-    exit 0
+function Invoke-Guard {
+    param([string[]]$Arguments)
+    $output = & $python (Join-Path $repoRoot "scripts\violin_guard.py") @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "violin_guard.py $($Arguments -join ' ') failed with exit code $LASTEXITCODE`n$($output -join "`n")"
+    }
+    return $output
 }
 
-$Hermes = Get-Command hermes -ErrorAction SilentlyContinue
-if (-not $Hermes) {
-    Write-Host "Hermes not found on PATH. Release checks passed; install smoke skipped."
-    exit 0
-}
-
-$ProfileName = "violin-smoke-$([int][double]::Parse((Get-Date -UFormat %s)))"
 try {
-    hermes profile install . --name $ProfileName -y
-    if ($LASTEXITCODE -ne 0) { throw "Hermes profile install failed." }
-    hermes profile show $ProfileName
-    if ($LASTEXITCODE -ne 0) { throw "Hermes profile show failed." }
-    hermes -p $ProfileName tools --summary
-    if ($LASTEXITCODE -ne 0) { throw "Hermes tool listing failed." }
-    hermes -p $ProfileName chat -q "Smoke test: reply with Violin profile loaded" -Q
-    if ($LASTEXITCODE -ne 0) { throw "Hermes chat smoke test failed." }
+    New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
+    Invoke-Guard @("init-engagement", $engagement, "--host", "10.10.10.10", "--session-id", "windows-smoke") | Out-Null
+
+    $scopePath = Join-Path $engagement "scope\scope.yaml"
+    $scope = Get-Content -LiteralPath $scopePath -Raw
+    $scope = $scope -replace "confirmed: false", "confirmed: true"
+    Set-Content -LiteralPath $scopePath -Value $scope -Encoding UTF8
+    Invoke-Guard @("validate-scope", "--scope", $scopePath) | Out-Null
+
+    Invoke-Guard @(
+        "record-ptt", "--eng-dir", $engagement, "--id", "PT-001", "--status", "[~]",
+        "--note", "Windows workflow smoke", "--skill", "pentest", "--technique", "recon"
+    ) | Out-Null
+
+    Write-Output "PASS: Windows workflow smoke completed through PTT preparation."
 }
 finally {
-    hermes profile delete $ProfileName -y 2>$null
+    if (Test-Path -LiteralPath $smokeRoot) {
+        Remove-Item -LiteralPath $smokeRoot -Recurse -Force
+    }
 }

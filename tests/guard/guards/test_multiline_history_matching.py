@@ -3,6 +3,12 @@ from pathlib import Path
 
 from plugins.violin_guard import bootstrap, history, state
 from plugins.violin_guard import handlers as service
+from plugins.violin_guard.skill_receipts import (
+    SkillViewResult,
+    bind_task,
+    complete_delivery,
+    prepare_delivery,
+)
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -72,6 +78,17 @@ def test_history_contains_returns_false_when_not_in_history(tmp_path: Path) -> N
 
 def test_batch_review_succeeds_for_multiline_pending_command(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
+    state.record_session_id(eng, "multiline-session")
+    reservation = prepare_delivery(
+        eng,
+        session_id="multiline-session",
+        skill="pentest",
+        bundle_digest="sha256:" + "a" * 64,
+        phase="RECON",
+    )
+    if reservation.owner:
+        reservation = complete_delivery(eng, reservation, SkillViewResult(True, content="pentest"))
+    bind_task(eng, task_id="PT-010", delivery_id=reservation.id, technique="recon")
     multiline_cmd = "cd /app\n  curl -i http://eloquia.htb/\n  wc -l index.html"
 
     # Mark pending sync with multiline command

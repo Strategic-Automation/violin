@@ -14,6 +14,7 @@ from ..skill_receipts import (
     HermesSkillViewAdapter,
     bind_task,
     complete_delivery,
+    get_binding,
     prepare_delivery,
     prepare_review_readiness,
 )
@@ -508,14 +509,36 @@ def handle_review_batch(a, **kwargs):
                     finding_path=None,
                     message="nothing pending",
                 )
+            task_id = str(pending.get("ptt_task_id") or "").strip()
+            binding = get_binding(engagement, task_id) if task_id else None
+            if not binding:
+                raise ValueError(
+                    "the pending batch has no active delivered skill binding; "
+                    "rebind or prepare the active PTT task before review"
+                )
             skill = str(a.get("skill") or "").strip()
+            finding = a.get("finding")
+            expected_skill = "fp-check" if finding else str(binding.get("skill") or "")
+            if skill and skill != expected_skill:
+                raise ValueError(
+                    f"review skill {skill!r} does not match the expected binding skill {expected_skill!r}"
+                )
+            a = {
+                **a,
+                "skill": expected_skill,
+                "hypothesis_id": str(a.get("hypothesis_id") or binding.get("hypothesis_id") or ""),
+                "technique": str(a.get("technique") or binding.get("technique") or "batch-review"),
+            }
+            # A normal review certifies the already delivered execution skill.
+            # An fp-check receipt is prepared separately before a finding review;
+            # do not invoke Hermes again during the final mutation.
             if skill:
                 a, early_response = _handle_review_batch_skill_reservation(
-                    engagement, pending, a, skill
+                    engagement, pending, a, expected_skill
                 )
                 if early_response is not None:
                     return early_response
-            return _execute_batch_review(engagement, pending, a, skill)
+            return _execute_batch_review(engagement, pending, a, expected_skill)
     except (OSError, ValueError) as exc:
         return _json(
             "blocked",

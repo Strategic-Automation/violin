@@ -53,6 +53,14 @@ def _listener_scope_check(eng_dir: str, scope: str, bind_host: str, values: dict
     """Gate a local catch listener."""
     from ..targets import _callback_hosts, normalise_target, scope_hosts
 
+    canonical_scope = (_eng_path(eng_dir) / "scope" / "scope.yaml").resolve()
+    requested_scope = Path(scope).expanduser().resolve() if scope else canonical_scope
+    if requested_scope != canonical_scope:
+        return _json(
+            "blocked",
+            error="runtime adapter execution must use the engagement's canonical scope.yaml",
+        )
+
     host = (bind_host or "").strip()
     host_norm = host
     if host:
@@ -62,7 +70,7 @@ def _listener_scope_check(eng_dir: str, scope: str, bind_host: str, values: dict
             host_norm = host.split(":")[0].strip()
     if not host or host_norm in {"0.0.0.0", "::", "127.0.0.1", "::1", "localhost"}:
         return {}
-    scope_path = Path(scope) if scope else _eng_path(eng_dir) / "scope" / "scope.yaml"
+    scope_path = canonical_scope
     if not scope_path.exists():
         return {}
     try:

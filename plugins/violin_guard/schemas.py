@@ -35,8 +35,8 @@ class RecordPttArgsModel(BaseModel):
     id: str
     status: str = ""
     note: str = ""
-    skill: str = Field("", description="Required selected Violin skill")
-    technique: str = Field("", description="Required concrete technique for this task")
+    skill: str = Field(..., description="Selected Violin skill required before task activation")
+    technique: str = Field(..., description="Concrete technique required before task activation")
     hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
     outcome: str = ""
     evidence_paths: list[str] = Field(default_factory=list)
@@ -138,7 +138,10 @@ class ReviewBatchArgsModel(BaseModel):
     id: str = Field(..., description="Active PTT task id")
     status: str
     note: str = Field(..., description="Truthful result/evidence review")
-    skill: str = Field("", description="Required selected review skill")
+    skill: str = Field(
+        "",
+        description="Review skill; defaults to the active execution binding, or fp-check for findings",
+    )
     hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
     outcome: str = ""
     evidence_paths: list[str] = Field(default_factory=list)

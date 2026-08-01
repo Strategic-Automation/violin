@@ -110,12 +110,29 @@ def validate_scope(scope_path: Path) -> ScopeResult:
     if not isinstance(authorisation, dict) or authorisation.get("confirmed") is not True:
         result.add_error("scope.authorisation.confirmed must be true before target execution")
 
-    # targets.ip_addresses
+    # A scope may identify targets by IP, CIDR, domain, hostname, URL, or role.
+    # Requiring an IP address made otherwise valid web/domain engagements fail
+    # before the workflow could reach authorization and execution.
     targets = data.get("targets", {})
-    if "ip_addresses" not in targets:
-        result.add_error("scope.targets.ip_addresses is required")
-    elif not isinstance(targets["ip_addresses"], list) or not targets["ip_addresses"]:
-        result.add_error("scope.targets.ip_addresses must be a non-empty list")
+    if not isinstance(targets, dict):
+        result.add_error("scope.targets must be a mapping")
+    else:
+        target_fields = ("ip_addresses", "cidrs", "domains", "hostnames", "urls", "in_scope_urls")
+        has_list_target = any(
+            isinstance(targets.get(field), list)
+            and any(str(item).strip() for item in targets.get(field, []))
+            for field in target_fields
+        )
+        roles = targets.get("roles")
+        has_role_target = isinstance(roles, dict) and any(
+            (isinstance(value, list) and any(str(item).strip() for item in value))
+            or (isinstance(value, str) and value.strip())
+            for value in roles.values()
+        )
+        if not has_list_target and not has_role_target:
+            result.add_error(
+                "scope.targets must contain at least one IP, CIDR, domain, hostname, URL, or role"
+            )
 
     assessment_hosts = data.get("assessment_hosts", {}) or {}
     if not isinstance(assessment_hosts, dict):
@@ -144,17 +161,52 @@ def validate_scope(scope_path: Path) -> ScopeResult:
     return result
 
 
-_PHASE_ACTION_TERMS = {
-    Phase.SCOPING: ("scope",),
-    Phase.RECON: ("recon", "discovery", "banner", "version", "scan", "enumerat"),
-    Phase.VULN_RESEARCH: ("vuln", "research", "cve", "exploitdb"),
-    Phase.EXPLOITATION: ("exploit", "validation", "poc"),
-    Phase.POST_EXPLOITATION: ("post-exploit", "post exploitation", "exploit", "validation"),
-    Phase.PRIVESC: ("privilege", "privesc", "exploit", "validation"),
-    Phase.FLAGS: ("flag", "capture"),
-    Phase.REPORTING: ("report",),
-    Phase.RETROSPECTIVE: ("retrospective",),
+_PHASE_ACTIONS = {
+    Phase.SCOPING: frozenset({"scope", "scoping"}),
+    Phase.RECON: frozenset(
+        {
+            "recon",
+            "discovery",
+            "host port discovery",
+            "host-port-discovery",
+            "banner grabbing",
+            "banner-grabbing",
+            "version detection",
+            "version-detection",
+            "scanning",
+            "enumeration",
+        }
+    ),
+    Phase.VULN_RESEARCH: frozenset(
+        {
+            "vulnerability research",
+            "vulnerability-research",
+            "vuln-research",
+            "research",
+            "cve-research",
+            "exploitdb",
+        }
+    ),
+    Phase.EXPLOITATION: frozenset(
+        {
+            "exploitation",
+            "exploit validation",
+            "exploit-validation",
+            "poc",
+            "poc validation",
+            "poc-validation",
+        }
+    ),
+    Phase.POST_EXPLOITATION: frozenset({"post-exploitation", "post exploitation"}),
+    Phase.PRIVESC: frozenset({"privilege escalation", "privilege-escalation", "privesc"}),
+    Phase.FLAGS: frozenset({"flags", "flag capture", "flag-capture"}),
+    Phase.REPORTING: frozenset({"report", "reporting"}),
+    Phase.RETROSPECTIVE: frozenset({"retrospective"}),
 }
+
+
+def _normalise_action(value: object) -> str:
+    return " ".join(str(value).strip().lower().replace("_", " ").replace("/", " ").split())
 
 
 def check_scope_authorization(scope: dict[str, Any] | None, phase: Phase) -> CheckResult:
@@ -163,17 +215,17 @@ def check_scope_authorization(scope: dict[str, Any] | None, phase: Phase) -> Che
     if not isinstance(scope, dict):
         return result
     roe = scope.get("rules_of_engagement") or {}
-    allowed = [str(item).lower() for item in roe.get("allowed_actions", []) or []]
-    forbidden = [str(item).lower() for item in roe.get("forbidden_actions", []) or []]
-    terms = _PHASE_ACTION_TERMS[phase]
-    if any(any(term in action for term in terms) for action in forbidden):
+    allowed = {_normalise_action(item) for item in roe.get("allowed_actions", []) or []}
+    forbidden = {_normalise_action(item) for item in roe.get("forbidden_actions", []) or []}
+    actions = _PHASE_ACTIONS[phase]
+    if forbidden & actions:
         result.add_error(
             f"phase {phase.value} conflicts with scope.rules_of_engagement.forbidden_actions"
         )
-    if not any(any(term in action for term in terms) for action in allowed):
+    if not allowed & actions:
         result.add_error(
             f"phase {phase.value} is not permitted by scope.rules_of_engagement.allowed_actions; "
-            f"add an allowed_actions entry containing one of: {', '.join(terms)}"
+            f"add an allowed_actions entry containing one of: {', '.join(sorted(actions))}"
         )
     return result
 
@@ -372,10 +424,20 @@ def check_hypothesis_freshness(
 def check_command(args: CheckCommandArgs) -> CheckResult:
     """Run all sub-guards for a target command."""
     eng_dir = state.resolve_eng_dir(args.eng_dir)
-    scope_path = Path(args.scope) if args.scope else eng_dir / "scope" / "scope.yaml"
+    canonical_scope_path = (eng_dir / "scope" / "scope.yaml").resolve()
+    requested_scope_path = (
+        Path(args.scope).expanduser().resolve() if args.scope else canonical_scope_path
+    )
+    scope_path = canonical_scope_path
     phase = normalize_phase(args.phase)
 
     result = CheckResult()
+
+    if requested_scope_path != canonical_scope_path:
+        result.add_error(
+            "runtime execution must use the engagement's canonical scope.yaml; "
+            "validate alternate scope files separately with validate-scope"
+        )
 
     # 1. Bootstrap completeness
     bootstrap_result = bootstrap.check_bootstrap(str(eng_dir), auto_repair=False)

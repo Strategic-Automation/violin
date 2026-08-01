@@ -63,6 +63,10 @@ def cmd_record_ptt(args: argparse.Namespace) -> int:
                 "id": args.id,
                 "status": args.status,
                 "note": args.note or "",
+                "skill": args.skill,
+                "technique": args.technique,
+                "hypothesis_id": args.hypothesis_id,
+                "phase": args.phase,
             }
         )
     )
@@ -89,6 +93,9 @@ def cmd_review_batch(args: argparse.Namespace) -> int:
                 "id": args.id,
                 "status": args.status,
                 "note": args.note,
+                "skill": args.skill,
+                "hypothesis_id": args.hypothesis_id,
+                "technique": args.technique,
                 "finding": finding,
             }
         )
@@ -253,6 +260,10 @@ def main() -> int:
     p.add_argument("--id", required=True)
     p.add_argument("--status", required=True)
     p.add_argument("--note", default="")
+    p.add_argument("--skill", required=True)
+    p.add_argument("--technique", required=True)
+    p.add_argument("--hypothesis-id", default="")
+    p.add_argument("--phase", default="")
     p.set_defaults(func=cmd_record_ptt)
 
     p = sub.add_parser(
@@ -262,6 +273,9 @@ def main() -> int:
     p.add_argument("--id", required=True)
     p.add_argument("--status", required=True, choices=["[~]", "[x]", "[!]", "[-]"])
     p.add_argument("--note", required=True)
+    p.add_argument("--skill", default="")
+    p.add_argument("--hypothesis-id", default="")
+    p.add_argument("--technique", default="")
     p.add_argument("--finding-id", default="")
     p.add_argument("--finding-title", default="")
     p.add_argument(

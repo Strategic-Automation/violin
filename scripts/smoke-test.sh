@@ -164,7 +164,7 @@ fi
 mkdir -p "$SMOKE_ENG"/{scope,state,evidence}
 cp skills/pentest/templates/ptt.md "$SMOKE_ENG/state/ptt.md"
 # Update a PTT row so stale-PTT detection doesn't fire
-python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_ENG" --id PT-001 --status "[x]" --note "smoke bootstrap" >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_ENG" --id PT-001 --status "[x]" --note "smoke bootstrap" --skill pentest --technique recon >/dev/null 2>&1
 cp skills/pentest/templates/hypothesis-board.md "$SMOKE_ENG/hypotheses.md"
 echo "# Command History — smoke" > "$SMOKE_ENG/state/history.md"
 cat > "$SMOKE_ENG/scope/scope.yaml" <<'YAML'
@@ -255,7 +255,7 @@ YAML
 
 # (a) record-ptt updates a PTT row and exits 0
 set +e
-ptt_out=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-001 --status "[x]" --note "smoke test passed" 2>&1)
+ptt_out=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-001 --status "[x]" --note "smoke test passed" --skill pentest --technique recon 2>&1)
 ptt_exit=$?
 set -e
 if [ "$ptt_exit" -eq 0 ] && echo "$ptt_out" | grep -q "PT-001"; then
@@ -273,7 +273,7 @@ fi
 
 # (c) record-ptt with invalid status exits 1
 set +e
-bad_ptt=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-001 --status INVALID 2>&1 || true)
+bad_ptt=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-001 --status INVALID --skill pentest --technique recon 2>&1 || true)
 bad_ptt_exit=$?
 set -e
 if [ "$bad_ptt_exit" -eq 1 ] || echo "$bad_ptt" | grep -qi "invalid"; then
@@ -284,7 +284,7 @@ fi
 
 # (d) record-ptt with non-existent PT id exits 1
 set +e
-bad_id=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-999 --status "[~]" 2>&1)
+bad_id=$(python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_GUARD" --id PT-999 --status "[~]" --skill pentest --technique recon 2>&1)
 bad_id_exit=$?
 set -e
 if [ "$bad_id_exit" -eq 1 ] && echo "$bad_id" | grep -qi "not found"; then
@@ -359,7 +359,7 @@ seed_history_fixture "$SMOKE_FRESH" "nmap 10.129.45.113" RECON
 # PTT "Last updated" set to now
 sed -i "s|<YYYY-MM-DD HH:MM>|$(date '+%Y-%m-%d %H:%M')|" "$SMOKE_FRESH/state/ptt.md"
 # Mark one RECON row done so desync detection has a baseline
-python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_FRESH" --id PT-016 --status "[x]" --note "nmap done" >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_FRESH" --id PT-016 --status "[x]" --note "nmap done" --skill pentest --technique recon >/dev/null 2>&1
 # Findings file present (non-empty) once vuln-research underway
 echo "## Findings" > "$SMOKE_FRESH/evidence/vuln-research/findings.md"
 # Skill-load marker for session 'fresh'
@@ -434,7 +434,7 @@ cat > "$SMOKE_STALEPTT/hypotheses.md" <<'MD'
 MD
 echo "# Command History" > "$SMOKE_STALEPTT/state/history.md"
 seed_history_fixture "$SMOKE_STALEPTT" "curl 10.129.45.113" EXPLOITATION
-python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEPTT" --id PT-040 --status "[~]" --note "exploiting" >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEPTT" --id PT-040 --status "[~]" --note "exploiting" --skill pentest --technique exploit-validation --hypothesis-id H-001 >/dev/null 2>&1
 touch "$SMOKE_STALEPTT/state/.skill-loaded-stale"
 cat > "$SMOKE_STALEPTT/scope/scope.yaml" <<'YAML'
 engagement:
@@ -489,7 +489,7 @@ cat > "$SMOKE_STALEHYP/hypotheses.md" <<'MD'
 MD
 echo "# Command History" > "$SMOKE_STALEHYP/state/history.md"
 seed_history_fixture "$SMOKE_STALEHYP" "curl 10.129.45.113" EXPLOITATION
-python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEHYP" --id PT-040 --status "[~]" --note "exploiting" >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$SMOKE_STALEHYP" --id PT-040 --status "[~]" --note "exploiting" --skill pentest --technique exploit-validation --hypothesis-id H-001 >/dev/null 2>&1
 touch "$SMOKE_STALEHYP/state/.skill-loaded-sh"
 cat > "$SMOKE_STALEHYP/scope/scope.yaml" <<'YAML'
 engagement:
@@ -572,7 +572,7 @@ authorisation:
 YAML
 
 # Seed the active PTT row whose identity review-batch must preserve.
-python3 scripts/violin_guard.py record-ptt --eng-dir "$GATES_DIR" --id PT-010 --status "[~]" --note "active recon" >/dev/null 2>&1
+python3 scripts/violin_guard.py record-ptt --eng-dir "$GATES_DIR" --id PT-010 --status "[~]" --note "active recon" --skill pentest --technique recon >/dev/null 2>&1
 # Drive the canonical service handler directly.
 python3 - "$GATES_DIR" <<'PY'
 import json

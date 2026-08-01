@@ -18,8 +18,14 @@ from .base import _eng_path, _json, _serialise_errors
 @_serialise_errors
 def handle_target(a, **kwargs):
     """Resolve a target value from scope.yaml."""
-    scope_path_arg = a.get("scope")
-    p = Path(scope_path_arg) if scope_path_arg else _eng_path(a["eng_dir"]) / "scope" / "scope.yaml"
+    canonical = (_eng_path(a["eng_dir"]) / "scope" / "scope.yaml").resolve()
+    scope_path_arg = str(a.get("scope") or "").strip()
+    if scope_path_arg and Path(scope_path_arg).expanduser().resolve() != canonical:
+        return _json(
+            "blocked",
+            error="runtime target resolution must use the engagement's canonical scope.yaml",
+        )
+    p = canonical
 
     if not p.exists():
         return _json("error", error=f"scope file not found: {p}")
