@@ -103,8 +103,8 @@ def handle_exec_burst(a, **kwargs):
     active_task = ptt.find_active_task(ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md"))
     active_task_id = active_task.id if active_task else ""
 
-    results = []
-    executed = 0
+    preflight = []
+    required_slots = 0
     for idx, cmd in enumerate(cmds):
         cmd_args = {
             "command": cmd,
@@ -120,9 +120,8 @@ def handle_exec_burst(a, **kwargs):
         if status_name == "block":
             return _json(
                 "denied",
-                executed=executed,
-                results=results
-                + [
+                executed=0,
+                results=[
                     {
                         "index": idx + 1,
                         "command": cmd,
@@ -133,6 +132,31 @@ def handle_exec_burst(a, **kwargs):
                 reason=f"command [{idx + 1}] blocked: {r.errors[0] if r.errors else 'blocked'}",
             )
         review_warnings = r.warnings if status_name == "review" else []
+        local = state.is_local_bookkeeping_command(cmd)
+        if not local:
+            required_slots += 1
+        preflight.append(
+            {
+                "index": idx + 1,
+                "command": cmd,
+                "review_warnings": review_warnings,
+                "local": local,
+            }
+        )
+
+    reservation_id = None
+    if required_slots:
+        try:
+            reservation_id = state.reserve_sync_credit(eng_dir, phase, required_slots)
+        except ValueError as exc:
+            return _json("denied", executed=0, results=[], reason=str(exc))
+
+    results = []
+    executed = 0
+    for item in preflight:
+        idx = item["index"]
+        cmd = item["command"]
+        review_warnings = item["review_warnings"]
         try:
             res = execution.execute(
                 command=cmd,
@@ -143,6 +167,7 @@ def handle_exec_burst(a, **kwargs):
                 cwd=cwd,
                 label=label,
                 ptt_task_id=active_task_id,
+                sync_reservation=None if item["local"] else reservation_id,
             )
             res.pop("status", None)
             entry = {"index": idx + 1, "command": cmd, **res}
@@ -152,9 +177,21 @@ def handle_exec_burst(a, **kwargs):
             results.append(entry)
             if res.get("executed"):
                 executed += 1
+            if (
+                reservation_id
+                and not item["local"]
+                and not res.get("sync_reservation_consumed")
+                and not res.get("sync_reservation_released")
+            ):
+                if res.get("executed"):
+                    state.consume_reserved_sync_credit(eng_dir, reservation_id)
+                else:
+                    state.release_reserved_sync_credit(eng_dir, reservation_id)
             if res.get("exit_code", 0) != 0 and not continue_on_error:
                 break
         except Exception as e:  # noqa: BLE001
+            if reservation_id:
+                state.release_reserved_sync_credit(eng_dir, reservation_id)
             if not continue_on_error:
                 return _json(
                     "execution_failed",
@@ -163,6 +200,9 @@ def handle_exec_burst(a, **kwargs):
                     error=str(e),
                 )
             results.append({"index": idx + 1, "command": cmd, "error": str(e)})
+
+    if reservation_id:
+        state.release_reserved_sync_credit(eng_dir, reservation_id)
 
     return _json(
         "batch_complete",

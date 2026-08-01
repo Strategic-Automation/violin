@@ -211,6 +211,59 @@ def spend_sync_credit(eng_dir: str | Path, phase: str) -> int:
     return mutate_json(path, spend)
 
 
+def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
+    """Atomically reserve credit for a burst before any command starts."""
+    if count < 1:
+        raise ValueError("a sync reservation must contain at least one command")
+    path = _sync_path(eng_dir)
+
+    def reserve(data: dict[str, Any]) -> str:
+        credit = max(0, int(data.get("credit", sync_credit_limit(phase))))
+        if credit < count:
+            raise ValueError(f"insufficient sync credit for burst: need {count}, have {credit}")
+        reservation_id = f"burst-{uuid.uuid4().hex}"
+        data["credit"] = credit - count
+        data.setdefault("reservations", {})[reservation_id] = {
+            "phase": phase,
+            "remaining": count,
+            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        }
+        return reservation_id
+
+    return mutate_json(path, reserve)
+
+
+def consume_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
+    """Consume one previously reserved slot without decrementing credit twice."""
+    path = _sync_path(eng_dir)
+
+    def consume(data: dict[str, Any]) -> int:
+        reservation = (data.get("reservations") or {}).get(reservation_id)
+        if not reservation or int(reservation.get("remaining", 0)) < 1:
+            raise ValueError("sync reservation is missing or exhausted")
+        reservation["remaining"] = int(reservation["remaining"]) - 1
+        if reservation["remaining"] == 0:
+            data["reservations"].pop(reservation_id, None)
+        return max(0, int(data.get("credit", 0)))
+
+    return mutate_json(path, consume)
+
+
+def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
+    """Return every unconsumed slot in a reservation to the sync window."""
+    path = _sync_path(eng_dir)
+
+    def release(data: dict[str, Any]) -> int:
+        reservation = (data.get("reservations") or {}).pop(reservation_id, None)
+        if reservation:
+            data["credit"] = int(data.get("credit", 0)) + max(
+                0, int(reservation.get("remaining", 0))
+            )
+        return max(0, int(data.get("credit", 0)))
+
+    return mutate_json(path, release)
+
+
 def mark_pending_sync(
     eng_dir: str | Path,
     command: str,
@@ -248,6 +301,7 @@ def clear_pending_sync(eng_dir: str | Path) -> None:
     def clear(data: dict[str, Any]) -> None:
         data.pop("pending", None)
         data.pop("credit", None)
+        data.pop("reservations", None)
 
     mutate_json(path, clear)
 

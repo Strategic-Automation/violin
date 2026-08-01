@@ -2,6 +2,7 @@
 
 ## 3.0.0
 
+- Made burst execution atomic at admission: every command is preflighted before launch, required sync credit is reserved under one lock, and unused reservations are returned after partial batches.
 - Fixed target extraction for dotted identifiers and direct `/dev/tcp`/`/dev/udp` redirections, and prevented network-capable local-looking commands from bypassing execution accounting.
 - Made interrupted skill preparation recoverable with expiring reservations and stale-owner protection; batch review now remains tied to the delivered execution receipt.
 - Stabilized the core engagement workflow: domain/URL-only scopes now validate, runtime execution cannot substitute another scope file, PTT/review CLI contracts carry skill metadata, and review reuses the active delivered binding.

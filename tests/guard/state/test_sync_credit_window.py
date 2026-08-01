@@ -37,6 +37,16 @@ def test_network_clients_are_not_local_bookkeeping() -> None:
     assert not state.is_local_bookkeeping_command("cat < /dev/tcp/10.10.10.10/80")
 
 
+def test_sync_credit_reservation_consumes_and_releases_atomically(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    before = state.sync_credit_remaining(eng, "recon")
+    reservation = state.reserve_sync_credit(eng, "recon", 2)
+    assert state.sync_credit_remaining(eng, "recon") == before - 2
+    state.consume_reserved_sync_credit(eng, reservation)
+    state.release_reserved_sync_credit(eng, reservation)
+    assert state.sync_credit_remaining(eng, "recon") == before - 1
+
+
 def test_phase_window_runs_without_yolo_then_next_command_blocks(
     monkeypatch, tmp_path: Path
 ) -> None:

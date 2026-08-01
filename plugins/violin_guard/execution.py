@@ -248,10 +248,30 @@ def _monitor_background(
     )
 
 
-def _commit_started_command(engagement: Path, command: str, phase: str, ptt_task_id: str) -> int:
+def _commit_started_command(
+    engagement: Path,
+    command: str,
+    phase: str,
+    ptt_task_id: str,
+    sync_reservation: str | None = None,
+) -> tuple[int, bool]:
     if state.is_local_bookkeeping_command(command):
-        return state.sync_credit_remaining(str(engagement), phase)
-    return _commit_guard_state(engagement, command, phase, ptt_task_id)
+        return state.sync_credit_remaining(str(engagement), phase), False
+    if sync_reservation:
+        state.record_ok_check(str(engagement), command, phase)
+        remaining = state.consume_reserved_sync_credit(str(engagement), sync_reservation)
+        state.mark_pending_sync(str(engagement), command, phase, ptt_task_id)
+        count = state.tick_command(str(engagement))
+        from .phases import suppresses_heartbeat
+
+        phase_enum = normalize_phase(phase)
+        if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
+            state.set_heartbeat_pending(
+                str(engagement),
+                f"Reached {count} executed target commands. Review engagement files for drift.",
+            )
+        return remaining, True
+    return _commit_guard_state(engagement, command, phase, ptt_task_id), False
 
 
 def _start_background_monitor(
@@ -265,12 +285,15 @@ def _start_background_monitor(
     command: str,
     phase: str,
     ptt_task_id: str,
+    sync_reservation: str | None,
     timeout: int,
     execution_id: str,
 ) -> dict[str, Any]:
     state.atomic_json(manifest_path, record)
     try:
-        remaining = _commit_started_command(engagement, command, phase, ptt_task_id)
+        remaining, consumed = _commit_started_command(
+            engagement, command, phase, ptt_task_id, sync_reservation
+        )
     except Exception:
         _terminate_process(proc)
         raise
@@ -296,6 +319,7 @@ def _start_background_monitor(
         "stderr_preview": "",
         "sync_required": remaining <= 0,
         "sync_credit_remaining": remaining,
+        "sync_reservation_consumed": consumed,
     }
 
 
@@ -312,6 +336,7 @@ def execute(
     ptt_task_id: str = "",
     argv: list[str] | None = None,
     background: bool = False,
+    sync_reservation: str | None = None,
 ) -> dict[str, Any]:
     """Execute one already-authorized command and persist its complete receipt."""
     engagement = _resolve_engagement(eng_dir)
@@ -390,6 +415,7 @@ def execute(
                     command=command,
                     phase=phase,
                     ptt_task_id=ptt_task_id,
+                    sync_reservation=sync_reservation,
                     timeout=timeout,
                     execution_id=execution_id,
                 )
@@ -442,15 +468,25 @@ def execute(
 
     append_history(engagement, command, phase, exit_code, rel_manifest)
 
-    remaining = _commit_started_command(engagement, command, phase, ptt_task_id)
+    if sync_reservation and proc is None:
+        remaining = state.release_reserved_sync_credit(str(engagement), sync_reservation)
+        consumed = False
+        released = True
+    else:
+        remaining, consumed = _commit_started_command(
+            engagement, command, phase, ptt_task_id, sync_reservation
+        )
+        released = False
 
     return {
         **receipt,
-        "executed": True,
+        "executed": proc is not None,
         "stdout_preview": _preview(stdout_path),
         "stderr_preview": _preview(stderr_path),
         "sync_required": remaining <= 0,
         "sync_credit_remaining": remaining,
+        "sync_reservation_consumed": consumed,
+        "sync_reservation_released": released,
     }
 
 

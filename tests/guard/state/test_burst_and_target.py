@@ -24,6 +24,7 @@ from plugins.violin_guard import (
     handlers as service,
 )
 from plugins.violin_guard import handlers as tools  # noqa: E402
+from plugins.violin_guard.command import CheckResult  # noqa: E402
 from plugins.violin_guard.targets import resolve_target  # noqa: E402
 from tests.guard.receipt_fixture import bind_active_task  # noqa: E402
 
@@ -186,9 +187,16 @@ def _patch_burst(monkeypatch, eng_dir):
     def fake_execute(command, *, eng_dir=eng_dir, phase, **kwargs):
         rec["commands"].append(command)
         active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
-        remaining = execution._commit_guard_state(
-            Path(eng_dir), command, phase, active.id if active else ""
-        )
+        reservation_id = kwargs.get("sync_reservation")
+        if reservation_id:
+            state.record_ok_check(eng_dir, command, phase)
+            remaining = state.consume_reserved_sync_credit(eng_dir, reservation_id)
+            state.mark_pending_sync(eng_dir, command, phase, active.id if active else "")
+            state.tick_command(eng_dir)
+        else:
+            remaining = execution._commit_guard_state(
+                Path(eng_dir), command, phase, active.id if active else ""
+            )
         rec["batch_id"] = state.get_pending_sync(eng_dir)
         return {
             "execution_id": "00000000-0000-0000-0000-000000000001",
@@ -207,6 +215,7 @@ def _patch_burst(monkeypatch, eng_dir):
             "evidence_paths": {},
             "sync_required": remaining <= 0,
             "sync_credit_remaining": remaining,
+            "sync_reservation_consumed": bool(reservation_id),
         }
 
     monkeypatch.setattr(execution, "execute", fake_execute)
@@ -288,8 +297,34 @@ def test_exec_burst_fail_closed_on_blocked_command(eng, monkeypatch):
     assert (
         data["reason"] == "command [2] blocked: destructive filesystem deletion (rm -rf) is blocked"
     ), data
-    # First command ran; the blocked one did not, and nothing after it ran.
-    assert rec["commands"] == ["nmap -sV 10.10.10.10"]
+    # Preflight is atomic: the blocked command prevents every command from launching.
+    assert rec["commands"] == []
+
+
+def test_exec_burst_preflights_every_command_before_launch(eng, monkeypatch):
+    from plugins.violin_guard.handlers import exec_handlers
+
+    checks = iter((CheckResult(), CheckResult(errors=["blocked second command"])))
+    launched: list[str] = []
+    monkeypatch.setattr(exec_handlers, "_check_command_internal", lambda _args: next(checks))
+    monkeypatch.setattr(execution, "execute", lambda command, **_kwargs: launched.append(command))
+
+    before = state.sync_credit_remaining(eng, "recon")
+    result = json.loads(
+        service.handle_exec_burst(
+            {
+                "eng_dir": str(eng),
+                "phase": "recon",
+                "target": "10.10.10.10",
+                "commands": ["first", "second"],
+            }
+        )
+    )
+
+    assert result["status"] == "denied"
+    assert result["executed"] == 0
+    assert launched == []
+    assert state.sync_credit_remaining(eng, "recon") == before
 
 
 def test_exec_burst_missing_commands_file(eng):
