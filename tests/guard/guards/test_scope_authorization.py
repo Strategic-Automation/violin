@@ -140,3 +140,15 @@ def test_callback_hosts_are_secondary_only_and_exclusions_still_win(tmp_path: Pa
         scope, "nc -l -v -s 10.10.10.99 4444", primary_target="10.10.10.10"
     )
     assert any("excluded target 10.10.10.99" in error for error in excluded.errors)
+
+
+def test_direct_dev_tcp_redirection_is_checked_and_not_bookkeeping(tmp_path: Path) -> None:
+    scope = tmp_path / "scope.yaml"
+    _write_scope(scope, callback_hosts="10.10.10.10")
+
+    result = check_scope_targets(
+        scope,
+        "echo ready > /dev/tcp/10.10.10.99/4444",
+        primary_target="10.10.10.10",
+    )
+    assert any("10.10.10.99" in error for error in result.errors)

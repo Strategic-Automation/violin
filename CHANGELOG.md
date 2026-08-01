@@ -2,6 +2,7 @@
 
 ## 3.0.0
 
+- Fixed target extraction for dotted identifiers and direct `/dev/tcp`/`/dev/udp` redirections, and prevented network-capable local-looking commands from bypassing execution accounting.
 - Made interrupted skill preparation recoverable with expiring reservations and stale-owner protection; batch review now remains tied to the delivered execution receipt.
 - Stabilized the core engagement workflow: domain/URL-only scopes now validate, runtime execution cannot substitute another scope file, PTT/review CLI contracts carry skill metadata, and review reuses the active delivered binding.
 - Added receipt-backed skill routing, delivery, task binding, browser enforcement, Kali auto-backend selection, proof-based finding review, and semantic anti-stuck enforcement.

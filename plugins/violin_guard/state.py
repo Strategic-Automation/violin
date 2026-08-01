@@ -170,8 +170,16 @@ def mutate_json(path: Path, mutation) -> Any:
 
 def is_local_bookkeeping_command(command: str) -> bool:
     """Whether a command is a harmless local bookkeeping action."""
-    leading = command.strip().split(maxsplit=1)
-    return bool(leading) and leading[0] in LOCAL_TOOLS
+    from .bash_ast import parse_bash_segments
+    from .targets import extract_target_candidates
+
+    segments = parse_bash_segments(command)
+    if len(segments) != 1:
+        return False
+    segment = segments[0]
+    if segment.executable not in LOCAL_TOOLS or segment.redirects:
+        return False
+    return not extract_target_candidates(command)
 
 
 # Sync credit / pending sync

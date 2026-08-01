@@ -14,6 +14,7 @@ class CommandSegment:
     raw_text: str
     words: list[str] = field(default_factory=list)
     executable: str = ""
+    redirects: list[str] = field(default_factory=list)
 
 
 class _CommandVisitor:
@@ -31,8 +32,19 @@ class _CommandVisitor:
             segment_text = self.command[start:end]
             words = self._collect_words(node)
             executable = self._extract_executable(words)
+            redirects = [
+                str(getattr(getattr(part, "output", None), "word", ""))
+                for part in getattr(node, "parts", [])
+                if getattr(part, "kind", None) == "redirect"
+                and getattr(getattr(part, "output", None), "word", None)
+            ]
             self.segments.append(
-                CommandSegment(raw_text=segment_text, words=words, executable=executable)
+                CommandSegment(
+                    raw_text=segment_text,
+                    words=words,
+                    executable=executable,
+                    redirects=redirects,
+                )
             )
 
         if hasattr(node, "parts"):
@@ -52,6 +64,11 @@ class _CommandVisitor:
             if kind == "word" and hasattr(n, "word"):
                 words.append(n.word)
                 self.words.append(n.word)
+            elif kind == "redirect":
+                output = getattr(n, "output", None)
+                if output is not None and hasattr(output, "word"):
+                    words.append(output.word)
+                    self.words.append(output.word)
             if hasattr(n, "parts"):
                 for child in n.parts:
                     collect(child)

@@ -33,6 +33,8 @@ def test_network_clients_are_not_local_bookkeeping() -> None:
     for command in ("curl https://10.10.10.10", "dig 10.10.10.10", "host 10.10.10.10"):
         assert not state.is_local_bookkeeping_command(command)
     assert state.is_local_bookkeeping_command("echo local-note")
+    assert not state.is_local_bookkeeping_command("echo ping > /dev/tcp/10.10.10.10/80")
+    assert not state.is_local_bookkeeping_command("cat < /dev/tcp/10.10.10.10/80")
 
 
 def test_phase_window_runs_without_yolo_then_next_command_blocks(
