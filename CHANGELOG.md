@@ -2,6 +2,7 @@
 
 ## 3.0.0
 
+- Made interrupted skill preparation recoverable with expiring reservations and stale-owner protection; batch review now remains tied to the delivered execution receipt.
 - Stabilized the core engagement workflow: domain/URL-only scopes now validate, runtime execution cannot substitute another scope file, PTT/review CLI contracts carry skill metadata, and review reuses the active delivered binding.
 - Added receipt-backed skill routing, delivery, task binding, browser enforcement, Kali auto-backend selection, proof-based finding review, and semantic anti-stuck enforcement.
 - Replaced marker-file authorization with two-turn skill preparation and receipt diagnostics; legacy markers can only infer a unique session ID during migration.

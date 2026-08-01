@@ -59,6 +59,24 @@ def test_concurrent_duplicate_only_has_one_owner(tmp_path: Path) -> None:
     assert duplicate.status == "preparing"
 
 
+def test_expired_preparation_is_reclaimed_and_old_owner_cannot_complete(tmp_path: Path) -> None:
+    first = _reserve(tmp_path)
+    state_path = tmp_path / "state" / "skills.json"
+    data = json.loads(state_path.read_text(encoding="utf-8"))
+    data["deliveries"][first.id]["expires_at"] = "2000-01-01T00:00:00Z"
+    state_path.write_text(json.dumps(data), encoding="utf-8")
+
+    reclaimed = _reserve(tmp_path)
+    assert reclaimed.owner
+    assert reclaimed.owner_token != first.owner_token
+
+    with pytest.raises(ValueError, match="stale"):
+        complete_delivery(tmp_path, first, SkillViewResult(True, content="# old"))
+
+    delivered = complete_delivery(tmp_path, reclaimed, SkillViewResult(True, content="# new"))
+    assert delivered.status == "delivered"
+
+
 def test_context_reset_requires_a_new_delivery(tmp_path: Path) -> None:
     old = _deliver(tmp_path)
     assert advance_context_generation(tmp_path, "session-a") == 1

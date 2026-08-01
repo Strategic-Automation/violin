@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,6 +39,7 @@ __all__ = [
 _FILE_NAME = "skills.json"
 _SCHEMA_VERSION = 1
 _MAX_DELIVERIES = 200
+_PREPARING_TTL_SECONDS = 300
 
 
 def _now() -> str:
@@ -46,6 +48,33 @@ def _now() -> str:
 
 def _digest(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _preparing_expired(entry: dict[str, Any]) -> bool:
+    value = str(entry.get("expires_at") or "").strip()
+    if value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")) <= datetime.now(UTC)
+        except ValueError:
+            return True
+    updated = str(entry.get("updated_at") or entry.get("created_at") or "").strip()
+    if not updated:
+        return True
+    try:
+        started = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (datetime.now(UTC) - started).total_seconds() >= _PREPARING_TTL_SECONDS
+
+
+def _preparing_expires_at() -> str:
+    from datetime import timedelta
+
+    return (
+        (datetime.now(UTC) + timedelta(seconds=_PREPARING_TTL_SECONDS))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _path(eng_dir: str | Path) -> Path:
@@ -130,6 +159,7 @@ class DeliveryReservation:
     session_id: str
     context_generation: int
     owner: bool
+    owner_token: str = ""
 
 
 @dataclass(frozen=True)
@@ -192,7 +222,7 @@ def prepare_delivery(
         current_session, generation = _context(data, session_id.strip())
         identifier = _delivery_key(current_session, generation, skill, bundle_digest)
         existing = data["deliveries"].get(identifier)
-        if existing and existing.get("status") in {"preparing", "delivered"}:
+        if existing and existing.get("status") == "delivered":
             return DeliveryReservation(
                 identifier,
                 existing["status"],
@@ -202,6 +232,18 @@ def prepare_delivery(
                 generation,
                 False,
             )
+        if existing and existing.get("status") == "preparing" and not _preparing_expired(existing):
+            return DeliveryReservation(
+                identifier,
+                existing["status"],
+                skill,
+                bundle_digest,
+                current_session,
+                generation,
+                False,
+            )
+        owner_token = uuid.uuid4().hex
+        now = _now()
         data["deliveries"][identifier] = {
             "id": identifier,
             "skill": skill,
@@ -209,13 +251,22 @@ def prepare_delivery(
             "session_id": current_session,
             "context_generation": generation,
             "status": "preparing",
-            "created_at": _now(),
-            "updated_at": _now(),
+            "created_at": now,
+            "updated_at": now,
+            "expires_at": _preparing_expires_at(),
+            "owner_token": owner_token,
             "attempts": int((existing or {}).get("attempts") or 0) + 1,
         }
         _prune(data)
         return DeliveryReservation(
-            identifier, "preparing", skill, bundle_digest, current_session, generation, True
+            identifier,
+            "preparing",
+            skill,
+            bundle_digest,
+            current_session,
+            generation,
+            True,
+            owner_token,
         )
 
     return _mutate(eng_dir, reserve)
@@ -234,6 +285,10 @@ def complete_delivery(
         entry = data["deliveries"].get(reservation.id)
         if not entry or entry.get("status") != "preparing":
             raise ValueError("delivery reservation is no longer active")
+        if not reservation.owner or not reservation.owner_token:
+            raise ValueError("only the reservation owner may complete delivery")
+        if entry.get("owner_token") != reservation.owner_token:
+            raise ValueError("delivery reservation owner is stale; prepare a new delivery")
         entry["status"] = "delivered" if result.ready else "failed"
         entry["updated_at"] = _now()
         entry["delivered_turn_id"] = delivered_turn_id if result.ready else None
