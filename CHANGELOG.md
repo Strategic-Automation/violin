@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.1
+
+- Aligned workflow instructions in `.hermes.md`, `SKILL.md`, and `playbooks/recon.md` with Hermes v3 runtime tool contracts.
+- Added cross-cutting evidence & verification discipline guidance (`references/evidence-and-verification-discipline.md`).
+- Added authorized flag-capture (FLAGS) mode for lab/CTF engagements (`references/flags-mode.md`, `templates/flag-capture-register.md`).
+- Enforced per-hypothesis discipline fields (`Confidence`, `Timebox`, `Cheapest test`, `Kill criteria`) and `Decoy Trail` logging.
+- Fixed hypothesis board rewriter in `plugins/violin_guard/hypotheses.py` to preserve structural sections (`## Observations`, `## Decoy Trail`, `## Research Log`, `## Resolved Theories`).
+- Updated `RecordHypothesisArgsModel` in `schemas.py` to expose discipline fields in tool parameters.
+- Standardized workspace `AGENTS.md` to follow industry AI developer guidance best practices.
+
 ## 3.0.0
 
 - Made the Windows workflow smoke harness use the repository virtual-environment runtime when available, avoiding false failures from a dependency-free system Python.
