@@ -31,7 +31,7 @@ hermes -p violin
 <tr><td width="280"><b>🔬 31 Methodology Playbooks</b></td><td>7 operational playbooks (five execution phases, optional post-exploitation, and the tools catalog) + 24 vulnerability-class playbooks, routed across the `pentest`, `web-attacks`, and `access-control` skills.</td></tr>
 <tr><td><b>🛡️ Multi-Layer Safety</b></td><td>Interactive scoping (9 questions) → scope validation → guard check → approval gates — every target-touching command validated before execution.</td></tr>
 <tr><td><b>🧠 Pentesting Task Tree</b></td><td>Structured artifact tracking every task via `[x]/[ ]/[~]` markers across phases, with executor-owned history, hypothesis linking, and guard-bound batch reviews.</td></tr>
-<tr><td><b>🌐 Browser + Web Research</b></td><td>Browser toolset for website enumeration. Web toolset for CVE lookup, exploit search, and OSINT.</td></tr>
+<tr><td><b>🌐 Browser + Web Research</b></td><td>Browser toolset for approved in-scope website enumeration; v3.0.0 gates the engagement workflow but does not provide a network-level browser allowlist. Web toolset for CVE lookup, exploit search, and OSINT.</td></tr>
 <tr><td><b>📋 Evidence-Driven Reporting</b></td><td>Reproducible evidence with screenshots, tool output, and request/response pairs. CVSS 3.1 + 4.0 crosswalks and optional remediation patches.</td></tr>
 <tr><td><b>🔗 Hermes-Native</b></td><td>Inherits your existing Hermes provider, model, and tool backends. Violin introduces no separate credential store or broker.</td></tr>
 </table>

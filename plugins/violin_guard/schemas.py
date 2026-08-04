@@ -58,6 +58,11 @@ class RecordHypothesisArgsModel(BaseModel):
     id: str = ""
     title: str = ""
     status: str = ""
+    confidence: str = Field("", description="0.1-1.0 guesstimate; escalate only with evidence")
+    timebox: str = Field("", description="e.g. 4 tool batches or 30 min — then re-evaluate")
+    cheapest_test: str = Field(
+        "", description="Single cheapest probe that discriminates this theory"
+    )
     phase: str = ""
     target: str = Field("", description="target host/IP (must be in scope)")
     vuln_class: str = ""
@@ -80,9 +85,15 @@ class RecordHypothesisArgsModel(BaseModel):
     test_command: str = Field("", description="Exact syntax tested, including argument order")
     test_response: str = Field("", description="Exact decisive response or error")
     verification_status: str = ""
+    kill_criteria: str = Field(
+        "",
+        description="Evidence that contradicts, or no new info in N batches — then kill & log in Decoy Trail",
+    )
     rejection_reason: str = Field(
         "", description="Why a rejected hypothesis is safe to stop pursuing"
     )
+    next_step: str = ""
+    linked_findings: str = ""
     candidate_source: str = ""
     entry_point: str = ""
     data_flow: str = ""

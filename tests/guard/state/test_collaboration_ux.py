@@ -327,3 +327,62 @@ def test_sync_windows_are_phase_aware() -> None:
     assert state.sync_credit_limit("RECON") == 10
     assert state.sync_credit_limit("EXPLOITATION") == 20
     assert state.sync_credit_limit("PRIVESC") == 20
+
+
+def test_update_hypothesis_supports_discipline_fields(tmp_path: Path) -> None:
+    hyp_file = tmp_path / "hypotheses.md"
+    hyp_file.write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n",
+        encoding="utf-8",
+    )
+    h = hypotheses.update_hypothesis(
+        hyp_file,
+        id="001",
+        title="SQLi in authentication form",
+        status="Candidate",
+        confidence="0.8",
+        timebox="4 tool batches",
+        cheapest_test="' OR 1=1 --",
+        kill_criteria="Response status 404 or no error output",
+        next_step="Run sqlmap probe",
+        linked_findings="FIND-001",
+    )
+    assert h.confidence == "0.8"
+    assert h.timebox == "4 tool batches"
+    assert h.cheapest_test == "' OR 1=1 --"
+    assert h.kill_criteria == "Response status 404 or no error output"
+    assert h.next_step == "Run sqlmap probe"
+    assert h.linked_findings == "FIND-001"
+
+    parsed = hypotheses.parse_hypotheses(hyp_file)
+    assert len(parsed) == 1
+    assert parsed[0].confidence == "0.8"
+    assert parsed[0].cheapest_test == "' OR 1=1 --"
+
+    text = hyp_file.read_text(encoding="utf-8")
+    assert "- **Confidence:** 0.8" in text
+    assert "- **Timebox:** 4 tool batches" in text
+    assert "- **Cheapest test:** ' OR 1=1 --" in text
+    assert "- **Kill criteria:** Response status 404 or no error output" in text
+
+
+def test_update_hypothesis_preserves_board_sections(tmp_path: Path) -> None:
+    template_path = ROOT / "skills" / "pentest" / "templates" / "hypothesis-board.md"
+    hyp_file = tmp_path / "hypotheses.md"
+    hyp_file.write_text(template_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    h = hypotheses.update_hypothesis(
+        hyp_file,
+        id="001",
+        title="Command injection in search endpoint",
+        status="Candidate",
+    )
+    assert h.id == "001"
+    text = hyp_file.read_text(encoding="utf-8")
+    assert "## Active Theories" in text
+    assert "### H-001: Command injection in search endpoint" in text
+    assert "## Observations (ungrouped)" in text
+    assert "## Investigation Chains" in text
+    assert "## Decoy Trail (killed approaches — do NOT re-enter)" in text
+    assert "## Research Log" in text
+    assert "## Resolved Theories" in text

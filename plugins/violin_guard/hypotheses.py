@@ -52,6 +52,12 @@ _FIELD_NAMES = {
     "source evidence": "source_evidence",
     "runtime evidence": "runtime_evidence",
     "updated": "updated",
+    "confidence": "confidence",
+    "timebox": "timebox",
+    "cheapest test": "cheapest_test",
+    "kill criteria": "kill_criteria",
+    "next step": "next_step",
+    "linked findings": "linked_findings",
 }
 
 
@@ -60,6 +66,9 @@ class Hypothesis:
     id: str
     title: str
     status: str = "Candidate"
+    confidence: str = ""
+    timebox: str = ""
+    cheapest_test: str = ""
     phase: str = ""
     service: str = ""
     port: str = ""
@@ -72,7 +81,10 @@ class Hypothesis:
     test_command: str = ""
     test_response: str = ""
     verification_status: str = ""
+    kill_criteria: str = ""
     rejection_reason: str = ""
+    next_step: str = ""
+    linked_findings: str = ""
     candidate_source: str = ""
     entry_point: str = ""
     data_flow: str = ""
@@ -88,6 +100,9 @@ class Hypothesis:
             "id": self.id,
             "title": self.title,
             "status": self.canonical_status(),
+            "confidence": self.confidence,
+            "timebox": self.timebox,
+            "cheapest_test": self.cheapest_test,
             "phase": self.phase,
             "service": self.service,
             "port": self.port,
@@ -100,7 +115,10 @@ class Hypothesis:
             "test_command": self.test_command,
             "test_response": self.test_response,
             "verification_status": self.verification_status,
+            "kill_criteria": self.kill_criteria,
             "rejection_reason": self.rejection_reason,
+            "next_step": self.next_step,
+            "linked_findings": self.linked_findings,
             "candidate_source": self.candidate_source,
             "entry_point": self.entry_point,
             "data_flow": self.data_flow,
@@ -113,7 +131,12 @@ class Hypothesis:
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
         lines = [f"### H-{self.id}: {self.title}"]
         lines.append(f"- **Status:** {self.canonical_status()}")
-        lines.append(f"- **Updated:** {self.updated or now}")
+        if self.confidence:
+            lines.append(f"- **Confidence:** {self.confidence}")
+        if self.timebox:
+            lines.append(f"- **Timebox:** {self.timebox}")
+        if self.cheapest_test:
+            lines.append(f"- **Cheapest test:** {self.cheapest_test}")
         if self.phase:
             lines.append(f"- **Phase:** {self.phase}")
         if self.service:
@@ -138,8 +161,14 @@ class Hypothesis:
             lines.append(f"- **Test Response:** {self.test_response}")
         if self.verification_status:
             lines.append(f"- **Verification Status:** {self.verification_status}")
+        if self.kill_criteria:
+            lines.append(f"- **Kill criteria:** {self.kill_criteria}")
         if self.rejection_reason:
             lines.append(f"- **Rejection Reason:** {self.rejection_reason}")
+        if self.next_step:
+            lines.append(f"- **Next step:** {self.next_step}")
+        if self.linked_findings:
+            lines.append(f"- **Linked findings:** {self.linked_findings}")
         for label, value in (
             ("Candidate Source", self.candidate_source),
             ("Entry Point", self.entry_point),
@@ -149,7 +178,7 @@ class Hypothesis:
         ):
             if value:
                 lines.append(f"- **{label}:** {value}")
-        lines.append(f"- **Updated:** {self.updated or now} UTC")
+        lines.append(f"- **Updated:** {self.updated or now}")
         return "\n".join(lines) + "\n"
 
 
@@ -322,6 +351,9 @@ def update_hypothesis(
         id=merged_fields["id"],
         title=merged_fields.get("title", "") or f"Hypothesis {merged_fields['id']}",
         status=(merged_fields.get("status") or "Candidate"),
+        confidence=(merged_fields.get("confidence") or "").strip(),
+        timebox=(merged_fields.get("timebox") or "").strip(),
+        cheapest_test=(merged_fields.get("cheapest_test") or "").strip(),
         phase=(merged_fields.get("phase") or "").strip(),
         service=(merged_fields.get("service") or "").strip(),
         port=(merged_fields.get("port") or "").strip(),
@@ -334,7 +366,10 @@ def update_hypothesis(
         test_command=(merged_fields.get("test_command") or "").strip(),
         test_response=(merged_fields.get("test_response") or "").strip(),
         verification_status=(merged_fields.get("verification_status") or "").strip(),
+        kill_criteria=(merged_fields.get("kill_criteria") or "").strip(),
         rejection_reason=(merged_fields.get("rejection_reason") or "").strip(),
+        next_step=(merged_fields.get("next_step") or "").strip(),
+        linked_findings=(merged_fields.get("linked_findings") or "").strip(),
         candidate_source=(merged_fields.get("candidate_source") or "").strip(),
         entry_point=(merged_fields.get("entry_point") or "").strip(),
         data_flow=(merged_fields.get("data_flow") or "").strip(),
@@ -378,23 +413,41 @@ def update_hypothesis(
 
 
 def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
-    """Rewrite the entire hypotheses file."""
+    """Rewrite the hypotheses file while preserving structural sections (Decoy Trail, Observations, etc.)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
-    # Template instructions are an HTML comment containing an example H-001
-    # heading. Remove that comment before locating real records, otherwise a
-    # newly written hypothesis is accidentally placed inside the comment.
+
+    # Remove template instruction HTML comment if present
+    import re
+
     comment_start = template.find("<!--")
     if comment_start != -1:
         comment_end = template.find("-->", comment_start)
         if comment_end != -1:
             template = template[:comment_start] + template[comment_end + 3 :]
-    # Keep any header content before first hypothesis
-    header_end = template.find("### H-")
-    if header_end == -1:
-        header = template.strip() + "\n\n"
+
+    # Preserve section structure (e.g. ## Active Theories ... ## Observations ... ## Decoy Trail)
+    active_heading = "## Active Theories"
+    active_pos = template.find(active_heading)
+
+    if active_pos != -1:
+        header = template[: active_pos + len(active_heading)].strip() + "\n\n"
+        # Find next section header after Active Theories
+        next_sec = re.search(r"\n##\s+(?!Active Theories)", template[active_pos:])
+        trailer = template[active_pos + next_sec.start() + 1 :].lstrip() if next_sec else ""
     else:
-        header = template[:header_end].rstrip() + "\n\n"
+        # Fallback: locate first hypothesis heading starting with ### H-
+        first_h = re.search(r"^###\s+H-", template, re.MULTILINE)
+        if first_h:
+            header = template[: first_h.start()].rstrip() + "\n\n"
+            next_sec = re.search(r"\n##\s+", template[first_h.start() :])
+            trailer = (
+                template[first_h.start() + next_sec.start() + 1 :].lstrip() if next_sec else ""
+            )
+        else:
+            header = template.strip() + "\n\n"
+            trailer = ""
 
     body = "\n".join(h.to_markdown() for h in hypotheses_list)
-    path.write_text(header + body, encoding="utf-8")
+    content = header + body + ("\n\n" + trailer if trailer else "\n")
+    path.write_text(content, encoding="utf-8")
