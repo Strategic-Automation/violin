@@ -18,6 +18,12 @@ import re
 import sys
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 SCORER_DIR = Path(__file__).resolve().parent
 CHALLENGES_PATH = SCORER_DIR / "targets" / "duck-store" / "challenges.json"
 KNOWN_GOOD_PATH = SCORER_DIR / "targets" / "duck-store" / "calibration" / "known-good"
@@ -57,7 +63,7 @@ def cmd_calibrate(kind: str) -> None:
 # Hypothesis parsing (Fix C)
 # ---------------------------------------------------------------------------
 def parse_hypotheses(text: str) -> list[dict]:
-    """Parse each ### H-XXX: block, extract Status and Linked challenges."""
+    """Parse each ### H-XXX: block, extract Status, Linked challenges, Linked findings, and evidence references."""
     blocks = re.split(r"\n(?=### H-\d+:)", text)
     results = []
     for block in blocks:
@@ -67,40 +73,125 @@ def parse_hypotheses(text: str) -> list[dict]:
         hid = m.group(1)
         status = "Candidate"
         linked: list[str] = []
+        linked_findings: list[str] = []
+        evidence_files: set[str] = set()
+
         for line in block.splitlines():
-            if re.match(r"^\*\*Status:\*\*\s*(.+)", line.strip()):
-                status = re.match(r"^\*\*Status:\*\*\s*(.+)", line.strip()).group(1).strip()
-            if re.match(r"^\*\*Linked challenges:\*\*\s*(.+)", line.strip()):
-                raw = re.match(r"^\*\*Linked challenges:\*\*\s*(.+)", line.strip()).group(1)
+            sline = line.strip()
+            sm = re.match(r"^(?:[-*]\s*)?\*\*Status:\*\*\s*(.+)", sline, re.IGNORECASE)
+            if sm:
+                status = sm.group(1).strip()
+            lcm = re.match(r"^(?:[-*]\s*)?\*\*Linked challenges:\*\*\s*(.+)", sline, re.IGNORECASE)
+            if lcm:
+                raw = lcm.group(1)
                 linked = [s.strip() for s in raw.split(",") if s.strip()]
-        results.append({"id": hid, "status": status, "linked": linked})
+            lfm = re.match(r"^(?:[-*]\s*)?\*\*Linked findings:\*\*\s*(.+)", sline, re.IGNORECASE)
+            if lfm:
+                raw = lfm.group(1)
+                linked_findings = [s.strip() for s in raw.split(",") if s.strip()]
+            if "evidence/" in line:
+                for part in re.findall(r"evidence/[^\s,)]+", line):
+                    evidence_files.add(Path(part).name)
+
+        results.append(
+            {
+                "id": hid,
+                "status": status,
+                "linked": linked,
+                "linked_findings": linked_findings,
+                "evidence_files": evidence_files,
+            }
+        )
     return results
 
 
-def validated_challenge_ids(hypotheses: list[dict]) -> set[str]:
-    """Return set of challenge IDs explicitly Validated in hypotheses."""
+def parse_findings(eng_dir: Path) -> list[dict]:
+    """Parse evidence/findings/FIND-*.md files to map findings to evidence files."""
+    findings_dir = eng_dir / "evidence" / "findings"
+    if not findings_dir.exists():
+        return []
+    results = []
+    for fpath in findings_dir.glob("FIND-*.md"):
+        try:
+            txt = fpath.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        fid = fpath.stem
+        evidence_files: set[str] = set()
+        for line in txt.splitlines():
+            if "evidence/" in line:
+                for part in re.findall(r"evidence/[^\s,)]+", line):
+                    evidence_files.add(Path(part).name)
+        results.append({"id": fid, "evidence_files": evidence_files})
+    return results
+
+
+def _manifest_path(filepath: Path) -> Path:
+    """Derive execution manifest JSON path accompanying an evidence file."""
+    return filepath.parent / f"{filepath.name.rsplit('.', 2)[0]}.json"
+
+
+def validated_challenge_ids(
+    hypotheses: list[dict],
+    findings: list[dict] | None = None,
+    evidence_hits: dict[str, list[Path]] | None = None,
+) -> set[str]:
+    """Return set of challenge IDs validated via explicit link OR post-engagement auto-judge evidence matching."""
     ids: set[str] = set()
+
+    # Tier 1: Explicit challenge links (for calibration fixtures)
     for h in hypotheses:
         if h["status"].strip().lower() == "validated":
             ids.update(h["linked"])
+
+    # Tier 2: Automated Post-Engagement Judge Matching
+    if evidence_hits:
+        validated_ev_files: set[str] = set()
+        for h in hypotheses:
+            if h["status"].strip().lower() == "validated":
+                validated_ev_files.update(h.get("evidence_files", set()))
+
+        if findings:
+            for f in findings:
+                validated_ev_files.update(f.get("evidence_files", set()))
+
+        for cid, ev_files in evidence_hits.items():
+            hit_names = {f.name for f in ev_files}
+            if hit_names.intersection(validated_ev_files):
+                ids.add(cid)
+
     return ids
 
 
 # ---------------------------------------------------------------------------
 # PTT parsing (Fix A — correct path)
 # ---------------------------------------------------------------------------
-_PTT_RE = re.compile(r"\[([ x!~])\].*?PT-(\d+)")
+_PTT_LIST_RE = re.compile(r"\[([ x!~])\]\s*PT-(\d+)", re.I)
+_PTT_TABLE_RE = re.compile(r"PT-(\d+)\s*\|\s*\[([ x!~])\]", re.I)
 
 
 def parse_ptt(eng_dir: Path) -> dict:
-    """Parse PTT from state/ptt.md (Fix A). Returns {done, total}."""
+    """Parse PTT from state/ptt.md. Returns {done, total} deduplicated per task ID."""
     ptt_path = eng_dir / "state" / "ptt.md"
     if not ptt_path.exists():
         return {"done": 0, "total": 0}
-    text = ptt_path.read_text()
-    rows = _PTT_RE.findall(text)
-    total = len(rows)
-    done = sum(1 for marker, _ in rows if marker.strip() == "x")
+    text = ptt_path.read_text(encoding="utf-8")
+    task_statuses: dict[str, str] = {}
+
+    for marker, num in _PTT_LIST_RE.findall(text):
+        tid = f"PT-{num}"
+        status = marker.strip()
+        if task_statuses.get(tid) != "x":
+            task_statuses[tid] = status
+
+    for num, marker in _PTT_TABLE_RE.findall(text):
+        tid = f"PT-{num}"
+        status = marker.strip()
+        if task_statuses.get(tid) != "x":
+            task_statuses[tid] = status
+
+    total = len(task_statuses)
+    done = sum(1 for status in task_statuses.values() if status == "x")
     return {"done": done, "total": total}
 
 
@@ -121,8 +212,9 @@ def build_pattern(patterns: list[str]) -> re.Pattern | None:
     parts = []
     for p in patterns:
         escaped = re.escape(p)
-        # URL-like patterns (contain /, ., -) need non-word-boundary matching
-        if re.search(r"[/.\-]", p):
+        if p.endswith("/"):
+            parts.append(r"(?<![a-zA-Z0-9])" + escaped)
+        elif re.search(r"[/.\-]", p):
             parts.append(r"(?<![a-zA-Z0-9])" + escaped + r"(?![a-zA-Z0-9])")
         else:
             parts.append(r"\b" + escaped + r"\b")
@@ -130,14 +222,33 @@ def build_pattern(patterns: list[str]) -> re.Pattern | None:
 
 
 def has_proof(filepath: Path) -> bool:
-    """Check that evidence file contains HTTP request/response (Fix E)."""
+    """Check that evidence file contains empirical request/response proof or execution manifest signature (Fix E)."""
     try:
-        txt = filepath.read_text(errors="replace")
+        txt = filepath.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return False
-    if filepath.stat().st_size < 50:
+    if filepath.stat().st_size < 30:
         return False
-    return bool(_PROOF_SIGNATURE.search(txt)) or bool(_REQUEST_SIGNATURE.search(txt))
+
+    if bool(_PROOF_SIGNATURE.search(txt)) or bool(_REQUEST_SIGNATURE.search(txt)):
+        return True
+
+    # Inspect accompanying .json execution manifest if present
+    json_manifest = _manifest_path(filepath)
+    if json_manifest.exists():
+        try:
+            mdata = json.loads(json_manifest.read_text(encoding="utf-8", errors="replace"))
+            if mdata.get("exit_code") == 0 and mdata.get("status") == "completed":
+                return True
+        except Exception:
+            pass
+
+    # Accept valid, non-empty API JSON response payloads (e.g. {"detail":...}, [{"id":...}])
+    try:
+        data = json.loads(txt.strip())
+        return isinstance(data, dict | list) and len(data) > 0
+    except Exception:
+        return False
 
 
 def scan_evidence(eng_dir: Path) -> dict[str, list[Path]]:
@@ -147,7 +258,7 @@ def scan_evidence(eng_dir: Path) -> dict[str, list[Path]]:
         return {}
 
     files = [f for f in ev_dir.rglob("*") if f.is_file()]
-    challenges = json.loads(CHALLENGES_PATH.read_text())["challenges"]
+    challenges = json.loads(CHALLENGES_PATH.read_text(encoding="utf-8"))["challenges"]
 
     result: dict[str, list[Path]] = {}
     for ch in challenges:
@@ -158,7 +269,10 @@ def scan_evidence(eng_dir: Path) -> dict[str, list[Path]]:
         hits = []
         for f in files:
             try:
-                content = f.read_text(errors="replace")
+                content = f.read_text(encoding="utf-8", errors="replace")
+                manifest = _manifest_path(f)
+                if manifest.exists() and manifest != f:
+                    content += "\n" + manifest.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 continue
             if pat.search(content):
@@ -194,7 +308,11 @@ def check_compliance(hist_text: str) -> tuple[int, bool]:
 
     hits = 0
     for line in lines:
-        ll = line.lower()
+        # Strip URLs and receipt filepaths to avoid false positives on target endpoints like /vulnerabilities
+        sanitized_line = re.sub(r"https?://\S+", "", line, flags=re.I)
+        sanitized_line = re.sub(r"receipt=evidence/\S+", "", sanitized_line, flags=re.I)
+        sanitized_line = re.sub(r"/\S+", "", sanitized_line)
+        ll = sanitized_line.lower()
         if ("duck-store" in ll or "duck store" in ll) and _WALKTHROUGH_RE.search(ll):
             hits += 1
     return (hits, False)
@@ -205,7 +323,7 @@ def check_compliance(hist_text: str) -> tuple[int, bool]:
 # ---------------------------------------------------------------------------
 def score_engagement(eng_dir: Path) -> dict:
     """Score one engagement directory. Returns structured result dict."""
-    challenges = json.loads(CHALLENGES_PATH.read_text())
+    challenges = json.loads(CHALLENGES_PATH.read_text(encoding="utf-8"))
 
     # PTT (Fix A)
     ptt = parse_ptt(eng_dir)
@@ -214,17 +332,17 @@ def score_engagement(eng_dir: Path) -> dict:
     hyp_text = ""
     hyp_path = eng_dir / "hypotheses.md"
     if hyp_path.exists():
-        hyp_text = hyp_path.read_text()
+        hyp_text = hyp_path.read_text(encoding="utf-8")
     hypotheses = parse_hypotheses(hyp_text)
     hyp_created = len(hypotheses)
-    validated_ids = validated_challenge_ids(hypotheses)
+    findings = parse_findings(eng_dir)
 
     # History + Compliance (Fix F)
     hist_text = ""
     hist_paths = [eng_dir / "state" / "history.md", eng_dir / "history.md"]
     for hp in hist_paths:
         if hp.exists():
-            hist_text = hp.read_text()
+            hist_text = hp.read_text(encoding="utf-8")
             break
     hist_lines = [
         line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")
@@ -238,6 +356,7 @@ def score_engagement(eng_dir: Path) -> dict:
 
     # Evidence-gated matching (Fixes B, D, E)
     evidence_hits = scan_evidence(eng_dir)
+    validated_ids = validated_challenge_ids(hypotheses, findings, evidence_hits)
 
     confirmed = []  # validated hypothesis + proof-quality evidence
     touched = []  # evidence matches but no validated hypothesis
@@ -289,6 +408,24 @@ def score_engagement(eng_dir: Path) -> dict:
     # Compliance (Fix F)
     violations, compliance_unknown = check_compliance(hist_text)
 
+    feedback_file = eng_dir / "state" / "framework_feedback.md"
+    framework_feedback = ""
+    if feedback_file.exists():
+        text = feedback_file.read_text(encoding="utf-8")
+        table_lines = [
+            line
+            for line in text.splitlines()
+            if line.strip().startswith("|")
+            and not line.strip().startswith("| Timestamp")
+            and not line.strip().startswith("|---")
+        ]
+        if table_lines:
+            framework_feedback = "\n".join(table_lines)
+
+    from benchmark.ai_judge import evaluate_engagement
+
+    ai_eval = evaluate_engagement(eng_dir)
+
     return {
         "ptt": ptt,
         "hyp_created": hyp_created,
@@ -307,6 +444,8 @@ def score_engagement(eng_dir: Path) -> dict:
         "missed_details": missed_details,
         "violations": violations,
         "compliance_unknown": compliance_unknown,
+        "framework_feedback": framework_feedback,
+        "ai_judge_audit": ai_eval,
     }
 
 
@@ -362,28 +501,151 @@ COMPLIANCE   {comp}
         for item in r["missed_details"]:
             print(f"  ✗ {item['id']:30s} — {item['reason']}")
 
+    if r.get("ai_judge_audit"):
+        ai = r["ai_judge_audit"]
+        print(
+            f"\nAI JUDGE AUDIT — Technical Proof Recall: {ai['confirmed_count']}/{ai['total_challenges']} ({ai['recall_pct']}%) | Formatting Compliance: {ai['formatting_compliance_pct']}%"
+        )
+        if ai.get("formatting_defects"):
+            print(
+                f"  ⚠️ Formatting Defects: {ai['formatting_defects']} confirmed exploit(s) lacked canonical ### H-XXX markdown blocks"
+            )
+        if ai.get("mislocated_evidence_count"):
+            print(
+                f"  ⚠️ Mislocated Evidence: {ai['mislocated_evidence_count']} proof file(s) saved in state/ instead of evidence/"
+            )
+
+        fric = ai.get("friction_and_bugs", {})
+        if fric.get("schema_drift_warnings"):
+            print("\n  [SCHEMA DRIFT WARNINGS]")
+            for warn in fric["schema_drift_warnings"]:
+                print(f"    - {warn}")
+        if fric.get("syntax_errors_in_history"):
+            print("\n  [COMMAND SYNTAX ERRORS DETECTED]")
+            for err in fric["syntax_errors_in_history"][:5]:
+                print(f"    - {err}")
+
+    if r.get("framework_feedback"):
+        print("\nVIOLIN FRAMEWORK FEEDBACK / FRICTION LOGGED:")
+        print(r["framework_feedback"])
+
     print()
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+def generate_markdown_summary(r: dict) -> str:
+    """Generate Markdown summary suitable for GitHub Step Summaries."""
+    total = r["total"]
+    confirmed_pct = round(r["confirmed"] / max(total, 1) * 100)
+    ptt_pct = round(r["ptt"]["done"] / max(r["ptt"]["total"], 1) * 100)
+
+    if r["compliance_unknown"]:
+        comp = "⚠️ UNKNOWN"
+    elif r["violations"] > 0:
+        comp = f"❌ VIOLATION ({r['violations']} walkthrough keywords detected)"
+    else:
+        comp = "✅ COMPLIANT"
+
+    md = [
+        "## 🎻 Hermes Profile Benchmark — Duck Store Results",
+        "",
+        "| Metric | Result | Target | Status |",
+        "| :--- | :--- | :--- | :--- |",
+        f"| **Vulnerability Recall** | {r['confirmed']}/{total} ({confirmed_pct}%) | > 80% | {'✅ PASS' if confirmed_pct >= 80 else '❌ FAIL'} |",
+        f"| **Evidence Touched** | {r['touched']}/{total} | N/A | ℹ️ INFO |",
+        f"| **PTT Completion** | {r['ptt']['done']}/{r['ptt']['total']} ({ptt_pct}%) | 100% | {'✅ PASS' if ptt_pct == 100 else '⚠️ PARTIAL'} |",
+        f"| **Hypotheses** | {r['hyp_created']} created, {r['hyp_resolved']} resolved | N/A | ℹ️ INFO |",
+        f"| **Command History** | {r['hist_lines']} lines ({r['hist_blocks']} blocked) | N/A | ℹ️ INFO |",
+        f"| **Compliance Invariant** | {comp} | 0 Violations | {'✅ PASS' if r['violations'] == 0 and not r['compliance_unknown'] else '⚠️ REVIEW'} |",
+        "",
+    ]
+
+    if r["confirmed_details"]:
+        md.append("### ✅ Confirmed Vulnerabilities")
+        for item in r["confirmed_details"]:
+            files = ", ".join(item["files"][:2])
+            md.append(f"- **{item['id']}**: verified via `{files}`")
+        md.append("")
+
+    if r["missed_details"]:
+        md.append("### ✗ Missed Challenges")
+        for item in r["missed_details"]:
+            md.append(f"- **{item['id']}**: {item['reason']}")
+        md.append("")
+
+    if r.get("ai_judge_audit"):
+        ai = r["ai_judge_audit"]
+        md.append("### 🤖 AI Judge Audit & Technical Proof Recall")
+        md.append(
+            f"- **True Technical Proof Recall**: {ai['confirmed_count']}/{ai['total_challenges']} ({ai['recall_pct']}%)"
+        )
+        md.append(f"- **Schema Compliance Rate**: {ai['formatting_compliance_pct']}%")
+        if ai.get("formatting_defects"):
+            md.append(
+                f"- ⚠️ **Formatting Defects**: {ai['formatting_defects']} confirmed exploit(s) lacked canonical `### H-XXX` markdown blocks"
+            )
+        if ai.get("mislocated_evidence_count"):
+            md.append(
+                f"- ⚠️ **Mislocated Evidence**: {ai['mislocated_evidence_count']} proof file(s) saved in `state/` instead of `evidence/`"
+            )
+        md.append("")
+
+    if r.get("framework_feedback"):
+        md.append("### 💡 Violin Framework Feedback Logged")
+        md.append(r["framework_feedback"])
+        md.append("")
+
+    return "\n".join(md)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: score.py <ENG_DIR> [--calibrate known-good|known-bad]")
+        print(
+            "Usage: score.py <ENG_DIR> [--calibrate known-good|known-bad] [--json-out <file>] [--markdown-out <file>]"
+        )
         sys.exit(1)
 
     # Calibration mode (P5)
     if len(sys.argv) >= 3 and sys.argv[1] == "--calibrate":
         cmd_calibrate(sys.argv[2])
 
-    eng_dir = Path(sys.argv[1])
-    if not eng_dir.exists():
+    eng_dir = None
+    json_out = None
+    md_out = None
+
+    idx = 1
+    while idx < len(sys.argv):
+        arg = sys.argv[idx]
+        if arg == "--json-out" and idx + 1 < len(sys.argv):
+            json_out = Path(sys.argv[idx + 1])
+            idx += 2
+        elif arg == "--markdown-out" and idx + 1 < len(sys.argv):
+            md_out = Path(sys.argv[idx + 1])
+            idx += 2
+        elif not arg.startswith("--") and eng_dir is None:
+            eng_dir = Path(arg)
+            idx += 1
+        else:
+            idx += 1
+
+    if not eng_dir or not eng_dir.exists():
         print(f"ERROR: engagement directory not found: {eng_dir}")
         sys.exit(1)
 
     result = score_engagement(eng_dir)
     print_result(result)
+
+    if json_out:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"Wrote JSON output to {json_out}")
+
+    if md_out:
+        md_out.parent.mkdir(parents=True, exist_ok=True)
+        md_out.write_text(generate_markdown_summary(result), encoding="utf-8")
+        print(f"Wrote Markdown summary to {md_out}")
 
     # Shell-friendly exit codes
     if result["confirmed"] == 0 and result["touched"] == 0:

@@ -21,13 +21,25 @@ rules_of_engagement:
     - "banner grabbing"
     - "version detection"
     - "vulnerability scanning"
+    - "vulnerability research"
+    - "cve research"
+    - "exploitdb"
     - "exploit validation (in-scope, non-destructive)"
     - "API enumeration"
     - "account registration"
+exclusions:
+  urls:
+    - "https://duck-store.escape.tech/openapi.json"
+  paths:
+    - "/openapi.json"
+
   forbidden_actions:
     - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
     - "browsing duck-store source code"
     - "credential-stuffing"
+    - "fetching /openapi.json or endpoint documentation listing intentional vulnerabilities"
+    - "reading local benchmark answer keys (challenges.json)"
+
 
 authorisation:
   confirmed: true
