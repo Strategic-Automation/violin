@@ -64,6 +64,16 @@ class _TargetPolicy:
     excluded_ip_set: netaddr.IPSet
     research_hosts: set[str]
     callback_hosts: set[str]
+    excluded_urls: set[str]
+    excluded_paths: set[str]
+
+    def check_command_payload(self, command: str, result: TargetCheckResult) -> None:
+        for url in self.excluded_urls:
+            if url in command:
+                result.errors.append(f"command contains excluded URL: {url}")
+        for path in self.excluded_paths:
+            if path in command:
+                result.errors.append(f"command contains excluded path: {path}")
 
     def is_excluded(self, candidate: str) -> bool:
         return _matches_host(candidate, self.excluded) or _matches_ip_set(
@@ -225,6 +235,7 @@ def check_scope_targets(
     if scope is None:
         return result
 
+    exclusions = scope.get("exclusions", {}) or {}
     policy = _TargetPolicy(
         allowed=scope_hosts(scope, "targets"),
         excluded=scope_hosts(scope, "exclusions"),
@@ -232,6 +243,8 @@ def check_scope_targets(
         excluded_ip_set=_scope_ip_set(scope, "exclusions"),
         research_hosts=_research_hosts(scope),
         callback_hosts=_callback_hosts(scope),
+        excluded_urls={v for v in _values(exclusions.get("urls", []))},
+        excluded_paths={v for v in _values(exclusions.get("paths", []))},
     )
 
     explicit = normalise_target(primary_target) if primary_target else ""
@@ -244,6 +257,8 @@ def check_scope_targets(
         if candidate not in seen:
             seen.add(candidate)
             policy.check_secondary(candidate, result)
+            
+    policy.check_command_payload(command, result)
     return result
 
 
@@ -333,7 +348,8 @@ def scope_hosts(scope: dict[str, Any], section: str = "targets") -> set[str]:
     """Return canonical hosts from one scope section."""
     values = scope.get(section, {}) or {}
     if section == "exclusions":
-        return {normalise_target(value) for value in _values(values)}
+        keys = ("ip_addresses", "domains", "hostnames", "roles")
+        return {normalise_target(value) for key in keys for value in _values(values.get(key, []))}
     keys = ("ip_addresses", "in_scope_urls", "urls", "domains", "hostnames", "roles")
     return {normalise_target(value) for key in keys for value in _values(values.get(key, []))}
 

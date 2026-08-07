@@ -134,8 +134,10 @@ targets:
 exclusions:
   urls:
     - "{target}/openapi.json"
+    - "{target}/vulnerabilities"
   paths:
     - "/openapi.json"
+    - "/vulnerabilities"
 
 assessment_hosts:
   callback_hosts: []
@@ -152,7 +154,7 @@ rules_of_engagement:
     - "out-of-scope testing"
     - "destructive actions"
     - "denial of service"
-    - "fetching /openapi.json or endpoint documentation that lists challenges or vulnerabilities"
+    - "fetching /openapi.json or /vulnerabilities or endpoints that list challenges or intentional vulnerabilities"
     - "reading local benchmark answer keys (challenges.json)"
 
 authorisation:
