@@ -27,14 +27,6 @@ rules_of_engagement:
     - "exploit validation (in-scope, non-destructive)"
     - "API enumeration"
     - "account registration"
-exclusions:
-  urls:
-    - "https://duck-store.escape.tech/openapi.json"
-    - "https://duck-store.escape.tech/vulnerabilities"
-  paths:
-    - "/openapi.json"
-    - "/vulnerabilities"
-
   forbidden_actions:
     - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
     - "browsing duck-store source code"
@@ -42,6 +34,13 @@ exclusions:
     - "fetching /openapi.json or /vulnerabilities or endpoints that list challenges or intentional vulnerabilities"
     - "reading local benchmark answer keys (challenges.json)"
 
+exclusions:
+  urls:
+    - "https://duck-store.escape.tech/openapi.json"
+    - "https://duck-store.escape.tech/vulnerabilities"
+  paths:
+    - "/openapi.json"
+    - "/vulnerabilities"
 
 authorisation:
   confirmed: true

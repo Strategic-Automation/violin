@@ -70,10 +70,12 @@ class _TargetPolicy:
     def check_command_payload(self, command: str, result: TargetCheckResult) -> None:
         for url in self.excluded_urls:
             if url in command:
-                result.errors.append(f"command contains excluded URL: {url}")
+                result.errors.append(f"strict block: command payload contains excluded URL '{url}'")
         for path in self.excluded_paths:
             if path in command:
-                result.errors.append(f"command contains excluded path: {path}")
+                result.errors.append(
+                    f"strict block: command payload contains excluded path '{path}'"
+                )
 
     def is_excluded(self, candidate: str) -> bool:
         return _matches_host(candidate, self.excluded) or _matches_ip_set(
@@ -257,7 +259,7 @@ def check_scope_targets(
         if candidate not in seen:
             seen.add(candidate)
             policy.check_secondary(candidate, result)
-            
+
     policy.check_command_payload(command, result)
     return result
 
