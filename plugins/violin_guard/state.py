@@ -613,7 +613,6 @@ def tick_message(eng_dir: str | Path) -> int:
             if attempt == 2:
                 raise
             time.sleep(0.02 * (attempt + 1))
-    raise RuntimeError("unreachable")
 
 
 def record_ok_check(eng_dir: str | Path, command: str, phase: str) -> None:

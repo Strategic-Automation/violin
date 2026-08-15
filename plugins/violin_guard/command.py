@@ -599,12 +599,10 @@ def check_hypothesis_freshness(
         ts = None
         raw = h.updated.strip()
         candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
-        for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"):
-            try:
-                ts = datetime.strptime(candidate, fmt)
-                break
-            except ValueError:
-                continue
+        try:
+            ts = datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
         if ts is None:
             continue
         ts = ts.replace(tzinfo=UTC)
@@ -637,12 +635,10 @@ def check_hypothesis_freshness(
             raw = h.updated.strip()
             candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
             updated_ts = None
-            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"):
-                try:
-                    updated_ts = datetime.strptime(candidate, fmt)
-                    break
-                except ValueError:
-                    continue
+            try:
+                updated_ts = datetime.fromisoformat(candidate)
+            except ValueError:
+                pass
             if updated_ts is None:
                 continue
             updated_ts = updated_ts.replace(tzinfo=UTC)

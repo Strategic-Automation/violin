@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Evidence-gated, provenance-aware Violin benchmark scorer."""
 
+import argparse
 import json
 import re
 import sys
@@ -566,20 +567,12 @@ def main() -> None:
     json_out = None
     md_out = None
 
-    idx = 1
-    while idx < len(sys.argv):
-        arg = sys.argv[idx]
-        if arg == "--json-out" and idx + 1 < len(sys.argv):
-            json_out = Path(sys.argv[idx + 1])
-            idx += 2
-        elif arg == "--markdown-out" and idx + 1 < len(sys.argv):
-            md_out = Path(sys.argv[idx + 1])
-            idx += 2
-        elif not arg.startswith("--") and eng_dir is None:
-            eng_dir = Path(arg)
-            idx += 1
-        else:
-            idx += 1
+    parser = argparse.ArgumentParser(prog="score.py", add_help=True)
+    parser.add_argument("eng_dir", nargs="?", type=Path)
+    parser.add_argument("--json-out", type=Path)
+    parser.add_argument("--markdown-out", type=Path)
+    ns = parser.parse_args(sys.argv[1:])
+    eng_dir, json_out, md_out = ns.eng_dir, ns.json_out, ns.markdown_out
 
     if not eng_dir or not eng_dir.exists():
         print(f"ERROR: engagement directory not found: {eng_dir}")

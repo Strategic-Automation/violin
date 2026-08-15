@@ -9,6 +9,7 @@ valid phase, and a target that is in scope (audit P1-hyp).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -464,13 +465,7 @@ def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
 
     # Remove template instruction HTML comment if present
-    import re
-
-    comment_start = template.find("<!--")
-    if comment_start != -1:
-        comment_end = template.find("-->", comment_start)
-        if comment_end != -1:
-            template = template[:comment_start] + template[comment_end + 3 :]
+    template = re.sub(r"<!--.*?-->", "", template, flags=re.DOTALL)
 
     # Preserve section structure (e.g. ## Active Theories ... ## Observations ... ## Decoy Trail)
     active_heading = "## Active Theories"
