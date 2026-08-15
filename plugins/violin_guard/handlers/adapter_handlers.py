@@ -1,12 +1,15 @@
+import os
 import shlex
 import sys
 from pathlib import Path
 
 from ..adapters import (
+    AdapterError,
     build_ffuf,
     build_httpx,
     build_netcat_listener,
     build_nuclei,
+    resolve_ffuf_wordlist,
     search_exploit,
 )
 from . import exec_handlers
@@ -32,8 +35,8 @@ def _adapter(builder):
                 **values,
                 "target": values.get("target") or values.get("url"),
                 "command": built,
-                "_argv": shlex.split(built, posix=True),
             },
+            _internal_argv=shlex.split(built, posix=True),
         )
 
     return execute_adapter
@@ -41,7 +44,55 @@ def _adapter(builder):
 
 handle_httpx = _adapter(build_httpx)
 handle_nuclei = _adapter(build_nuclei)
-handle_ffuf = _adapter(build_ffuf)
+
+
+@_serialise_errors
+def handle_ffuf(args, **kwargs):
+    """Resolve a portable wordlist before dispatching the typed ffuf command."""
+
+    values = dict(args or {})
+    try:
+        orig_eng_dir = os.environ.get("ENG_DIR")
+        if values.get("eng_dir"):
+            os.environ["ENG_DIR"] = str(values["eng_dir"])
+        try:
+            values["wordlist"] = resolve_ffuf_wordlist(values.get("wordlist"))
+        finally:
+            if orig_eng_dir is None:
+                os.environ.pop("ENG_DIR", None)
+            else:
+                os.environ["ENG_DIR"] = orig_eng_dir
+        token_file = str(values.get("auth_token_file") or "").strip()
+        if token_file:
+            engagement = _eng_path(str(values.get("eng_dir") or ""))
+            path = Path(token_file)
+            if not path.is_absolute():
+                path = engagement / path
+            path = path.resolve()
+            evidence_root = (engagement / "evidence").resolve()
+            if evidence_root not in path.parents:
+                raise AdapterError(
+                    "auth_token_file must be inside the engagement evidence directory"
+                )
+            token = path.read_text(encoding="utf-8").strip()
+            if not token:
+                raise AdapterError("auth_token_file is empty")
+            values["headers"] = [
+                *(values.get("headers") or []),
+                f"Authorization: Bearer {token}",
+            ]
+    except AdapterError as exc:
+        return _json("error", executed=False, error=str(exc))
+    built = build_ffuf(values)
+    return _call(
+        _get_handle_exec(),
+        {
+            **values,
+            "target": values.get("target") or values.get("url"),
+            "command": built,
+        },
+        _internal_argv=shlex.split(built, posix=True),
+    )
 
 
 @_serialise_errors
@@ -110,7 +161,7 @@ def handle_listener(args, **kwargs):
         {
             **values,
             "command": built,
-            "_argv": shlex.split(built, posix=True),
-            "background": True,
         },
+        _internal_argv=shlex.split(built, posix=True),
+        _internal_background=True,
     )

@@ -7,6 +7,7 @@ via bashlex, netaddr for IP/CIDR set arithmetic, and yarl for RFC 3986 URL parsi
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,7 +47,33 @@ _COMMON_FILE_SUFFIXES = {
     ".vsix",
     ".exe",
     ".dll",
+    ".token",
+    ".pem",
+    ".key",
 }
+_NON_TARGET_DOTTED_TOKENS = frozenset(
+    {
+        "urllib.request",
+        "urllib.parse",
+        "urllib.error",
+        "http.client",
+        "http.server",
+        "json.decoder",
+        "json.encoder",
+        "json.tool",
+        "xml.etree",
+        "unittest.mock",
+        "importlib.util",
+        "asyncio.runner",
+        "wsgiref.simple_server",
+        "jwt.io",
+        "example.com",
+        "example.org",
+        "example.net",
+        "schema.org",
+        "w3.org",
+    }
+)
 _LOCAL_HOSTS = {"127.0.0.1", "0.0.0.0", "localhost", "::1"}
 
 
@@ -64,6 +91,44 @@ class _TargetPolicy:
     excluded_ip_set: netaddr.IPSet
     research_hosts: set[str]
     callback_hosts: set[str]
+    excluded_urls: set[str]
+    excluded_paths: set[str]
+
+    def check_command_payload(self, command: str, result: TargetCheckResult) -> None:
+        if not self.excluded_urls and not self.excluded_paths:
+            return
+        for token in _command_tokens(command):
+            candidate = token.strip("'\"(),;")
+            if not candidate:
+                continue
+
+            for url in self.excluded_urls:
+                if url and url in candidate:
+                    result.errors.append(
+                        f"strict block: command payload contains excluded URL '{url}'"
+                    )
+                    break
+
+            for path in self.excluded_paths:
+                if not path:
+                    continue
+                if candidate == path:
+                    result.errors.append(
+                        f"strict block: command payload contains excluded path '{path}'"
+                    )
+                    break
+                if "://" in candidate or candidate.startswith("/"):
+                    with contextlib.suppress(Exception):
+                        cand_url = URL(
+                            candidate if "://" in candidate else f"http://dummy.local{candidate}"
+                        )
+                        cpath = cand_url.path
+                        norm_ex = path.rstrip("/")
+                        if cpath in (path, norm_ex) or cpath.startswith(norm_ex + "/"):
+                            result.errors.append(
+                                f"strict block: command payload contains excluded path '{path}'"
+                            )
+                            break
 
     def is_excluded(self, candidate: str) -> bool:
         return _matches_host(candidate, self.excluded) or _matches_ip_set(
@@ -78,9 +143,17 @@ class _TargetPolicy:
     def is_secondary_only(self, candidate: str) -> bool:
         return _matches_host(candidate, self.callback_hosts | self.research_hosts | _LOCAL_HOSTS)
 
-    def check_primary(self, candidate: str, result: TargetCheckResult) -> None:
+    def check_primary(
+        self,
+        candidate: str,
+        result: TargetCheckResult,
+        *,
+        allow_research: bool = False,
+    ) -> None:
         if self.is_excluded(candidate):
             result.errors.append(f"excluded target {candidate} must not be touched")
+        elif allow_research and _matches_host(candidate, self.research_hosts):
+            return
         elif self.is_secondary_only(candidate):
             result.errors.append(
                 f"secondary-only endpoint {candidate} must not be used as a primary target"
@@ -113,12 +186,20 @@ def extract_target_candidates(command: str) -> list[str]:
     """Return ordered, unique network targets found in a shell command."""
     candidates: list[str] = []
     skip_path_value = False
+    skip_next_token = False
     for token in _command_tokens(command):
         if skip_path_value:
             skip_path_value = False
             continue
+        if skip_next_token:
+            skip_next_token = False
+            continue
         if token in _PATH_VALUE_FLAGS:
             skip_path_value = True
+            continue
+        if token == "-m" or token.startswith("-m="):
+            if token == "-m":
+                skip_next_token = True
             continue
         if token in _REDIRECTION_OPERATORS or any(
             token.startswith(f"{flag}=") for flag in _PATH_VALUE_FLAGS
@@ -128,6 +209,8 @@ def extract_target_candidates(command: str) -> list[str]:
         if token.rstrip(";, ").endswith("()"):
             continue
         candidate = token.strip("'\"(),;")
+        if candidate.lower() in _NON_TARGET_DOTTED_TOKENS:
+            continue
         if _looks_like_local_path(candidate) and not (
             candidate.startswith(_DEV_NETWORK_PREFIXES)
             or candidate.startswith("//")
@@ -158,38 +241,38 @@ def resolve_target(
 ) -> str | None:
     """Resolve a single target value from scope data."""
     targets_sec = scope_data.get("targets", {}) or {}
+    role = str(role or "").strip()
+    host_query = str(host_query or "").strip()
+    if role and host_query:
+        raise ValueError("provide exactly one of role or host, not both")
 
-    target_val = None
+    target_val: str | None = None
     if role:
-        role_val = (targets_sec.get("roles", {}) or {}).get(role)
-        target_val = (
-            str(role_val[0]).strip()
-            if isinstance(role_val, list) and role_val
-            else str(role_val).strip()
-            if role_val is not None
-            else None
-        )
-
-    if not target_val and host_query and normalise_target(host_query) in scope_hosts(scope_data):
-        target_val = host_query.strip()
-
-    if not target_val:
-        for key in ("ip_addresses", "urls", "in_scope_urls", "domains", "hostnames"):
-            items = targets_sec.get(key, [])
-            if isinstance(items, list) and items:
-                target_val = str(items[0]).strip()
-                break
-        if not target_val:
-            roles = targets_sec.get("roles", {}) or {}
-            if roles:
-                first_val = next(iter(roles.values()))
-                target_val = (
-                    str(first_val[0]).strip()
-                    if isinstance(first_val, list) and first_val
-                    else str(first_val).strip()
-                    if first_val is not None
-                    else None
-                )
+        roles = targets_sec.get("roles", {}) or {}
+        if role not in roles:
+            raise ValueError(f"target role {role!r} is not defined in scope.yaml")
+        values = [value.strip() for value in _values(roles[role]) if value.strip()]
+        unique = list(dict.fromkeys(values))
+        if len(unique) != 1:
+            raise ValueError(f"target role {role!r} is ambiguous; expected exactly one value")
+        target_val = unique[0]
+    elif host_query:
+        if normalise_target(host_query) not in scope_hosts(scope_data):
+            raise ValueError(f"target host {host_query!r} is not present in scope.yaml")
+        target_val = host_query
+    else:
+        raw_values = [
+            value.strip()
+            for key in ("ip_addresses", "urls", "in_scope_urls", "domains", "hostnames", "roles")
+            for value in _values(targets_sec.get(key, []))
+            if value.strip()
+        ]
+        by_host: dict[str, str] = {}
+        for value in raw_values:
+            by_host.setdefault(normalise_target(value), value)
+        if len(by_host) > 1:
+            raise ValueError("multiple targets are in scope; select one with host or role")
+        target_val = next(iter(by_host.values()), None)
 
     if not target_val:
         return None
@@ -208,6 +291,12 @@ def _research_hosts(scope: dict[str, Any]) -> set[str]:
     return {normalise_target(v) for v in _values(scope.get("research_hosts", []))}
 
 
+def is_research_host(scope: dict[str, Any], candidate: str | None) -> bool:
+    """Return whether ``candidate`` is an explicitly authorized research host."""
+    normalized = normalise_target(candidate) if candidate else ""
+    return bool(normalized and _matches_host(normalized, _research_hosts(scope)))
+
+
 def _callback_hosts(scope: dict[str, Any]) -> set[str]:
     """Return operator-approved local callback/listener infrastructure."""
     assessment_hosts = scope.get("assessment_hosts", {}) or {}
@@ -217,7 +306,11 @@ def _callback_hosts(scope: dict[str, Any]) -> set[str]:
 
 
 def check_scope_targets(
-    scope_path: Path, command: str, primary_target: str | None = None
+    scope_path: Path,
+    command: str,
+    primary_target: str | None = None,
+    *,
+    allow_research_primary: bool = False,
 ) -> TargetCheckResult:
     """Block excluded or out-of-scope IP/CIDR targets in ``command``."""
     result = TargetCheckResult()
@@ -225,6 +318,7 @@ def check_scope_targets(
     if scope is None:
         return result
 
+    exclusions = scope.get("exclusions", {}) or {}
     policy = _TargetPolicy(
         allowed=scope_hosts(scope, "targets"),
         excluded=scope_hosts(scope, "exclusions"),
@@ -232,6 +326,8 @@ def check_scope_targets(
         excluded_ip_set=_scope_ip_set(scope, "exclusions"),
         research_hosts=_research_hosts(scope),
         callback_hosts=_callback_hosts(scope),
+        excluded_urls={v for v in _values(exclusions.get("urls", []))},
+        excluded_paths={v for v in _values(exclusions.get("paths", []))},
     )
 
     explicit = normalise_target(primary_target) if primary_target else ""
@@ -239,11 +335,13 @@ def check_scope_targets(
     seen: set[str] = set()
     if explicit:
         seen.add(explicit)
-        policy.check_primary(explicit, result)
+        policy.check_primary(explicit, result, allow_research=allow_research_primary)
     for candidate in candidates:
         if candidate not in seen:
             seen.add(candidate)
             policy.check_secondary(candidate, result)
+
+    policy.check_command_payload(command, result)
     return result
 
 
@@ -262,16 +360,16 @@ def _parse_target_token(token: str) -> str | None:
         return None
     unbracketed = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
 
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(ValueError):
         if "/" in unbracketed:
-            return str(netaddr.IPNetwork(unbracketed).cidr).lower()
-        return str(netaddr.IPAddress(unbracketed)).lower()
+            return str(ipaddress.ip_network(unbracketed, strict=False)).lower()
+        return str(ipaddress.ip_address(unbracketed)).lower()
 
     with contextlib.suppress(Exception):
         url = URL(raw if raw.startswith("//") or "://" in raw else f"//{raw}")
         if url.host:
-            with contextlib.suppress(Exception):
-                return str(netaddr.IPAddress(url.host)).lower()
+            with contextlib.suppress(ValueError):
+                return str(ipaddress.ip_address(url.host)).lower()
             return _valid_hostname(url.host)
 
     return None
@@ -291,7 +389,13 @@ def _dev_network_host(token: str) -> str | None:
 def _valid_hostname(value: str) -> str | None:
     host = value.strip().rstrip(".").lower()
     labels = host.split(".")
-    if not host or len(host) > 253 or len(labels) < 2:
+    if (
+        not host
+        or len(host) > 253
+        or len(labels) < 2
+        or all(label.isdigit() for label in labels)
+        or labels[-1].isdigit()
+    ):
         return None
     if any(
         not label
@@ -333,7 +437,8 @@ def scope_hosts(scope: dict[str, Any], section: str = "targets") -> set[str]:
     """Return canonical hosts from one scope section."""
     values = scope.get(section, {}) or {}
     if section == "exclusions":
-        return {normalise_target(value) for value in _values(values)}
+        keys = ("ip_addresses", "domains", "hostnames", "roles")
+        return {normalise_target(value) for key in keys for value in _values(values.get(key, []))}
     keys = ("ip_addresses", "in_scope_urls", "urls", "domains", "hostnames", "roles")
     return {normalise_target(value) for key in keys for value in _values(values.get(key, []))}
 

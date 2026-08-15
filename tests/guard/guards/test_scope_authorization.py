@@ -66,6 +66,12 @@ def test_dotted_arguments_are_not_treated_as_network_targets_when_they_are_paths
     assert extract_target_candidates(
         "smbclient //10.10.10.10/share -c 'put /tmp/x payload.vsix'"
     ) == ["10.10.10.10"]
+    assert extract_target_candidates("cat evidence/recon/access.token") == []
+    assert "urllib.request" not in extract_target_candidates(
+        "python3 -c 'import urllib.request; urllib.request.urlopen(\"https://target.example\")'"
+    )
+    assert extract_target_candidates("python3 -m json.tool input.json") == []
+    assert extract_target_candidates("curl -u user:pass jwt.io") == []
 
 
 def test_explicit_target_keeps_unknown_bare_hostnames_reviewable(
@@ -152,3 +158,51 @@ def test_direct_dev_tcp_redirection_is_checked_and_not_bookkeeping(tmp_path: Pat
         primary_target="10.10.10.10",
     )
     assert any("10.10.10.99" in error for error in result.errors)
+
+
+def test_parenthetical_scope_actions_are_permitted() -> None:
+    from plugins.violin_guard.command import check_scope_authorization
+    from plugins.violin_guard.phases import Phase
+
+    scope = {
+        "rules_of_engagement": {
+            "allowed_actions": ["exploit validation (in-scope, non-destructive)"],
+            "forbidden_actions": [],
+        }
+    }
+    res = check_scope_authorization(scope, Phase.EXPLOITATION)
+    assert not res.errors
+
+
+def test_vulnerability_research_permits_vuln_research_phase() -> None:
+    from plugins.violin_guard.command import check_scope_authorization
+    from plugins.violin_guard.phases import Phase
+
+    scope = {
+        "rules_of_engagement": {
+            "allowed_actions": ["vulnerability research"],
+            "forbidden_actions": [],
+        }
+    }
+    res = check_scope_authorization(scope, Phase.VULN_RESEARCH)
+    assert not res.errors
+
+
+def test_scope_authorization_error_message_provides_selection_list() -> None:
+    from plugins.violin_guard.command import check_scope_authorization
+    from plugins.violin_guard.phases import Phase
+
+    scope = {
+        "rules_of_engagement": {
+            "allowed_actions": ["vulnerability scanning"],
+            "forbidden_actions": [],
+        }
+    }
+    res = check_scope_authorization(scope, Phase.VULN_RESEARCH)
+    assert len(res.errors) == 1
+    err = res.errors[0]
+    assert "scope/scope.yaml" in err
+    assert "Select and add one of the following valid action strings for VULN_RESEARCH" in err
+    assert "'vulnerability research'" in err
+    assert "'cve-research'" in err
+    assert "current allowed_actions: ['vulnerability scanning']" in err

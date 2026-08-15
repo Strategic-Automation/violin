@@ -19,3 +19,14 @@ def test_concurrent_credit_spends_are_serialised(tmp_path):
 
     assert state.sync_credit_remaining(eng) == 25
     assert sorted(results) == list(range(25, 50))
+
+
+def test_lock_file_releases_lock_path(tmp_path):
+    target = tmp_path / "test.json"
+    lock_file = tmp_path / "test.json.lock"
+    with state.lock_file(target):
+        assert lock_file.exists()
+    acquired = False
+    with state.lock_file(target):
+        acquired = True
+    assert acquired

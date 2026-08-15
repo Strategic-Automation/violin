@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import threading
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ValidationError
 
 from . import (
     code_execution_audit,
@@ -24,12 +29,21 @@ from .skill_receipts import (
 )
 from .terminal_policy import block_terminal_command
 
-__all__ = ["register", "TOOLS", "REGISTERED_TOOLS", "tools"]
+__all__ = [
+    "REGISTERED_TOOLS",
+    "TOOL_DEFINITIONS",
+    "TOOLS",
+    "ToolDefinition",
+    "register",
+    "tools",
+]
 
 TOOLS = handlers
 tools = handlers
 
 _SESSION_ENGAGEMENTS: dict[str, str] = {}
+_EXECUTE_CODE_RECEIPTS: dict[str, tuple[str, str]] = {}
+_EXECUTE_CODE_RECEIPTS_LOCK = threading.Lock()
 _TARGET_TOOLS = {
     "violin_exec",
     "violin_exec_burst",
@@ -46,82 +60,162 @@ _BROWSER_TARGET_TOOLS = {
     "browser_scroll",
 }
 
-# Tool names registered with the Hermes plugin loader. Kept in sync with the
-# registration tuple below; the release gate compares these against
-# plugin.yaml's provides_tools.
-REGISTERED_TOOLS = [
-    "violin_check_command",
-    "violin_record_ptt",
-    "violin_record_hypothesis",
-    "violin_exec",
-    "violin_exec_status",
-    "violin_exec_cancel",
-    "violin_review_batch",
-    "violin_rebind_pending_batch",
-    "violin_heartbeat_done",
-    "violin_exec_burst",
-    "violin_target",
-    "violin_status",
-    "violin_search_exploit",
-    "violin_httpx",
-    "violin_nuclei",
-    "violin_ffuf",
-    "violin_listener",
-]
+
+@dataclass(frozen=True)
+class ToolDefinition:
+    """Single source of truth for one registered Hermes tool."""
+
+    name: str
+    model: type[BaseModel]
+    schema: dict[str, Any]
+    handler: Any
+    emoji: str
+
+
+TOOL_DEFINITIONS = (
+    ToolDefinition(
+        "violin_check_command",
+        schemas.CheckCommandArgsModel,
+        schemas.CHECK_COMMAND_SCHEMA,
+        handlers.handle_check_command,
+        "🛡️",
+    ),
+    ToolDefinition(
+        "violin_record_ptt",
+        schemas.RecordPttArgsModel,
+        schemas.RECORD_PTT_SCHEMA,
+        handlers.handle_record_ptt,
+        "📝",
+    ),
+    ToolDefinition(
+        "violin_record_hypothesis",
+        schemas.RecordHypothesisArgsModel,
+        schemas.RECORD_HYPOTHESIS_SCHEMA,
+        handlers.handle_record_hypothesis,
+        "🔎",
+    ),
+    ToolDefinition(
+        "violin_exec", schemas.ExecArgsModel, schemas.EXEC_SCHEMA, handlers.handle_exec, "⚡"
+    ),
+    ToolDefinition(
+        "violin_exec_status",
+        schemas.ExecStatusArgsModel,
+        schemas.EXEC_STATUS_SCHEMA,
+        handlers.handle_exec_status,
+        "i",
+    ),
+    ToolDefinition(
+        "violin_exec_cancel",
+        schemas.ExecCancelArgsModel,
+        schemas.EXEC_CANCEL_SCHEMA,
+        handlers.handle_exec_cancel,
+        "x",
+    ),
+    ToolDefinition(
+        "violin_review_batch",
+        schemas.ReviewBatchArgsModel,
+        schemas.REVIEW_BATCH_SCHEMA,
+        handlers.handle_review_batch,
+        "✅",
+    ),
+    ToolDefinition(
+        "violin_rebind_pending_batch",
+        schemas.RebindPendingBatchArgsModel,
+        schemas.REBIND_PENDING_BATCH_SCHEMA,
+        handlers.handle_rebind_pending_batch,
+        "↔",
+    ),
+    ToolDefinition(
+        "violin_heartbeat_done",
+        schemas.HeartbeatDoneArgsModel,
+        schemas.HEARTBEAT_DONE_SCHEMA,
+        handlers.handle_heartbeat_done,
+        "💓",
+    ),
+    ToolDefinition(
+        "violin_exec_burst",
+        schemas.ExecBurstArgsModel,
+        schemas.EXEC_BURST_SCHEMA,
+        handlers.handle_exec_burst,
+        "🚀",
+    ),
+    ToolDefinition(
+        "violin_target",
+        schemas.TargetArgsModel,
+        schemas.TARGET_SCHEMA,
+        handlers.handle_target,
+        "🎯",
+    ),
+    ToolDefinition(
+        "violin_status",
+        schemas.StatusArgsModel,
+        schemas.STATUS_SCHEMA,
+        handlers.handle_status,
+        "📊",
+    ),
+    ToolDefinition(
+        "violin_search_exploit",
+        schemas.SearchExploitArgsModel,
+        schemas.SEARCH_EXPLOIT_SCHEMA,
+        handlers.handle_search_exploit,
+        "?",
+    ),
+    ToolDefinition(
+        "violin_httpx", schemas.HttpxArgsModel, schemas.HTTPX_SCHEMA, handlers.handle_httpx, "H"
+    ),
+    ToolDefinition(
+        "violin_nuclei", schemas.NucleiArgsModel, schemas.NUCLEI_SCHEMA, handlers.handle_nuclei, "V"
+    ),
+    ToolDefinition(
+        "violin_ffuf", schemas.FfufArgsModel, schemas.FFUF_SCHEMA, handlers.handle_ffuf, "F"
+    ),
+    ToolDefinition(
+        "violin_listener",
+        schemas.ListenerArgsModel,
+        schemas.LISTENER_SCHEMA,
+        handlers.handle_listener,
+        "L",
+    ),
+)
+
+REGISTERED_TOOLS = [definition.name for definition in TOOL_DEFINITIONS]
+
+
+def _validated_handler(definition: ToolDefinition):
+    """Validate the raw Hermes payload before entering a public handler."""
+
+    def invoke(raw_args=None, **kwargs):
+        try:
+            validated = schemas.validate_args(definition.model, raw_args, strict=True)
+            # Hypothesis writes are PATCH-like.  Preserve the caller's field
+            # presence so omitted optional values do not become empty strings
+            # that erase an existing canonical record.
+            values = validated.model_dump(
+                exclude_unset=definition.model is schemas.RecordHypothesisArgsModel
+            )
+        except ValidationError as exc:
+            return json.dumps(
+                {
+                    "status": "invalid_arguments",
+                    "errors": exc.errors(include_input=False, include_url=False),
+                },
+                ensure_ascii=False,
+            )
+        return definition.handler(values, **kwargs)
+
+    invoke.__name__ = f"validated_{definition.handler.__name__}"
+    return invoke
 
 
 def register(ctx) -> None:
     """Called once by the plugin loader during discovery."""
-    for name, schema, handler, emoji in (
-        ("violin_check_command", schemas.CHECK_COMMAND_SCHEMA, handlers.handle_check_command, "🛡️"),
-        ("violin_record_ptt", schemas.RECORD_PTT_SCHEMA, handlers.handle_record_ptt, "📝"),
-        (
-            "violin_record_hypothesis",
-            schemas.RECORD_HYPOTHESIS_SCHEMA,
-            handlers.handle_record_hypothesis,
-            "🔎",
-        ),
-        ("violin_exec", schemas.EXEC_SCHEMA, handlers.handle_exec, "⚡"),
-        ("violin_exec_status", schemas.EXEC_STATUS_SCHEMA, handlers.handle_exec_status, "i"),
-        ("violin_exec_cancel", schemas.EXEC_CANCEL_SCHEMA, handlers.handle_exec_cancel, "x"),
-        (
-            "violin_review_batch",
-            schemas.REVIEW_BATCH_SCHEMA,
-            handlers.handle_review_batch,
-            "✅",
-        ),
-        (
-            "violin_rebind_pending_batch",
-            schemas.REBIND_PENDING_BATCH_SCHEMA,
-            handlers.handle_rebind_pending_batch,
-            "↔",
-        ),
-        (
-            "violin_heartbeat_done",
-            schemas.HEARTBEAT_DONE_SCHEMA,
-            handlers.handle_heartbeat_done,
-            "💓",
-        ),
-        ("violin_exec_burst", schemas.EXEC_BURST_SCHEMA, handlers.handle_exec_burst, "🚀"),
-        ("violin_target", schemas.TARGET_SCHEMA, handlers.handle_target, "🎯"),
-        ("violin_status", schemas.STATUS_SCHEMA, handlers.handle_status, "📊"),
-        (
-            "violin_search_exploit",
-            schemas.SEARCH_EXPLOIT_SCHEMA,
-            handlers.handle_search_exploit,
-            "?",
-        ),
-        ("violin_httpx", schemas.HTTPX_SCHEMA, handlers.handle_httpx, "H"),
-        ("violin_nuclei", schemas.NUCLEI_SCHEMA, handlers.handle_nuclei, "V"),
-        ("violin_ffuf", schemas.FFUF_SCHEMA, handlers.handle_ffuf, "F"),
-        ("violin_listener", schemas.LISTENER_SCHEMA, handlers.handle_listener, "L"),
-    ):
+    for definition in TOOL_DEFINITIONS:
         ctx.register_tool(
-            name=name,
+            name=definition.name,
             toolset="violin_guard",
-            schema=schema,
-            handler=handler,
-            emoji=emoji,
+            schema=definition.schema,
+            handler=_validated_handler(definition),
+            emoji=definition.emoji,
         )
 
     ctx.register_hook("pre_tool_call", _pre_tool_call_hook)
@@ -155,8 +249,25 @@ def _pre_tool_call_hook(tool_name=None, args=None, **kwargs):
         if blocked:
             return {"action": "block", "message": blocked}
     if tool_name == "execute_code":
-        _metadata, message = code_execution_audit.validate_source(args.get("code"))
-        return None if message is None else {"action": "block", "message": message}
+        tool_call_id = str(kwargs.get("tool_call_id") or "").strip()
+        if not tool_call_id:
+            return {
+                "action": "block",
+                "message": "execute_code requires Hermes tool_call_id for receipt correlation",
+            }
+        with _EXECUTE_CODE_RECEIPTS_LOCK:
+            if tool_call_id in _EXECUTE_CODE_RECEIPTS:
+                return {
+                    "action": "block",
+                    "message": f"execute_code tool_call_id is already active: {tool_call_id}",
+                }
+            try:
+                metadata, receipt = code_execution_audit.prepare_execution(args.get("code"))
+            except Exception as exc:
+                return {"action": "block", "message": str(exc)}
+            receipt_session = session_id or metadata["session_id"]
+            _EXECUTE_CODE_RECEIPTS[tool_call_id] = (receipt_session, str(receipt))
+        return None
     if tool_name != "terminal":
         return None
     message = block_terminal_command(args.get("command", ""))
@@ -166,14 +277,34 @@ def _pre_tool_call_hook(tool_name=None, args=None, **kwargs):
 def _post_tool_call_hook(tool_name=None, args=None, result=None, duration_ms=0, **kwargs):
     """Write the auditable execute-code source receipt after dispatch."""
     if tool_name == "execute_code" and isinstance(args, dict):
-        with contextlib.suppress(Exception):
-            code_execution_audit.record_completion(args.get("code"), result, duration_ms)
-    if tool_name in {"web_search", "web_extract"}:
+        tool_call_id = str(kwargs.get("tool_call_id") or "").strip()
+        if not tool_call_id:
+            raise ValueError("execute_code completion is missing Hermes tool_call_id")
+        session_id = str(kwargs.get("session_id") or "")
+        with _EXECUTE_CODE_RECEIPTS_LOCK:
+            pending = _EXECUTE_CODE_RECEIPTS.get(tool_call_id)
+            if pending is None:
+                raise ValueError("execute_code intent receipt is missing for tool_call_id")
+            receipt_session, receipt = pending
+            if session_id and receipt_session and session_id != receipt_session:
+                raise ValueError(
+                    "execute_code completion session does not match its intent receipt"
+                )
+            _EXECUTE_CODE_RECEIPTS.pop(tool_call_id)
+        try:
+            code_execution_audit.record_completion(
+                args.get("code"), result, duration_ms, receipt_path=receipt
+            )
+        except Exception as exc:
+            code_execution_audit.abandon_execution(receipt, f"completion failed: {exc}")
+            raise
+    if tool_name in {"web_search", "web_extract", "violin_search_exploit"}:
         session_id = str(kwargs.get("session_id") or "")
         eng_dir = _SESSION_ENGAGEMENTS.get(session_id)
         if eng_dir:
             with contextlib.suppress(Exception):
                 state.record_research_attempt(eng_dir, tool_name, not bool(result is None))
+
     if tool_name not in {"violin_record_ptt", "violin_review_batch"}:
         return
     args = args if isinstance(args, dict) else {}
@@ -227,8 +358,24 @@ def _pre_llm_call_hook(session_id=None, eng_dir=None, **kwargs):
     return None
 
 
+def _abandon_execute_code_receipts(session_id: object, reason: str) -> None:
+    session = str(session_id or "")
+    if not session:
+        return
+    with _EXECUTE_CODE_RECEIPTS_LOCK:
+        abandoned: list[str] = []
+        for key, (owner, receipt) in list(_EXECUTE_CODE_RECEIPTS.items()):
+            if owner == session:
+                _EXECUTE_CODE_RECEIPTS.pop(key)
+                abandoned.append(receipt)
+    for receipt in abandoned:
+        with contextlib.suppress(Exception):
+            code_execution_audit.abandon_execution(receipt, reason)
+
+
 def _on_session_reset_hook(session_id=None, eng_dir=None, **kwargs) -> None:
     """Hook: session reset (context compression, /goal set, etc.)."""
+    _abandon_execute_code_receipts(session_id, "session reset before tool completion")
     eng_dir = eng_dir or (_SESSION_ENGAGEMENTS.get(str(session_id)) if session_id else None)
     if eng_dir:
         with contextlib.suppress(Exception):
@@ -284,6 +431,8 @@ def _on_session_finalize_hook(session_id=None, eng_dir=None, **kwargs) -> None:
     Closeout gates are explicit (violin_review_batch / close command). On finalize
     we leave a continuity marker so a fresh session can re-read pending state.
     """
+    _abandon_execute_code_receipts(session_id, "session finalized before tool completion")
+    eng_dir = eng_dir or (_SESSION_ENGAGEMENTS.get(str(session_id)) if session_id else None)
     if eng_dir:
         with contextlib.suppress(Exception):
             pending = state.has_pending_sync(str(eng_dir))

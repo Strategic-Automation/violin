@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <b>31 playbooks · 10 references · 11 templates · required execution guard · Hermes-native</b>
+  <b>31 playbooks · 17 references · 12 templates · required execution guard · Hermes-native</b>
 </p>
 
 Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, three routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
@@ -122,8 +122,8 @@ graph TB
         WEB["web-attacks skill"]
         AC["access-control skill"]
         PB["31 Playbooks"]
-        REF["10 References"]
-        TEMP["11 Templates"]
+        REF["17 References"]
+        TEMP["12 Templates"]
     end
     
     subgraph "Configured Toolsets"
@@ -202,10 +202,53 @@ flowchart LR
 - **Exploit-first validation** — no hypothesis advances to Validated without a verification command
 - **Stateful recovery** — phase summaries and checkpoints restore the current engagement after context compression without starting a new conversation
 - **Self-explaining guard** — `violin_status` (or `python scripts/violin_guard.py status --eng-dir "$ENG_DIR"`) shows the active task and phase, pending commands and their required phases, phase requirements, skill state, blockers, and exact next actions without running a command
-- **Phase-aware work windows** — RECON/VULN_RESEARCH allow 10 guarded commands per reviewed batch; EXPLOITATION/POST_EXPLOITATION/PRIVESC/FLAGS allow 20, and the Hermes profile budget is 350 tool iterations
+- **Phase-aware work windows** — RECON/VULN_RESEARCH allow 10 guarded commands per reviewed batch; EXPLOITATION/POST_EXPLOITATION/PRIVESC/FLAGS allow 20, and the Hermes profile budget is 700 tool iterations
 - **One-call reconciliation** — `violin_review_batch` validates the completed batch, optionally writes its receipt-backed finding, updates the active PTT row once, and clears the batch lock last
 
 Full safety policy: `skills/pentest/references/standards.md`. Forbidden actions: `.hermes.md` §Forbidden Behaviour.
+
+---
+
+## Benchmarks & Evaluation
+
+Violin is evaluated against the **Escape Duck Store** benchmark — a modern-stack (FastAPI + React) target with **20 real-world vulnerabilities** spanning business logic, authorization, injection, and SSRF.
+
+> **Current measured results (deepseek/deepseek-v4-flash-0731):** best single run **17/20**, stable band **14–17/20** across repeated runs. Scoring is run-to-run model-variance dependent; a reliable **18/20+ has not yet been achieved.**
+
+### Duck Store ranking (sourced)
+
+| Rank | Tool | Recall | Model | Source |
+| :---: | :--- | :---: | :--- | :--- |
+| 1 | **Violin** | **17/20** (14–17 stable) | `deepseek-v4-flash-0731` | live runs |
+| 2 | Escape Cascade | 15/20 | proprietary | [escape.tech](https://escape.tech/blog/benchmarking-agentic-ai-pentesting-tools/) |
+| 3 | Claude Opus 4.8 (direct) | 14/20 | Claude Opus 4.8 | [escape.tech](https://escape.tech/blog/modern-ai-powered-pentesting-tools-in-depth-benchmark/) |
+| 4 | PentAGI | 9/20 | DeepSeek v3.2 | [escape.tech](https://escape.tech/blog/ai-pentesting-agents/) |
+| 5 | Shannon | 6/20 | DeepSeek v3.2 | [escape.tech](https://escape.tech/blog/ai-pentesting-agents/) |
+| 6 | Strix | 1/20 | DeepSeek v3.2 | [escape.tech](https://escape.tech/blog/ai-pentesting-agents/) |
+
+Competitor figures are Escape-reported (their agent, their validation); Violin's is self-reported. See [**docs/BENCHMARKS.md**](docs/BENCHMARKS.md) for the full methodology and caveats.
+
+### Tested Models
+
+| Model | Status | Result |
+| :--- | :---: | :--- |
+| **DeepSeek V4 Flash** (`deepseek-v4-flash-0731` / Pro) | **Tested** | Primary evaluation model; 14–17/20 (best 17/20) |
+| **Qwen 3.8 27B** | **In evaluation** | Drives the guard surface and reaches exploitation, but a scored pass has not yet completed |
+| **Qwen 3.5 9B** | Not viable | Empty-response generation instability mid-run |
+| **Gemma 4 26B A4B** | Not viable | Fails scope bootstrap before target execution |
+| **Nemotron 550B / Solar Pro 4** | Not viable | Protocol-incomprehension / hallucination |
+
+*Violin inherits whatever model is configured in your Hermes agent (`hermes config`). Only `deepseek-v4-flash` has produced a reliable scored pass.*
+
+### Running Benchmarks
+
+```bash
+# Run automated benchmark against target
+uv run python -m benchmark.run --target https://duck-store.escape.tech
+
+# Verify scorer calibration (known-good baseline)
+uv run python benchmark/score.py --calibrate known-good
+```
 
 ---
 
@@ -217,6 +260,11 @@ violin/
 ├── SOUL.md                 # Agent identity — senior pentester persona
 ├── config.yaml             # Profile config (toolsets, safety, memory)
 ├── distribution.yaml       # Hermes distribution manifest
+├── benchmark/              # Automated Hermes evaluation and benchmark framework
+│   ├── indexer.py          # Unified engagement artifact indexer with 2MB bounds
+│   ├── run.py              # Automated profile benchmark runner & OpenRouter integration
+│   ├── score.py            # Evidence-gated benchmark scorer & calibration
+│   └── ai_judge.py         # Technical proof quality evaluator & bug auditor
 ├── plugins/violin_guard/   # Required Hermes guard plugin and execution boundary
 │   ├── bash_ast.py         # bashlex AST command tokenization and parsing
 │   ├── terminal_policy.py  # AST-based best-effort blocks for target-touching raw terminal calls
@@ -229,11 +277,11 @@ violin/
 │   ├── smoke-test.ps1      # Windows supplemental smoke
 │   └── kali.sh             # Docker Kali helper
 └── skills/
-    ├── pentest/            # Engagement orchestrator (23 playbooks, 10 refs, 11 templates)
+    ├── pentest/            # Engagement orchestrator (23 playbooks, 17 refs, 12 templates)
     │   ├── SKILL.md
     │   ├── playbooks/      # 7 operational + 16 vulnerability-class playbooks
-    │   ├── references/     # 10 reference files
-    │   └── templates/      # 11 templates (reports, evidence, methodology, contracts)
+    │   ├── references/     # 17 reference files
+    │   └── templates/      # 12 templates (reports, evidence, methodology, contracts, PTY controller)
     ├── web-attacks/        # Routed skill — 5 injection/web playbooks (SQLi, XSS, SSRF, cmdi, traversal)
     └── access-control/     # Routed skill — 3 auth/authorisation playbooks (auth-bypass, IDOR, JWT)
 ```
@@ -250,6 +298,25 @@ Validates the plugin manifest and registered tools, isolated Hermes-style plugin
 
 Hermes skills are loaded on demand and enforced by Violin receipts. Start with `pentest`, then use `violin_record_ptt` to select the route-required skill. The first call prepares its real `skill_view` content without mutating the PTT; repeat the same transition after that tool result returns to the model to bind it. `violin_status` reports the route, binding, context generation, recovery action, and any obsolete legacy marker. Target and browser activity are blocked only in the same model call as delivery or binding, then open automatically on the next tool-loop continuation.
 
+### Bundled & Optional Skills
+
+Violin bundles core operational playbooks out of the box, and supports optional external Hermes skills:
+
+| Skill | Type | Description | Installation |
+|-------|------|-------------|--------------|
+| `pentest` | **Bundled** | Main engagement orchestrator & playbooks | *Included with Violin* |
+| `web-attacks` | **Bundled** | SQLi, XSS, SSRF, command injection, path traversal | *Included with Violin* |
+| `access-control` | **Bundled** | Auth-bypass, IDOR, JWT analysis | *Included with Violin* |
+| `fp-check` | Optional | False positive verification & review gating | `hermes skills install trailofbits/skills/plugins/fp-check/skills/fp-check` |
+| `domain-intel` | Optional | Domain & DNS intelligence gathering | `hermes skills install official/research/domain-intel` |
+| `osint-investigation` | Optional | Public records & OSINT investigation | `hermes skills install official/research/osint-investigation` |
+| `sherlock` | Optional | Account & identity enumeration | `hermes skills install official/security/sherlock` |
+| `oss-forensics` | Optional | Supply-chain & repository forensics | `hermes skills install official/security/oss-forensics` |
+| `audit-context-building` | Optional | Codebase audit context building | `hermes skills install trailofbits/skills/plugins/audit-context-building/skills/audit-context-building` |
+| `semgrep` | Optional | Static code analysis | `hermes skills install trailofbits/skills/plugins/static-analysis/skills/semgrep` |
+| `codeql` | Optional | CodeQL semantic code analysis | `hermes skills install trailofbits/skills/plugins/static-analysis/skills/codeql` |
+| `sarif-parsing` | Optional | SARIF report parsing & review | `hermes skills install trailofbits/skills/plugins/static-analysis/skills/sarif-parsing` |
+
 ---
 
 ## Optional: Kali Docker Container
@@ -257,19 +324,25 @@ Hermes skills are loaded on demand and enforced by Violin receipts. Start with `
 <details>
 <summary><b>One-time setup for a full Kali toolchain on any OS</b></summary>
 
-See [`scripts/kali.sh`](scripts/kali.sh) for the container exec helper.
+See [`Dockerfile`](Dockerfile) for the unified container build (includes `nmap`, `gobuster`, `sqlmap`, `nikto`, `hydra`, `ffuf`, `whatweb`, `nuclei`, `httpx-toolkit`, `dnsutils`/`dig`, `jq`, `dnsx`, `subfinder`, `tirith`, and `duckduckgo-search`).
 
 ```bash
-docker pull kalilinux/kali-rolling
-docker create -it --name kali-pentest \
-  -v /path/to/violin/engagements:/engagements \
-  kalilinux/kali-rolling bash
-docker start kali-pentest
-docker exec kali-pentest apt update
-docker exec kali-pentest apt install -y kali-linux-headless
+# Build the unified Hermes + Violin container image
+docker build -t violin-hermes:latest .
+
+# Run benchmark inside container with mounted host engagements directory
+# (Automatically generates timestamped results in engagements/benchmark-run-YYYYMMDD_HHMMSS)
+docker run -it --rm \
+  -e OPENROUTER_API_KEY="$OPENROUTER_API_KEY" \
+  -v $(pwd)/engagements:/violin/engagements \
+  violin-hermes:latest \
+  uv run python -m benchmark.run --target https://duck-store.escape.tech
 ```
 
+See [`scripts/kali.sh`](scripts/kali.sh) for the host container exec helper.
+
 </details>
+
 
 ## Contributing
 

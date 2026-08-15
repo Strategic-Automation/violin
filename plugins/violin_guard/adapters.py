@@ -6,12 +6,14 @@ Pure command construction — no execution.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -20,8 +22,10 @@ __all__ = [
     "build_httpx",
     "build_nuclei",
     "build_ffuf",
+    "resolve_ffuf_wordlist",
     "build_netcat_listener",
     "detect_netcat_variant",
+    "is_projectdiscovery_httpx",
     "search_exploit",
     "AdapterError",
 ]
@@ -42,6 +46,40 @@ class ToolAvailability:
     message: str = ""
 
 
+def is_projectdiscovery_httpx(output: str) -> bool:
+    """Classify whether a help/version string belongs to ProjectDiscovery httpx."""
+    text = output.lower()
+    return any(
+        k in text for k in ("projectdiscovery", "status-code", "tech-detect", "follow-redirects")
+    )
+
+
+@lru_cache(maxsize=8)
+def _installed_httpx_binary() -> str:
+    """Resolve ProjectDiscovery httpx binary ('httpx-toolkit' or 'httpx')."""
+    if shutil.which("httpx-toolkit"):
+        return "httpx-toolkit"
+
+    path = shutil.which("httpx")
+    if path:
+        try:
+            res = subprocess.run(
+                [path, "-h"], capture_output=True, text=True, timeout=5, check=False
+            )
+            if is_projectdiscovery_httpx(f"{res.stdout}\n{res.stderr}"):
+                return "httpx"
+            raise AdapterError(
+                "httpx on PATH is Python httpx HTTP client, not ProjectDiscovery httpx scanner. "
+                "Use curl/nmap/whatweb instead."
+            )
+        except AdapterError:
+            raise
+        except Exception as exc:
+            raise AdapterError(f"failed probing httpx binary: {exc}") from exc
+
+    raise AdapterError("httpx is not installed or not on PATH")
+
+
 def available(tool: str, backend: str = "local") -> ToolAvailability:
     """Report whether a CLI tool can be resolved without touching a target."""
 
@@ -50,6 +88,29 @@ def available(tool: str, backend: str = "local") -> ToolAvailability:
         raise AdapterError("tool must be one executable name")
     if backend != "local":
         raise AdapterError("availability probes currently support the local backend only")
+
+    if name == "httpx":
+        if not (shutil.which("httpx-toolkit") or shutil.which("httpx")):
+            return ToolAvailability(
+                False,
+                "httpx",
+                backend,
+                message="httpx is not installed or not on PATH",
+            )
+        try:
+            bin_name = _installed_httpx_binary()
+            path = shutil.which(bin_name) or shutil.which("httpx") or ""
+            return ToolAvailability(
+                True, bin_name, backend, path=path, message=f"{bin_name} is available"
+            )
+        except AdapterError as exc:
+            return ToolAvailability(
+                False,
+                "httpx",
+                backend,
+                path=shutil.which("httpx") or "",
+                message=str(exc),
+            )
 
     path = shutil.which(name)
     if path:
@@ -82,7 +143,8 @@ def build_httpx(args: dict) -> str:
     if not target:
         raise AdapterError("target is required")
 
-    parts = ["httpx", "-u", _quote(target), "-json"]
+    bin_name = _installed_httpx_binary()
+    parts = [bin_name, "-u", _quote(target), "-json"]
 
     extra = _extra(args.get("extra_args"))
     if extra:
@@ -139,6 +201,63 @@ def build_ffuf(args: dict) -> str:
         parts.append(extra)
 
     return " ".join(parts)
+
+
+def resolve_ffuf_wordlist(requested: object = "", eng_dir: object = "") -> str:
+    """Resolve an ffuf wordlist across common Kali, Parrot, custom installs, and engagement evidence."""
+
+    candidates: list[Path] = []
+    requested_text = os.path.expandvars(str(requested or "").strip())
+    if requested_text:
+        candidates.append(Path(requested_text).expanduser())
+
+    eng_text = os.path.expandvars(
+        str(
+            eng_dir or os.environ.get("ENG_DIR", "") or os.environ.get("VIOLIN_ENG_ROOT", "")
+        ).strip()
+    )
+    if eng_text:
+        eng_path = Path(eng_text).expanduser()
+        candidates.extend(
+            (
+                eng_path / "evidence" / "recon" / "focused_wordlist.txt",
+                eng_path / "evidence" / "recon" / "wordlist.txt",
+                eng_path / "evidence" / "wordlist.txt",
+            )
+        )
+
+    seclists_root = os.environ.get("SECLISTS", "").strip()
+    if seclists_root:
+        candidates.append(
+            Path(os.path.expandvars(seclists_root)).expanduser()
+            / "Discovery"
+            / "Web-Content"
+            / "common.txt"
+        )
+    candidates.extend(
+        (
+            Path("/usr/share/seclists/Discovery/Web-Content/common.txt"),
+            Path("/usr/share/dirb/wordlists/common.txt"),
+            Path("/usr/share/wordlists/dirb/common.txt"),
+        )
+    )
+
+    checked: list[str] = []
+    for candidate in candidates:
+        candidate_text = str(candidate)
+        if candidate_text in checked:
+            continue
+        checked.append(candidate_text)
+        if candidate.is_file():
+            return candidate_text
+
+    locations = ", ".join(checked)
+    raise AdapterError(
+        "ffuf wordlist not found; checked "
+        f"{locations}. Pass an existing wordlist, install the seclists package, "
+        "or set SECLISTS to a SecLists checkout. A target-derived focused wordlist "
+        "is also acceptable when recorded in engagement evidence."
+    )
 
 
 def detect_netcat_variant(version_output: str) -> str:
@@ -254,7 +373,7 @@ def search_exploit(args: dict) -> dict[str, Any]:
         return {
             "available": False,
             "tool": "searchsploit",
-            "message": "searchsploit is not installed or not on PATH",
+            "message": "searchsploit is not installed or not on PATH; install exploitdb via 'apt install exploitdb'",
             "candidates": [],
             "online_corroboration_required": True,
             "executed_candidates": False,

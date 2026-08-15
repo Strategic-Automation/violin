@@ -38,6 +38,30 @@ curl -s -X POST 'https://target.com/login' -d 'username=admin&password=1234'
 curl -s -X POST 'https://target.com/login' -d 'username=guest&password=guest'
 ```
 
+**When to run this:** immediately after user enumeration identifies an admin
+account (email prefix `admin`, role field, `isAdmin`, or the admin listed
+first), try the small default/weak set against that account on the login
+API — `admin:admin`, `admin:password`, `admin:123456`, plus the discovered
+admin email with `password`, `admin`, `123456`, `welcome1`. A handful of
+hand-testable weak pairs is NOT brute force and needs no extra
+authorisation. **Do NOT stop at the first session-establishing response** —
+enumerate the whole small set and record *every* successful pair, because
+the strongest privilege evidence (an `admin` role grant) may come from a
+later pair even when an earlier pair also logs in. Record each successful
+pair with its request/response under `evidence/vuln-research/`, and quote
+the exact username/password that produced the admin-level token. Also probe
+JSON login bodies with the trivial `"password":"password"` form — some
+frameworks only accept defaults via their typed request model.
+
+**Canonizing the win:** when a default/weak credential pair succeeds, the
+canonical `FIND-NNN.md` MUST quote the raw JSON field that proves the
+escalation — e.g. `"role":"admin"` or `role=admin`, exactly as the server
+returned it — and state the exact pair (`admin:password` style), the
+session-issuing response (e.g. `HTTP/1.1 200` with `token`/`role` in the
+body), and the concrete field that changed (`role`). A finding that says only
+`admin login works` without the raw JSON role field is unverifiable even with
+decisive evidence.
+
 ### Auth Parameter Manipulation
 
 ```bash

@@ -19,6 +19,7 @@ __all__ = [
     "SkillSpec",
     "catalog_snapshot",
     "resolve_skill_route",
+    "skill_spec",
     "validate_catalog",
     "validate_skill_selection",
 ]
@@ -172,6 +173,8 @@ _VULNERABILITY_ROUTES = {
     "auth-bypass": "access-control",
     "authentication": "access-control",
     "authorization": "access-control",
+    "broken-access-control": "access-control",
+    "broken-object-level-authorization": "access-control",
     "idor": "access-control",
     "jwt": "access-control",
     "command-injection": "web-attacks",
@@ -179,7 +182,12 @@ _VULNERABILITY_ROUTES = {
     "sqli": "web-attacks",
     "sql-injection": "web-attacks",
     "ssrf": "web-attacks",
+    "server-side-request-forgery": "web-attacks",
     "xss": "web-attacks",
+    "cross-site-scripting": "web-attacks",
+    "business-logic": "web-attacks",
+    "business-logic-flaw": "web-attacks",
+    "logic-flaw": "web-attacks",
     "source-analysis": "audit-context-building",
     "static-analysis": "semgrep",
     "sarif": "sarif-parsing",
@@ -208,12 +216,36 @@ _PHASE_DEFAULTS = {
     Phase.PRIVESC: "pentest",
     Phase.FLAGS: "pentest",
     Phase.REPORTING: "pentest",
-    Phase.RETROSPECTIVE: "fp-check",
+    Phase.RETROSPECTIVE: "pentest",
 }
+
+
+def _candidate_source_guidance() -> str:
+    """Render the public, normalized candidate-source vocabulary and its routes."""
+
+    return ", ".join(f"{source} -> {skill}" for source, skill in sorted(_SOURCE_ROUTES.items()))
+
+
+def _route_basis(decision: RouteDecision) -> str:
+    """Explain the highest-priority input that selected one mandatory skill."""
+
+    if decision.vulnerability_class in _VULNERABILITY_ROUTES:
+        return (
+            f"vulnerability_class {decision.vulnerability_class!r} "
+            "(vulnerability routes take precedence over candidate_source)"
+        )
+    if decision.candidate_source in _SOURCE_ROUTES:
+        return f"candidate_source {decision.candidate_source!r}"
+    return f"phase {decision.phase!r} default"
 
 
 def _normalise(value: str | None) -> str:
     return "-".join((value or "").strip().lower().replace("_", "-").split())
+
+
+def skill_spec(name: str) -> SkillSpec | None:
+    """Return catalog provenance and installation guidance for a skill."""
+    return _CATALOG_BY_NAME.get(_normalise(name))
 
 
 def validate_catalog(catalog: Iterable[SkillSpec] = CATALOG) -> tuple[str, ...]:
@@ -284,9 +316,17 @@ def resolve_skill_route(
         selected = _PHASE_DEFAULTS[canonical_phase]
     mismatch: list[str] = list(catalog_errors)
     if raw_vulnerability and raw_vulnerability not in _VULNERABILITY_ROUTES:
-        mismatch.append(f"unknown vulnerability class: {vulnerability_class}")
+        valid_classes = ", ".join(sorted(_VULNERABILITY_ROUTES.keys()))
+        mismatch.append(
+            f"unknown vulnerability class: {vulnerability_class}; valid classes are: {valid_classes}"
+        )
     if raw_source and raw_source not in _SOURCE_ROUTES:
-        mismatch.append(f"unknown candidate source: {candidate_source}")
+        mismatch.append(
+            f"unknown candidate source: {candidate_source!r}; accepted normalized values and routes: "
+            + _candidate_source_guidance()
+            + ". If this value names a vulnerability type (for example jwt, idor, xss, or ssrf), "
+            "pass it as vuln_class instead of candidate_source."
+        )
     allowed = () if mismatch else (selected,)
     return RouteDecision(
         canonical_phase.value, raw_vulnerability, raw_source, selected, allowed, tuple(mismatch)
@@ -304,10 +344,22 @@ def validate_skill_selection(
     decision = resolve_skill_route(phase, vulnerability_class, candidate_source)
     selection = _normalise(selected_skill)
     reasons = list(decision.mismatch_reasons)
+    if selection == "fp-check" and decision.phase == Phase.RETROSPECTIVE.value and not reasons:
+        return RouteDecision(
+            decision.phase,
+            decision.vulnerability_class,
+            decision.candidate_source,
+            selection,
+            (selection,),
+            (),
+        )
     if selection not in _CATALOG_BY_NAME:
         reasons.append(f"unknown or unapproved skill: {selected_skill}")
     elif decision.allowed and selection not in decision.allowed:
-        reasons.append(f"skill {selected_skill} is not permitted; expected {decision.selected}")
+        reasons.append(
+            f"skill {selected_skill!r} is not permitted; expected {decision.selected!r} "
+            f"because {_route_basis(decision)}. Set skill={decision.selected!r}."
+        )
     return RouteDecision(
         decision.phase,
         decision.vulnerability_class,

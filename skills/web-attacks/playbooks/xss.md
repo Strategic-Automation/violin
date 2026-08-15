@@ -67,6 +67,10 @@ jaVasCript:/*-/*`/*\`/*'/*"/**/(/ /* */oNcliCk=alert(1) )//%0D%0A%0D%0A//</stYle
 - JSON POST bodies (API endpoints)
 - Review/rating fields (stored XSS vectors)
 - Contact/feedback forms (blind XSS vectors — triggers in admin panel)
+- URL-valued fields in any form (avatar/image/link/website inputs):
+  `javascript:alert(1)`, `data:text/html,<script>…</script>`, and
+  `http://x/"><img src=x onerror=alert(1)>` — these are stored and render
+  in other users' contexts, so they double as blind vectors
 
 ### Stored XSS Detection
 
@@ -225,9 +229,3 @@ The following are **never** permitted during authorized testing unless explicitl
 | **Self-XSS without chaining** | Low-severity finding — don't report unless it can be chained |
 | Payloads that exfiltrate to external hosts | Requires attacker-controlled infrastructure; data leakage |
 ---
-
-last_updated: 2026-07-05
-updated_reason: |
-  Retrospective gap analysis found 9 XSS challenges (100% miss rate).
-  Added stored XSS, blind XSS, SVG/XML XSS, HTTP header XSS sub-techniques
-  with detection commands and testing locations.

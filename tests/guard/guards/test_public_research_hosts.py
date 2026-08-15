@@ -15,6 +15,30 @@ def test_public_research_host_is_not_treated_as_an_assessment_target(tmp_path):
     assert not result.errors
 
 
+def test_public_research_host_can_be_an_explicit_research_target(tmp_path):
+    scope = {
+        "targets": {"ip_addresses": ["10.10.10.10"]},
+        "research_hosts": ["api.osv.dev"],
+    }
+    path = Path(tmp_path / "scope.yaml")
+    path.write_text(yaml.safe_dump(scope), encoding="utf-8")
+
+    blocked = check_scope_targets(
+        path,
+        "curl https://api.osv.dev/v1/query",
+        primary_target="api.osv.dev",
+    )
+    assert any("secondary-only" in error for error in blocked.errors)
+
+    allowed = check_scope_targets(
+        path,
+        "curl https://api.osv.dev/v1/query",
+        primary_target="api.osv.dev",
+        allow_research_primary=True,
+    )
+    assert not allowed.errors
+
+
 def test_unlisted_public_host_still_requires_review(tmp_path):
     scope = {"targets": {"ip_addresses": ["10.10.10.10"]}, "research_hosts": []}
     path = Path(tmp_path / "scope.yaml")

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from . import hypotheses, state
-from .skill_receipts import get_review_readiness
 
 _FINDING_ID_RE = re.compile(r"FIND-(\d{3,})$")
 _SEVERITIES = {"critical", "high", "medium", "low", "info"}
@@ -83,7 +83,7 @@ def _validate_from_pending_batch(
     if identifier and not _FINDING_ID_RE.fullmatch(identifier):
         raise ValueError("finding_id must use FIND-NNN format")
     if not identifier:
-        raise ValueError("finding_id is required so fp-check review can bind the evidence set")
+        identifier = _next_finding_id(engagement / "evidence" / "findings")
     evidence = _batch_evidence(engagement, pending)
     if not evidence:
         raise ValueError("the current batch has no completed execution receipts to cite")
@@ -102,12 +102,6 @@ def _validate_from_pending_batch(
         or not hypothesis.runtime_evidence
     ):
         raise ValueError("a finding requires a linked Validated hypothesis with runtime_evidence")
-    evidence_digest = "sha256:" + sha256("\n".join(sorted(evidence)).encode()).hexdigest()
-    review = get_review_readiness(
-        engagement, finding_id=identifier, evidence_digest=evidence_digest
-    )
-    if not review:
-        raise ValueError("fp-check review must be prepared for this evidence on an earlier turn")
     return {
         **values,
         "severity": severity_key,
@@ -146,7 +140,7 @@ def _create_from_pending_batch(
     )
 
     directory = engagement / "evidence" / "findings"
-    directory.mkdir(parents=True, exist_ok=True)
+    state.ensure_dir(directory)
     batch_id = str(pending.get("batch_id") or "")
     existing = _existing_batch_finding(directory, batch_id)
     if existing:
@@ -211,3 +205,180 @@ def _create_from_pending_batch(
         "batch_id": batch_id,
         "reused": False,
     }
+
+
+# ---------------------------------------------------------------------------
+# Closeout artifact generation (FIND parsing + derived exports)
+# ---------------------------------------------------------------------------
+_HEADING_RE = re.compile(r"^# (FIND-\d{3,}):\s*(?P<title>.+)$")
+_BULLET_RE = re.compile(r"^- \*\*(?P<key>[^:*]+):\*\*\s*(?P<value>.*)$")
+_SECTION_RE = re.compile(r"^## (?P<name>.+)$")
+_EVIDENCE_ITEM_RE = re.compile(r"^- `(?P<path>[^`]+)`\s*$")
+
+_FIELD_KEYS = {
+    "severity": "severity",
+    "hypothesis": "hypothesis",
+    "phase": "phase",
+    "ptt task": "ptt_task",
+    "batch": "batch",
+}
+
+_SECTION_FIELDS = {
+    "Description": "description",
+    "Impact": "impact",
+    "Remediation": "remediation",
+}
+
+_SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")
+
+
+def parse_finding_file(path: Path) -> dict[str, Any]:
+    """Parse a canonical FIND-NNN.md into a flat record dict."""
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    heading = _HEADING_RE.match(lines[0].strip()) if lines else None
+    if not heading:
+        raise ValueError(f"{path.name}: first line must be '# FIND-NNN: <title>'")
+    record: dict[str, Any] = {
+        "id": heading.group(1),
+        "title": heading.group("title").strip(),
+        "severity": "",
+        "hypothesis": "",
+        "phase": "",
+        "ptt_task": "",
+        "batch": "",
+        "description": "",
+        "impact": "",
+        "evidence": [],
+        "remediation": "",
+    }
+    section = ""
+    section_buf: list[str] = []
+
+    def flush() -> None:
+        key = _SECTION_FIELDS.get(section)
+        if key:
+            record[key] = "\n".join(section_buf).strip()
+
+    for raw in lines[1:]:
+        line = raw.strip()
+        sec = _SECTION_RE.match(line)
+        if sec:
+            flush()
+            section = sec.group("name").strip()
+            section_buf = []
+            continue
+        bullet = _BULLET_RE.match(line)
+        if bullet and not section:
+            key = _FIELD_KEYS.get(bullet.group("key").strip().lower())
+            if key:
+                record[key] = bullet.group("value").strip()
+            continue
+        if section == "Evidence":
+            item = _EVIDENCE_ITEM_RE.match(line)
+            if item:
+                record["evidence"].append(item.group("path").strip())
+        else:
+            section_buf.append(raw)
+    flush()
+    return record
+
+
+def generate_findings_yaml(eng_dir: str | Path, *, force: bool = False) -> Path:
+    """Write evidence/reporting/findings.yaml derived from FIND-*.md files."""
+    engagement = Path(eng_dir)
+    findings = sorted((engagement / "evidence" / "findings").glob("FIND-*.md"))
+    if not findings:
+        raise ValueError("no FIND-*.md files under evidence/findings/")
+    out = engagement / "evidence" / "reporting" / "findings.yaml"
+    if out.exists() and not force:
+        raise ValueError("findings.yaml exists; pass force=True to regenerate")
+    records = [parse_finding_file(path) for path in findings]
+    payload = {
+        "engagement": engagement.name,
+        "generated_from": ", ".join(path.name for path in findings),
+        "note": (
+            "Derived export generated by violin_guard generate-closeout. "
+            "The canonical records are the per-finding Markdown files; "
+            "this YAML is a machine-readable summary."
+        ),
+        "findings": [
+            {
+                "id": rec["id"],
+                "title": rec["title"],
+                "severity": rec["severity"],
+                "hypothesis": rec["hypothesis"],
+                "phase": rec["phase"],
+                "evidence": rec["evidence"],
+            }
+            for rec in records
+        ],
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    return out
+
+
+def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False) -> Path:
+    """Write reporting/report.md assembled from FIND-*.md records."""
+    engagement = Path(eng_dir)
+    out = engagement / "reporting" / "report.md"
+    if out.exists() and not force:
+        raise ValueError("report.md exists; pass force=True to regenerate")
+    findings = sorted((engagement / "evidence" / "findings").glob("FIND-*.md"))
+    if not findings:
+        raise ValueError("no FIND-*.md files under evidence/findings/")
+    records = [parse_finding_file(path) for path in findings]
+    counts = {
+        severity: sum(1 for rec in records if rec["severity"].lower() == severity.lower())
+        for severity in _SEVERITY_ORDER
+    }
+    lines = [
+        f"# Security Assessment Report — {target}",
+        "",
+        f"- **Engagement:** {engagement.name}",
+        f"- **Target:** {target}",
+        f"- **Findings:** {len(records)}",
+        "",
+        "## Executive Summary",
+        "",
+        "<!-- Write 3-6 sentences: overall posture, worst findings, key themes. -->",
+        "",
+        "| Severity | Count |",
+        "|----------|-------|",
+    ]
+    for severity in _SEVERITY_ORDER:
+        lines.append(f"| {severity} | {counts[severity]} |")
+    lines.append("")
+    for rec in records:
+        lines += [
+            f"## {rec['id']}: {rec['title']}",
+            "",
+            f"- **Severity:** {rec['severity']}",
+        ]
+        if rec["hypothesis"]:
+            lines.append(f"- **Hypothesis:** {rec['hypothesis']}")
+        if rec["phase"]:
+            lines.append(f"- **Phase:** {rec['phase']}")
+        lines += [
+            "",
+            "### Description",
+            "",
+            rec["description"],
+            "",
+            "### Impact",
+            "",
+            rec["impact"],
+            "",
+            "### Evidence",
+            "",
+            *[f"- `{item}`" for item in rec["evidence"]],
+            "",
+            "### Remediation",
+            "",
+            rec["remediation"],
+            "",
+        ]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return out

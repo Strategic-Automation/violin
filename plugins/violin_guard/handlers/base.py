@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -47,8 +48,43 @@ def _result(r) -> dict[str, list[str]]:
     return {"errors": r.errors, "warnings": r.warnings, "infos": r.infos}
 
 
+def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
+    """Append a framework_feedback.md row when the guard blocks or reviews.
+
+    Only writes when state/framework_feedback.md already exists — engagement
+    initialization creates it. Engagements without the file are untouched.
+    Recording here means friction is captured at the moment it happens, with
+    zero agent bookkeeping, so the agent never has to reconstruct what was
+    blocked from memory at the end of the run.
+    """
+    feedback = eng_dir / "state" / "framework_feedback.md"
+    if not feedback.exists():
+        return
+    rows = [("Guard Block", err) for err in result.errors] + [
+        ("Guard Review", warn) for warn in result.warnings
+    ]
+    if not rows:
+        return
+    existing = feedback.read_text(encoding="utf-8", errors="replace")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines = []
+    for category, issue in rows:
+        safe = str(issue).replace("|", "\\|").replace("\n", " ").strip()
+        if safe in existing:  # avoid spam from repeated identical failures
+            continue
+        lines.append(
+            f"| {now} | {category} | {safe} | "
+            f"command blocked: {command[:100]} | "
+            f"use violin_record_hypothesis / violin_record_ptt / violin_exec with valid inputs |"
+        )
+    if not lines:
+        return
+    with feedback.open("a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
 def _check_command_internal(a) -> cmd_module.CheckResult:
-    return cmd_module.check_command(
+    result = cmd_module.check_command(
         CheckCommandArgs(
             command=a.get("command", ""),
             phase=a.get("phase", ""),
@@ -56,8 +92,16 @@ def _check_command_internal(a) -> cmd_module.CheckResult:
             scope=a.get("scope", ""),
             target=a.get("target"),
             session_id=a.get("session_id"),
+            hypothesis_id=a.get("hypothesis_id"),
         )
     )
+    try:
+        eng_path = state.resolve_eng_dir(a.get("eng_dir", ""))
+    except Exception:  # noqa: BLE001 — logging must never break the gate
+        eng_path = None
+    if eng_path is not None and (result.errors or result.warnings):
+        _log_guard_friction(eng_path, result, a.get("command", ""))
+    return result
 
 
 def _call(fn, args, **kwargs) -> Any:

@@ -1,9 +1,10 @@
 ---
 name: access-control
-description: "Use when an authorized engagement's PTT or hypothesis identifies authentication bypass, JWT weakness, IDOR, or broken authorization. Select it through the Violin receipt flow, then load the matching playbook for controlled validation and evidence."
+description: "Auth and authorization testing: JWT, IDOR, auth bypass."
 version: 1.0.0
 author: Violin
 license: MIT
+platforms: [linux]
 metadata:
   hermes:
     tags: [pentest, access-control, auth, owasp]

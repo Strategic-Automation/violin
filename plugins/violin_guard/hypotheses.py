@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .phases import normalize_phase
+from .state import atomic_text, ensure_dir
 from .targets import normalise_target
 
 __all__ = [
@@ -195,7 +196,10 @@ def _normalise_id(value: Any) -> str:
     if not normalized:
         return ""
     if not normalized.isdigit():
-        raise ValueError("hypothesis id must be numeric or in the form H-001")
+        raise ValueError(
+            "hypothesis id must be numeric or in the form H-001 (e.g. H-100, 100); "
+            "use the next free H-NNN for new hypotheses"
+        )
     return normalized.zfill(3)
 
 
@@ -277,7 +281,9 @@ def _validate_rejection_fields(fields: dict[str, Any]) -> list[str]:
 
 
 def validate_hypothesis_record(
-    fields: dict[str, Any], in_scope_hosts: set[str] | None = None
+    fields: dict[str, Any],
+    in_scope_hosts: set[str] | None = None,
+    engagement_dir: Path | None = None,
 ) -> list[str]:
     """Audit P1-hyp: fail-closed validation of a hypothesis record before write.
 
@@ -312,11 +318,32 @@ def validate_hypothesis_record(
             f"target '{target}' is not in scope; record a hypothesis only for in-scope hosts"
         )
     errors.extend(_validate_rejection_fields(fields))
-    if (
-        _normalize_status(str(fields.get("status") or "Candidate")) == "Validated"
-        and not str(fields.get("runtime_evidence") or "").strip()
-    ):
-        errors.append("Validated requires runtime_evidence; source evidence alone is not proof")
+    if _normalize_status(str(fields.get("status") or "Candidate")) == "Validated":
+        raw_evidence = str(fields.get("runtime_evidence") or "").strip()
+        if not raw_evidence:
+            errors.append(
+                "status='Validated' requires the 'runtime_evidence' field (e.g. "
+                "'evidence/executions/001-command.json' or 'evidence/exploitation/poc.txt'); "
+                "source evidence alone is not proof"
+            )
+        elif engagement_dir is not None:
+            relative = Path(raw_evidence)
+            evidence_root = (engagement_dir / "evidence").resolve()
+            candidate = (
+                (engagement_dir / relative).resolve()
+                if not relative.is_absolute()
+                else relative.resolve()
+            )
+            if relative.is_absolute() or not candidate.is_relative_to(evidence_root):
+                errors.append(
+                    "runtime_evidence must be an engagement-relative path beneath evidence/"
+                )
+            elif relative.is_symlink() or not candidate.is_file():
+                errors.append(
+                    f"runtime_evidence does not name an existing regular file: {raw_evidence}"
+                )
+            elif candidate.stat().st_size == 0:
+                errors.append(f"runtime_evidence must not be empty: {raw_evidence}")
     return errors
 
 
@@ -334,6 +361,13 @@ def update_hypothesis(
     """
     normalized_fields = dict(fields)
     hypotheses_list = parse_hypotheses(path)
+    ids = [hypothesis.id for hypothesis in hypotheses_list]
+    duplicate_ids = sorted({identifier for identifier in ids if ids.count(identifier) > 1})
+    if duplicate_ids:
+        raise ValueError(
+            "hypotheses.md contains duplicate IDs; repair the board before updating: "
+            + ", ".join(f"H-{identifier}" for identifier in duplicate_ids)
+        )
     supplied_id = fields.get("id")
     if supplied_id:
         normalized_fields["id"] = _normalise_id(supplied_id)
@@ -377,7 +411,9 @@ def update_hypothesis(
         runtime_evidence=(merged_fields.get("runtime_evidence") or "").strip(),
         updated=(merged_fields.get("updated") or "").strip(),
     )
-    errors = validate_hypothesis_record(temp.to_dict(), in_scope_hosts=in_scope_hosts)
+    errors = validate_hypothesis_record(
+        temp.to_dict(), in_scope_hosts=in_scope_hosts, engagement_dir=path.resolve().parent
+    )
     if errors:
         raise ValueError("; ".join(errors))
 
@@ -407,14 +443,24 @@ def update_hypothesis(
     # Always update timestamp
     target.updated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
 
-    # Rewrite file
+    original = path.read_text(encoding="utf-8") if path.exists() else ""
+
+    # Rewrite file, then verify the requested canonical ID was the sole record
+    # changed. A malformed board must fail closed rather than silently merging
+    # a new record into a neighbouring hypothesis.
     _rewrite_hypotheses(path, hypotheses_list)
+    persisted = [hypothesis for hypothesis in parse_hypotheses(path) if hypothesis.id == h_id]
+    if len(persisted) != 1 or persisted[0].title != target.title:
+        atomic_text(path, original)
+        raise ValueError(
+            f"hypothesis update integrity check failed for H-{h_id}; original board was restored"
+        )
     return target
 
 
 def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
     """Rewrite the hypotheses file while preserving structural sections (Decoy Trail, Observations, etc.)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(path.parent)
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
 
     # Remove template instruction HTML comment if present
@@ -450,4 +496,4 @@ def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
 
     body = "\n".join(h.to_markdown() for h in hypotheses_list)
     content = header + body + ("\n\n" + trailer if trailer else "\n")
-    path.write_text(content, encoding="utf-8")
+    atomic_text(path, content)

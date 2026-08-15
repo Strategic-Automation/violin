@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .phases import Phase, normalize_phase
+from .state import atomic_text
 
 __all__ = [
     "PttTask",
@@ -19,6 +20,8 @@ __all__ = [
     "find_active_task",
     "task_matches_phase",
     "update_task",
+    "update_tasks",
+    "sync_ptt",
 ]
 
 
@@ -151,55 +154,65 @@ def task_matches_phase(task: PttTask, phase: Phase | str) -> bool:
     return task.phase == expected.value
 
 
-def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
-    """Update a single PTT task row IN PLACE.
+def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, PttTask]:
+    """Validate and atomically apply one or more task-row updates.
 
     The PTT is a human-authored document (prose, multiple tables, headings).
-    This function rewrites only the matching row line and leaves every other
+    This function rewrites only matching row lines and leaves every other
     line untouched (audit P0: the previous implementation flattened the whole
-    document and could silently *create* a task to satisfy a caller). Creating
-    a task is now a hard error — the guard must never invent tasks to unlock a
-    batch.
+    document). Every target and status is validated before the atomic replace.
     """
-    status = status.strip()
-    if status not in _VALID_STATUSES:
-        raise ValueError(f"invalid PTT status {status!r}; expected one of {_VALID_STATUSES}")
+    normalized: dict[str, tuple[str, str]] = {}
+    for task_id, (status, note) in updates.items():
+        status = status.strip()
+        if status not in _VALID_STATUSES:
+            raise ValueError(f"invalid PTT status {status!r}; expected one of {_VALID_STATUSES}")
+        normalized[task_id] = (status, note)
 
     content = path.read_text(encoding="utf-8") if path.exists() else ""
-    target_line = None
-    target_idx = -1
+    lines = content.splitlines()
+    row_indices: dict[str, int] = {}
     for i, line in enumerate(content.splitlines()):
         m = _PTT_RE.match(line.strip())
-        if m and m.group("id").strip() == task_id:
-            target_line = line
-            target_idx = i
-            break
+        if m:
+            task_id = m.group("id").strip()
+            if task_id in normalized:
+                row_indices[task_id] = i
 
-    if target_line is None:
-        raise ValueError(f"PTT task {task_id!r} not found; refusing to create it")
+    missing = sorted(set(normalized) - set(row_indices))
+    if missing:
+        raise ValueError(f"PTT task {missing[0]!r} not found; refusing to create it")
 
-    cells = [c.strip() for c in target_line.strip().strip("|").split("|")]
-    # cells: [id, status, title, note, ...]
-    cells[1] = status
-    if len(cells) >= 4:
-        cells[-1] = note
-    # Keep every original column. EXPLOITATION rows contain hypothesis,
-    # validation-command, and patch columns that must not be flattened.
-    new_line = "| " + " | ".join(cells) + " |"
+    for task_id, target_idx in row_indices.items():
+        status, note = normalized[task_id]
+        target_line = lines[target_idx]
+        cells = [c.strip() for c in target_line.strip().strip("|").split("|")]
+        cells[1] = status
+        if len(cells) >= 4:
+            cells[-1] = note
+        lines[target_idx] = "| " + " | ".join(cells) + " |"
 
-    lines = content.splitlines()
-    lines[target_idx] = new_line
-    path.write_text(
+    bullet_re = re.compile(r"^(\s*-\s*)\[[ x~!-]\](\s+(?P<id>PT-[\w-]+)\b.*)")
+    for i, line in enumerate(lines):
+        m = bullet_re.match(line)
+        if m and m.group("id") in normalized:
+            lines[i] = f"{m.group(1)}{normalized[m.group('id')][0]}{m.group(2)}"
+
+    atomic_text(
+        path,
         "\n".join(lines) + ("\n" if content and not content.endswith("\n") else ""),
-        encoding="utf-8",
     )
 
-    # Re-parse for a faithful return object.
     tasks = parse_ptt(path)
-    for t in tasks:
-        if t.id == task_id:
-            return t
-    raise RuntimeError(f"internal error: updated task {task_id!r} not found after rewrite")
+    result = {task.id: task for task in tasks if task.id in normalized}
+    if len(result) != len(normalized):
+        raise RuntimeError("internal error: updated PTT tasks were not found after rewrite")
+    return result
+
+
+def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
+    """Validate and atomically update one PTT task row."""
+    return update_tasks(path, {task_id: (status, note)})[task_id]
 
 
 def create_task(path: Path, task_id: str, title: str, phase: str, note: str = "") -> PttTask:
@@ -271,7 +284,40 @@ def create_task(path: Path, task_id: str, title: str, phase: str, note: str = ""
     cells.extend([""] * (column_count - 4))
     cells.append(clean_cell(note))
     lines.insert(table_end + 1, "| " + " | ".join(cells) + " |")
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    atomic_text(path, "\n".join(lines) + "\n")
+    sync_ptt(path)
     return next(task for task in parse_ptt(path) if task.id == task_id)
+
+
+def sync_ptt(path: Path) -> list[PttTask]:
+    """Synchronize top-level summary checklist items (- [ ] PT-XXX) with table row statuses."""
+    if not path.exists():
+        return []
+    tasks = parse_ptt(path)
+    if not tasks:
+        return []
+    task_statuses = {t.id: t.status for t in tasks}
+
+    content = path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    modified = False
+
+    bullet_re = re.compile(r"^(\s*-\s*)\[[ x~!-]\](\s+(?P<id>PT-[\w-]+)\b.*)")
+    for i, line in enumerate(lines):
+        m = bullet_re.match(line)
+        if m:
+            t_id = m.group("id")
+            if t_id in task_statuses:
+                new_status = task_statuses[t_id]
+                new_line = f"{m.group(1)}{new_status}{m.group(2)}"
+                if new_line != line:
+                    lines[i] = new_line
+                    modified = True
+
+    if modified:
+        atomic_text(
+            path,
+            "\n".join(lines) + ("\n" if content and not content.endswith("\n") else ""),
+        )
+        tasks = parse_ptt(path)
+    return tasks

@@ -51,13 +51,13 @@ def test_exec_args_model_timeout_bounds():
         schemas.validate_args(schemas.ExecArgsModel, raw)
 
 
-def test_record_hypothesis_extra_allowed():
+def test_record_hypothesis_extra_forbidden():
     raw = {
         "eng_dir": "/tmp/eng",
         "custom_metadata": "allowed",
     }
-    model = schemas.validate_args(schemas.RecordHypothesisArgsModel, raw)
-    assert model.eng_dir == "/tmp/eng"
+    with pytest.raises(ValidationError):
+        schemas.validate_args(schemas.RecordHypothesisArgsModel, raw)
 
 
 def test_schema_exports_structure():
@@ -65,3 +65,24 @@ def test_schema_exports_structure():
     assert "eng_dir" in schemas.CHECK_COMMAND_SCHEMA["parameters"]["required"]
     assert schemas.EXEC_BURST_SCHEMA["name"] == "violin_exec_burst"
     assert schemas.TARGET_SCHEMA["name"] == "violin_target"
+
+
+def test_ffuf_wordlist_is_portably_optional():
+    model = schemas.validate_args(
+        schemas.FfufArgsModel,
+        {
+            "eng_dir": "/tmp/eng",
+            "phase": "RECON",
+            "target": "https://target.example/FUZZ",
+        },
+    )
+    assert model.url == ""
+    assert model.wordlist == ""
+
+
+def test_review_batch_keeps_the_active_task_by_default():
+    model = schemas.validate_args(
+        schemas.ReviewBatchArgsModel,
+        {"eng_dir": "/tmp/eng", "id": "PT-001", "note": "Reviewed batch evidence"},
+    )
+    assert model.status == "[~]"

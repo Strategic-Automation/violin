@@ -22,6 +22,7 @@ import psutil
 from . import state
 from .history import append_history
 from .phases import normalize_phase
+from .receipt_integrity import seal_execution_receipt
 from .runtime_backend import resolve_backend
 
 __all__ = [
@@ -188,7 +189,9 @@ def _deadline_expired(record: dict[str, Any]) -> bool:
     return False
 
 
-def _preview(path: Path) -> str:
+def _preview(path: Path | None) -> str:
+    if path is None or not path.exists():
+        return ""
     with path.open("rb") as handle:
         return handle.read(PREVIEW_BYTES).decode("utf-8", errors="replace")
 
@@ -225,6 +228,13 @@ def _finalize_background(
             return record
         if record.get("cancel_requested"):
             status_name = "cancelled"
+        stderr_rel = record.get("evidence_paths", {}).get("stderr")
+        if stderr_rel:
+            stderr_p = engagement / stderr_rel
+            if stderr_p.exists() and stderr_p.stat().st_size == 0:
+                with contextlib.suppress(OSError):
+                    stderr_p.unlink()
+                record.setdefault("evidence_paths", {})["stderr"] = None
         receipt = {
             **record,
             "status": status_name,
@@ -243,6 +253,7 @@ def _finalize_background(
             receipt["evidence_paths"]["manifest"],
         )
         receipt["history_recorded"] = True
+        receipt = seal_execution_receipt(receipt, engagement)
         state.atomic_json(manifest_path, receipt)
         return receipt
 
@@ -397,7 +408,7 @@ def execute(
     rel_stdout = stdout_path.relative_to(engagement).as_posix()
     rel_stderr = stderr_path.relative_to(engagement).as_posix()
 
-    evidence_dir.mkdir(parents=True, exist_ok=True)
+    state.ensure_dir(evidence_dir)
 
     record: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -424,6 +435,7 @@ def execute(
     output_limited = False
     cancelled = False
     proc: subprocess.Popen | None = None
+    failure_status = ""
 
     try:
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
@@ -499,37 +511,55 @@ def execute(
                 exit_code = proc.wait(timeout=5)
     except Exception as exc:
         exit_code = -1
+        failure_status = "failed_to_start" if proc is None else "failed_to_track"
+        if proc is not None:
+            with contextlib.suppress(Exception):
+                _terminate_process(proc)
         stderr_path.write_text(f"executor error: {exc}\n", encoding="utf-8")
 
     completed_at = _utc_now()
+    if stderr_path.exists() and stderr_path.stat().st_size == 0:
+        with contextlib.suppress(OSError):
+            stderr_path.unlink()
+        record.setdefault("evidence_paths", {})["stderr"] = None
+
     receipt = {
         **record,
-        "status": "cancelled"
-        if cancelled
-        else "timed_out"
-        if timed_out
-        else "output_limited"
-        if output_limited
-        else "completed",
+        "status": failure_status
+        or (
+            "cancelled"
+            if cancelled
+            else "timed_out"
+            if timed_out
+            else "output_limited"
+            if output_limited
+            else "completed"
+        ),
         "completed_at": completed_at,
         "exit_code": exit_code,
         "timed_out": timed_out,
         "cancelled": cancelled,
         "output_limited": output_limited,
     }
+    receipt = seal_execution_receipt(receipt, engagement)
     state.atomic_json(manifest_path, receipt)
 
-    append_history(engagement, command, phase, exit_code, rel_manifest)
+    append_history(
+        engagement,
+        command,
+        phase,
+        exit_code,
+        rel_manifest,
+        status=str(receipt["status"]),
+    )
 
-    if sync_reservation and proc is None:
-        remaining = state.release_reserved_sync_credit(str(engagement), sync_reservation)
+    if proc is None:
+        remaining = state.sync_credit_remaining(str(engagement), phase)
         consumed = False
-        released = True
     else:
         remaining, consumed = _commit_started_command(
             engagement, command, phase, ptt_task_id, sync_reservation
         )
-        released = False
 
     return {
         **receipt,
@@ -539,7 +569,7 @@ def execute(
         "sync_required": remaining <= 0,
         "sync_credit_remaining": remaining,
         "sync_reservation_consumed": consumed,
-        "sync_reservation_released": released,
+        "sync_reservation_released": False,
     }
 
 

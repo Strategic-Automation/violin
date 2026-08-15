@@ -21,13 +21,28 @@ rules_of_engagement:
     - "banner grabbing"
     - "version detection"
     - "vulnerability scanning"
+    - "vulnerability research"
+    - "cve research"
+    - "exploitdb"
     - "exploit validation (in-scope, non-destructive)"
     - "API enumeration"
     - "account registration"
+    - "reporting"
+    - "retrospective"
   forbidden_actions:
     - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
     - "browsing duck-store source code"
     - "credential-stuffing"
+    - "fetching /openapi.json or /vulnerabilities or endpoints that list challenges or intentional vulnerabilities"
+    - "reading local benchmark answer keys (challenges.json)"
+
+exclusions:
+  urls:
+    - "https://duck-store.escape.tech/openapi.json"
+    - "https://duck-store.escape.tech/vulnerabilities"
+  paths:
+    - "/openapi.json"
+    - "/vulnerabilities"
 
 authorisation:
   confirmed: true
@@ -35,6 +50,8 @@ authorisation:
 
 research_hosts:
   - nvd.nist.gov
+  - services.nvd.nist.gov
+  - api.osv.dev
   - www.exploit-db.com
   - raw.githubusercontent.com
 

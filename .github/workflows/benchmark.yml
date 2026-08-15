@@ -1,0 +1,105 @@
+name: Hermes Profile Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'OpenRouter / LLM Model ID (e.g. openrouter/anthropic/claude-3.5-sonnet)'
+        required: true
+        default: 'openrouter/anthropic/claude-3.5-sonnet'
+      target_url:
+        description: 'Target Host / URL'
+        required: true
+        default: 'http://localhost:8080'
+
+permissions:
+  contents: read
+
+# ---------------------------------------------------------------------------
+# Tier 1: Scorer Calibration (fast, deterministic, no Hermes/LLM needed)
+#   Runs on every push/PR via the main ci.yml workflow (pytest includes
+#   tests/guard/test_benchmark_runner.py which exercises known-good and
+#   known-bad calibration fixtures).
+#
+# Tier 2: Live LLM Benchmark (manual trigger, needs Hermes + OpenRouter key)
+#   This workflow — triggered via workflow_dispatch only.
+# ---------------------------------------------------------------------------
+
+jobs:
+  benchmark:
+    name: Live Hermes Profile Evaluation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync Dependencies
+        run: uv sync --dev
+
+      # ── Tier 1 gate: scorer calibration must pass before live run ──
+      - name: Scorer Calibration Gate
+        run: |
+          uv run pytest tests/guard/test_benchmark_runner.py -v
+
+      # ── Tier 2: live LLM benchmark (only if Hermes is available) ──
+      - name: Check Hermes Availability
+        id: hermes_check
+        run: |
+          if command -v hermes &>/dev/null; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "::warning::Hermes not installed. Skipping live benchmark. Scorer calibration passed."
+          fi
+
+      - name: Run Live Benchmark
+        if: steps.hermes_check.outputs.available == 'true'
+        env:
+          OPENAI_API_BASE: "https://openrouter.ai/api/v1"
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          MODEL_ID="${{ github.event.inputs.model }}"
+          TARGET_URL="${{ github.event.inputs.target_url }}"
+
+          uv run python benchmark/run.py \
+            --model "$MODEL_ID" \
+            --target "$TARGET_URL" \
+            --json-out benchmark_results.json \
+            --markdown-out benchmark_summary.md
+
+      - name: Score-Only Fallback (No Hermes)
+        if: steps.hermes_check.outputs.available == 'false'
+        run: |
+          uv run python benchmark/score.py \
+            benchmark/targets/duck-store/calibration/known-good \
+            --json-out benchmark_results.json \
+            --markdown-out benchmark_summary.md
+
+      - name: Publish Step Summary
+        if: always()
+        run: |
+          if [ -f benchmark_summary.md ]; then
+            cat benchmark_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Benchmark Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-benchmark-results-${{ github.run_id }}
+          path: |
+            benchmark_results.json
+            benchmark_summary.md
+            engagements/benchmark-run/

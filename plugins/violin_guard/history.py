@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .state import lock_file, resolve_eng_dir
+from .state import ensure_dir, lock_file, resolve_eng_dir
 
 _COMMAND_MARKER = " | command="
 _COMMAND_LENGTH_MARKER = " | command_length="
@@ -36,14 +36,16 @@ def append_history(
     phase: str,
     exit_code: int,
     receipt_path: str = "",
+    status: str = "",
 ) -> None:
     """Append one execution record to history.md under an advisory lock."""
     path = _history_path(eng_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(path.parent)
     stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     clean_command = normalize_command(command) if "\n" in command else command
+    status_field = f" | status={status}" if status else ""
     line = (
-        f"- {stamp} | phase={phase} | exit_code={exit_code} | command={clean_command}"
+        f"- {stamp} | phase={phase} | exit_code={exit_code}{status_field} | command={clean_command}"
         f"{_COMMAND_LENGTH_MARKER}{len(clean_command)}"
     )
     if receipt_path:

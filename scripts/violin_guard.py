@@ -13,7 +13,7 @@ _PROFILE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
 
-from plugins.violin_guard import bootstrap, command, handlers, state
+from plugins.violin_guard import bootstrap, command, findings, handlers, state
 
 
 def _print_result(result) -> int:
@@ -53,6 +53,20 @@ def cmd_validate_scope(args: argparse.Namespace) -> int:
     messages = result.errors or result.warnings or result.infos or ["scope valid"]
     print(f"{label}: {messages[0]}")
     return code
+
+
+def cmd_generate_closeout(args: argparse.Namespace) -> int:
+    try:
+        yaml_path = findings.generate_findings_yaml(args.eng_dir, force=args.force)
+        report_path = findings.generate_report_md(
+            args.eng_dir, target=args.target, force=args.force
+        )
+    except ValueError as exc:
+        print(f"BLOCK: {exc}")
+        return 1
+    print(f"OK: wrote {yaml_path}")
+    print(f"OK: wrote {report_path}")
+    return 0
 
 
 def cmd_record_ptt(args: argparse.Namespace) -> int:
@@ -150,14 +164,7 @@ def cmd_eng_root(args: argparse.Namespace) -> int:
 def cmd_check_release(args) -> int:
     from plugins.violin_guard import release
 
-    result = release.check_release()
-    for item in result.errors:
-        print(f"ERROR: {item}")
-    for item in result.warnings:
-        print(f"WARN: {item}")
-    for item in result.infos:
-        print(f"OK: {item}")
-    return result.exit_code()
+    return release.main()
 
 
 def cmd_search_exploit(args: argparse.Namespace) -> int:
@@ -317,6 +324,15 @@ def main() -> int:
 
     p = sub.add_parser("check-release", help="Run release checks")
     p.set_defaults(func=cmd_check_release)
+
+    p = sub.add_parser(
+        "generate-closeout",
+        help="Derive findings.yaml and report.md from canonical FIND-*.md files",
+    )
+    p.add_argument("--eng-dir", required=True)
+    p.add_argument("--target", required=True)
+    p.add_argument("--force", action="store_true", help="Overwrite existing artifacts")
+    p.set_defaults(func=cmd_generate_closeout)
 
     # search-exploit
     p = sub.add_parser("search-exploit", help="Search local ExploitDB (read-only)")

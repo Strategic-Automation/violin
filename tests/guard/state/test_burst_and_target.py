@@ -102,6 +102,23 @@ def test_target_role_preserves_malformed_url_for_review():
     assert resolve_target(scope, role="web", host_query=None, field="host") == "http://[broken"
 
 
+def test_target_resolution_rejects_conflicting_and_ambiguous_selectors():
+    scope = {
+        "targets": {
+            "ip_addresses": ["10.10.10.10", "10.10.10.11"],
+            "roles": {"web": ["10.10.10.10", "10.10.10.11"]},
+        }
+    }
+    with pytest.raises(ValueError, match="exactly one of role or host"):
+        resolve_target(scope, role="web", host_query="10.10.10.10", field="host")
+    with pytest.raises(ValueError, match="ambiguous"):
+        resolve_target(scope, role="web", host_query=None, field="host")
+    with pytest.raises(ValueError, match="multiple targets"):
+        resolve_target(scope, role=None, host_query=None, field="host")
+    with pytest.raises(ValueError, match="not defined in scope.yaml"):
+        resolve_target(scope, role="database", host_query=None, field="host")
+
+
 def _run(*args):
     return subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "violin_guard.py"), *args],
@@ -155,14 +172,10 @@ def test_target_host_ip(eng):
     assert r.stdout.strip() == "10.10.10.10"
 
 
-def test_target_out_of_scope_host_returns_in_scope_ip(eng):
-    """handle_target resolves from scope.yaml (first in-scope IP) and does NOT
-    perform scope validation itself â€” the per-command check-command gate is the
-    enforcement point. So an out-of-scope --host still yields rc=0 with the
-    in-scope IP, proving resolution is scope-file driven, not host-argument driven."""
+def test_target_rejects_unknown_host(eng):
     r = _run("target", "--eng-dir", str(eng), "--host", "10.99.99.99")
-    assert r.returncode == 0, r.stderr
-    assert r.stdout.strip() == "10.10.10.10"
+    assert r.returncode == 1
+    assert "not present in scope.yaml" in r.stdout
 
 
 def test_target_requires_eng_dir():
@@ -249,8 +262,19 @@ def test_exec_burst_clean_review_or_approved(eng, monkeypatch):
     assert state.has_pending_sync(str(eng)) is not None
 
 
-@pytest.mark.parametrize("secondary_only_host", ["listener.example", "github.com"])
-def test_exec_burst_denies_secondary_only_primary_target(eng, monkeypatch, secondary_only_host):
+@pytest.mark.parametrize(
+    ("secondary_only_host", "expected_reason"),
+    [
+        ("listener.example", "secondary-only endpoint"),
+        (
+            "github.com",
+            "research_hosts may be explicit execution targets only during VULN_RESEARCH",
+        ),
+    ],
+)
+def test_exec_burst_denies_secondary_only_primary_target(
+    eng, monkeypatch, secondary_only_host, expected_reason
+):
     rec = _patch_burst(monkeypatch, str(eng))
     data = json.loads(
         service.handle_exec_burst(
@@ -269,7 +293,7 @@ def test_exec_burst_denies_secondary_only_primary_target(eng, monkeypatch, secon
 
     assert data["status"] == "denied"
     assert data["executed"] == 0
-    assert "secondary-only endpoint" in data["reason"]
+    assert expected_reason in data["reason"]
     assert rec["commands"] == []
 
 
@@ -334,7 +358,7 @@ def test_exec_burst_missing_commands_file(eng):
                 "eng_dir": str(eng),
                 "scope": str(eng / "scope" / "scope.yaml"),
                 "phase": "recon",
-                "commands_file": str(eng / "does-not-exist.txt"),
+                "commands_file": "does-not-exist.txt",
                 "session_id": "ts",
                 "skill_loaded_file": str(eng / "state" / ".skill-loaded-ts"),
             }
@@ -342,6 +366,69 @@ def test_exec_burst_missing_commands_file(eng):
     )
     assert data["status"] == "error", data
     assert "commands file not found" in data["error"], data
+
+
+def test_exec_burst_rejects_absolute_commands_file(eng):
+    path = eng / "commands.txt"
+    path.write_text("nmap -sV 10.10.10.10\n", encoding="utf-8")
+    data = json.loads(
+        service.handle_exec_burst(
+            {
+                "eng_dir": str(eng),
+                "phase": "recon",
+                "commands_file": str(path.resolve()),
+                "session_id": "ts",
+            }
+        )
+    )
+    assert data["status"] == "error"
+    assert "engagement-relative" in data["error"]
+
+
+@pytest.mark.parametrize(
+    ("relative", "content", "expected"),
+    [
+        ("../commands.txt", "echo safe\n", "escapes"),
+        ("too-many.txt", "\n".join(f"echo {i}" for i in range(21)), "burst limit"),
+    ],
+)
+def test_exec_burst_rejects_unsafe_command_files(eng, relative, content, expected):
+    path = eng.parent / "commands.txt" if relative.startswith("..") else eng / relative
+    path.write_text(content, encoding="utf-8")
+    data = json.loads(
+        service.handle_exec_burst(
+            {"eng_dir": str(eng), "phase": "recon", "commands_file": relative}
+        )
+    )
+    message = data.get("error") or data.get("reason") or ""
+    assert expected in message
+
+
+def test_exec_burst_rejects_oversized_command_file(eng):
+    path = eng / "too-large.txt"
+    path.write_text("x" * (64 * 1024 + 1), encoding="utf-8")
+    data = json.loads(
+        service.handle_exec_burst(
+            {"eng_dir": str(eng), "phase": "recon", "commands_file": path.name}
+        )
+    )
+    assert "exceeds" in data["error"]
+
+
+def test_exec_burst_rejects_symlinked_commands_file(eng):
+    target = eng / "real-commands.txt"
+    link = eng / "linked-commands.txt"
+    target.write_text("echo safe\n", encoding="utf-8")
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    data = json.loads(
+        service.handle_exec_burst(
+            {"eng_dir": str(eng), "phase": "recon", "commands_file": link.name}
+        )
+    )
+    assert "symlink" in data["error"]
 
 
 def test_plugin_exec_burst_accepts_inline_commands(monkeypatch, tmp_path):
@@ -378,6 +465,7 @@ def test_plugin_exec_burst_accepts_inline_commands(monkeypatch, tmp_path):
     assert data["status"] == "batch_complete"
     assert data["executed"] == 2
     assert len(data["results"]) == 2
+    assert [item["index"] for item in data["results"]] == [1, 2]
     assert "gobuster dir" in data["results"][0]["command"]
     assert "curl -H" in data["results"][1]["command"]
 

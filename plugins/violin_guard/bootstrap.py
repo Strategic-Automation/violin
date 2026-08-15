@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from .results import GuardResult
-from .state import record_session_id, resolve_eng_dir
+from .state import ensure_dir, record_session_id, resolve_eng_dir
 
 __all__ = [
     "init_engagement",
@@ -141,6 +141,9 @@ def _ctf_scope(host: str) -> dict:
                 "banner grabbing",
                 "version detection",
                 "vulnerability scanning",
+                "vulnerability research",
+                "cve-research",
+                "exploitdb",
                 "exploit validation (in-scope, non-destructive)",
                 "privilege escalation",
                 "flag capture (user.txt, root.txt)",
@@ -167,10 +170,10 @@ def init_engagement(
     result = BootstrapResult()
     host = (host or "").strip() or _derive_host(eng_dir)
 
-    eng_dir.mkdir(parents=True, exist_ok=True)
+    ensure_dir(eng_dir)
     record_session_id(eng_dir, session_id)
     for rel in _ARTIFACT_DIRECTORIES:
-        (eng_dir / rel).mkdir(parents=True, exist_ok=True)
+        ensure_dir(eng_dir / rel)
     for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():
         target = eng_dir / rel
         if target.exists():
@@ -255,10 +258,22 @@ def check_bootstrap(
             'initialise command history with: echo "# Command History — $(date +%F)" > <ENG_DIR>/state/history.md'
         )
 
-    # Stale PTT detection
+    # Stale PTT detection (warn only on resumed sessions where history contains executed commands)
     if eng_dir.exists():
         ptt_check = eng_dir / "state" / "ptt.md"
-        if ptt_check.exists() and _ptt_is_stale(ptt_check):
+        hist_check = eng_dir / "state" / "history.md"
+        has_history = (
+            hist_check.exists()
+            and len(
+                [
+                    line
+                    for line in hist_check.read_text(encoding="utf-8").splitlines()
+                    if line.strip() and not line.startswith("#")
+                ]
+            )
+            > 0
+        )
+        if ptt_check.exists() and _ptt_is_stale(ptt_check) and has_history:
             result.add_warning(
                 "PTT has never been updated (all PT-XXX rows are [ ]); possible drift at session resume"
             )
@@ -285,14 +300,14 @@ def _auto_repair_corrupt_artifacts(eng_dir: Path, result: BootstrapResult) -> Bo
 
     if not eng_dir.exists():
         try:
-            eng_dir.mkdir(parents=True, exist_ok=True)
+            ensure_dir(eng_dir)
             new_infos.append(f"AUTO-REPAIR: created missing engagement directory {eng_dir}")
         except Exception as exc:
             new_errors.append(f"AUTO-REPAIR FAILED creating {eng_dir}: {exc}")
 
     for rel in _ARTIFACT_DIRECTORIES:
         try:
-            (eng_dir / rel).mkdir(parents=True, exist_ok=True)
+            ensure_dir(eng_dir / rel)
         except OSError as exc:
             new_errors.append(f"AUTO-REPAIR FAILED creating {eng_dir / rel}: {exc}")
 

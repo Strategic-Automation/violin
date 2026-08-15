@@ -35,15 +35,18 @@ def _docker_container_ready(
 ) -> tuple[bool, str]:
     if shutil.which("docker") is None:
         return False, "docker executable not found"
-    result = run(
-        ["docker", "inspect", "--format", "{{.State.Running}}|{{json .Mounts}}", container],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=10,
-        check=False,
-    )
+    try:
+        result = run(
+            ["docker", "inspect", "--format", "{{.State.Running}}|{{json .Mounts}}", container],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"Docker container {container!r} probe timed out"
     if result.returncode != 0:
         return False, f"Docker container {container!r} is unavailable"
     running, _, mounts = result.stdout.strip().partition("|")

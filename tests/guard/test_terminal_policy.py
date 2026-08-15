@@ -7,17 +7,25 @@ import json
 import pytest
 
 from plugins.violin_guard import (
+    TOOL_DEFINITIONS,
+    _on_session_finalize_hook,
     _on_session_reset_hook,
     _post_tool_call_hook,
     _pre_llm_call_hook,
     _pre_tool_call_hook,
     bootstrap,
     register,
+    schemas,
     state,
 )
-from plugins.violin_guard import command as guard_command
+from plugins.violin_guard import (
+    command as guard_command,
+)
 from plugins.violin_guard import (
     handlers as service,
+)
+from plugins.violin_guard import (
+    history as execution_history,
 )
 from plugins.violin_guard.skill_receipts import SkillViewResult
 from tests.guard.receipt_fixture import bind_active_task
@@ -43,9 +51,10 @@ engagement:
 class _Context:
     def __init__(self) -> None:
         self.hooks: dict[str, object] = {}
+        self.tools: dict[str, dict] = {}
 
-    def register_tool(self, **_kwargs) -> None:
-        pass
+    def register_tool(self, **kwargs) -> None:
+        self.tools[kwargs["name"]] = kwargs
 
     def register_hook(self, name: str, callback) -> None:
         self.hooks[name] = callback
@@ -56,6 +65,68 @@ def test_plugin_registers_terminal_policy_hook() -> None:
     register(context)
     assert context.hooks["pre_tool_call"] is _pre_tool_call_hook
     assert context.hooks["post_tool_call"] is _post_tool_call_hook
+
+
+def test_every_registered_tool_strictly_rejects_argv_injection() -> None:
+    context = _Context()
+    register(context)
+    assert set(context.tools) == {definition.name for definition in TOOL_DEFINITIONS}
+    for definition in TOOL_DEFINITIONS:
+        result = json.loads(context.tools[definition.name]["handler"]({"_argv": ["whoami"]}))
+        assert result["status"] == "invalid_arguments", definition.name
+        assert any(error["type"] == "extra_forbidden" for error in result["errors"])
+        assert (
+            definition.schema["parameters"]
+            == schemas.to_tool_schema(definition.model)["parameters"]
+        )
+
+
+def test_registered_hypothesis_update_preserves_omitted_fields(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    context = _Context()
+    register(context)
+    invoke = context.tools["violin_record_hypothesis"]["handler"]
+
+    created = json.loads(
+        invoke(
+            {
+                "eng_dir": str(eng),
+                "id": "H-001",
+                "title": "Preserve partial fields",
+                "status": "Candidate",
+                "phase": "RECON",
+                "target": "10.10.10.10",
+                "confidence": "0.7",
+                "vuln_class": "access-control",
+                "cve_research": "NVD queried; no applicable CVE",
+                "exploit_research": "ExploitDB queried; no applicable PoC",
+            }
+        )
+    )
+    assert created["status"] == "ok"
+
+    evidence = eng / "evidence" / "executions" / "validated.json"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text('{"status":"completed"}', encoding="utf-8")
+    updated = json.loads(
+        invoke(
+            {
+                "eng_dir": str(eng),
+                "id": "H-001",
+                "status": "Validated",
+                "runtime_evidence": "evidence/executions/validated.json",
+            }
+        )
+    )
+
+    assert updated["status"] == "ok"
+    hypothesis = updated["hypothesis"]
+    assert hypothesis["confidence"] == "0.7"
+    assert hypothesis["phase"] == "RECON"
+    assert hypothesis["target"] == "10.10.10.10"
+    assert hypothesis["vuln_class"] == "access-control"
+    assert hypothesis["cve_research"] == "NVD queried; no applicable CVE"
+    assert hypothesis["exploit_research"] == "ExploitDB queried; no applicable PoC"
 
 
 def test_raw_terminal_target_command_is_blocked() -> None:
@@ -187,6 +258,41 @@ def test_safe_local_terminal_command_remains_available() -> None:
     )
 
     assert result is None
+
+
+def test_local_payload_content_with_a_url_is_not_target_execution() -> None:
+    command = "printf '<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>' > payload.svg"
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
+
+
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        r"dir \\victim.example\share",
+        r"Get-Content \\10.10.10.10\share\loot.txt",
+        "cat //victim.example/share/loot.txt",
+        "TARGET=10.10.10.10; nmap -sV $TARGET",
+        "$TargetHost='victim.example'; curl https://$TargetHost/admin",
+    ],
+)
+def test_terminal_blocks_network_shares_and_indirect_targets(raw_command: str) -> None:
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command})
+    assert result and result["action"] == "block"
+
+
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        "echo 13.99",
+        "PRICE=13.99; echo $PRICE",
+        "pip install requests",
+        "git status --short",
+    ],
+)
+def test_terminal_keeps_numeric_prices_and_local_package_work_available(
+    raw_command: str,
+) -> None:
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None
 
 
 def test_local_script_paths_are_not_treated_as_hosts() -> None:
@@ -462,50 +568,280 @@ def _code(eng, target="10.10.10.10") -> str:
 
 def test_execute_code_requires_valid_metadata(tmp_path) -> None:
     blocked = _pre_tool_call_hook(
-        tool_name="execute_code", args={"code": "print('missing header')"}
+        tool_name="execute_code",
+        args={"code": "print('missing header')"},
+        tool_call_id="invalid-header",
     )
     assert blocked["action"] == "block"
     assert "first-line metadata" in blocked["message"]
 
     blocked = _pre_tool_call_hook(
-        tool_name="execute_code", args={"code": _code(_engagement(tmp_path), "10.10.10.11")}
+        tool_name="execute_code",
+        args={"code": _code(_engagement(tmp_path), "10.10.10.11")},
+        tool_call_id="invalid-target",
     )
     assert blocked["action"] == "block"
     assert "Violin guard" in blocked["message"]
 
 
+def test_execute_code_missing_fields_surfaces_header_schema(tmp_path) -> None:
+    code = '# violin: {"eng_dir":"/tmp/test"}\nprint(1)'
+    blocked = _pre_tool_call_hook(
+        tool_name="execute_code", args={"code": code}, tool_call_id="missing-fields"
+    )
+    assert blocked["action"] == "block"
+    assert "Header format" in blocked["message"]
+    assert "session_id via violin_status" in blocked["message"]
+
+
 def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
     eng = _engagement(tmp_path)
-    source = _code(eng)
-    assert _pre_tool_call_hook(tool_name="execute_code", args={"code": source}) is None
+    source = _code(eng) + "import requests\nrequests.get('https://10.10.10.10')\n"
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="recorded-call",
+        )
+        is None
+    )
+    intent_receipts = list((eng / "evidence" / "executions").glob("*-execute-code.json"))
+    assert len(intent_receipts) == 1
+    intent = json.loads(intent_receipts[0].read_text(encoding="utf-8"))
+    assert intent["status"] == "starting"
+    assert intent["execution_class"] == "target_touching"
+    assert intent["sync_accounted"] is True
+    assert state.sync_credit_remaining(eng, "RECON") == 9
+    assert state.has_pending_sync(eng)
 
     _post_tool_call_hook(
         tool_name="execute_code",
         args={"code": source},
         result='{"result":"ok"}',
         duration_ms=42,
+        session_id="test",
+        tool_call_id="recorded-call",
     )
 
-    receipts = list((eng / "evidence" / "recon").glob("execute-code-*.py"))
+    receipts = list((eng / "evidence" / "executions").glob("*-execute-code.py"))
     assert len(receipts) == 1
     assert receipts[0].read_text(encoding="utf-8") == source
     history = (eng / "state" / "history.md").read_text(encoding="utf-8")
-    assert "execute_code sha256=" in history
-    assert "status=ok" in history
+    assert "execute_code class=target_touching sha256=" in history
+    assert "status=completed" in history
     assert "exit_code=0" in history
+    pending = state.get_pending_sync(eng)
+    assert pending is not None
+    pending_command = pending["commands"][0]["command"]
+    assert "duration_ms=" not in pending_command
+    assert execution_history.history_contains(eng, pending_command)
+    from plugins.violin_guard.handlers.ptt_handlers import (
+        _validate_pending_history,
+        _validate_review_history,
+    )
+
+    _validate_review_history(str(eng), pending)
+    _validate_pending_history(str(eng), pending)
+
+
+def test_local_execute_code_is_recorded_without_target_sync_credit(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    source = _code(eng) + "import json\nprint(json.dumps({'local': True}))\n"
+    before = state.sync_credit_remaining(eng, "RECON")
+
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="local-analysis",
+        )
+        is None
+    )
+    intent_receipts = list((eng / "evidence" / "executions").glob("*-execute-code.json"))
+    assert len(intent_receipts) == 1
+    intent = json.loads(intent_receipts[0].read_text(encoding="utf-8"))
+    assert intent["execution_class"] == "local_analysis"
+    assert intent["sync_accounted"] is False
+    assert state.sync_credit_remaining(eng, "RECON") == before
+    assert not state.has_pending_sync(eng)
+
+    _post_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": source},
+        result='{"result":"ok"}',
+        duration_ms=5,
+        session_id="test",
+        tool_call_id="local-analysis",
+    )
+    history = (eng / "state" / "history.md").read_text(encoding="utf-8")
+    assert "execute_code class=local_analysis" in history
+
+
+def test_local_execute_code_remains_available_when_target_credit_is_exhausted(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    for _ in range(state.sync_credit_limit("RECON")):
+        state.spend_sync_credit(eng, "RECON")
+    assert state.sync_credit_remaining(eng, "RECON") == 0
+
+    source = _code(eng)
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="exhausted-local-analysis",
+        )
+        is None
+    )
+    _post_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": source},
+        result='{"result":"ok"}',
+        duration_ms=1,
+        session_id="test",
+        tool_call_id="exhausted-local-analysis",
+    )
+    assert state.sync_credit_remaining(eng, "RECON") == 0
+    assert not state.has_pending_sync(eng)
+
+
+def test_execute_code_rejects_foreign_literal_target(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    source = _code(eng) + "url = 'https://10.10.10.11/admin'\n"
+    blocked = _pre_tool_call_hook(
+        tool_name="execute_code", args={"code": source}, tool_call_id="foreign-target"
+    )
+    assert blocked["action"] == "block"
+    assert "differ from declared target" in blocked["message"]
+
+
+def test_execute_code_completion_without_intent_is_an_audit_error(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    with pytest.raises(ValueError, match="intent receipt is missing"):
+        _post_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": _code(eng)},
+            result='{"result":"ok"}',
+            duration_ms=1,
+            tool_call_id="missing-intent",
+        )
 
 
 def test_execute_code_records_tool_errors(tmp_path) -> None:
     eng = _engagement(tmp_path)
+    source = _code(eng)
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="error-call",
+        )
+        is None
+    )
     _post_tool_call_hook(
         tool_name="execute_code",
-        args={"code": _code(eng)},
+        args={"code": source},
         result='{"error":"sandbox failed"}',
         duration_ms=7,
+        session_id="test",
+        tool_call_id="error-call",
     )
     history = (eng / "state" / "history.md").read_text(encoding="utf-8")
-    assert "status=error" in history
+    assert "status=completed_with_error" in history
     assert "exit_code=1" in history
+
+
+def test_execute_code_requires_tool_call_id_before_writing_intent(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    blocked = _pre_tool_call_hook(tool_name="execute_code", args={"code": _code(eng)})
+
+    assert blocked == {
+        "action": "block",
+        "message": "execute_code requires Hermes tool_call_id for receipt correlation",
+    }
+    assert not list((eng / "evidence" / "executions").glob("*-execute-code.json"))
+
+
+def test_parallel_execute_code_calls_correlate_by_tool_call_id(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    first = _code(eng) + "print('first call')\n"
+    second = _code(eng) + "print('second call')\n"
+
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": first},
+            session_id="test",
+            tool_call_id="parallel-1",
+        )
+        is None
+    )
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": second},
+            session_id="test",
+            tool_call_id="parallel-2",
+        )
+        is None
+    )
+
+    _post_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": first},
+        result='{"result":"first"}',
+        duration_ms=11,
+        session_id="test",
+        tool_call_id="parallel-1",
+    )
+    _post_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": second},
+        result='{"result":"second"}',
+        duration_ms=22,
+        session_id="test",
+        tool_call_id="parallel-2",
+    )
+
+    receipts = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (eng / "evidence" / "executions").glob("*-execute-code.json")
+    ]
+    assert sorted((receipt["status"], receipt["duration_ms"]) for receipt in receipts) == [
+        ("completed", 11),
+        ("completed", 22),
+    ]
+
+
+def test_session_finalize_abandons_unfinished_execute_code_receipt(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    source = _code(eng)
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="abandoned-call",
+        )
+        is None
+    )
+
+    _on_session_finalize_hook(session_id="test", eng_dir=str(eng))
+
+    manifest = next((eng / "evidence" / "executions").glob("*-execute-code.json"))
+    receipt = json.loads(manifest.read_text(encoding="utf-8"))
+    assert receipt["status"] == "abandoned"
+    with pytest.raises(ValueError, match="intent receipt is missing for tool_call_id"):
+        _post_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            result='{"result":"late"}',
+            session_id="test",
+            tool_call_id="abandoned-call",
+        )
 
 
 @pytest.mark.parametrize(
@@ -532,4 +868,16 @@ def test_local_script_syntax_and_test_checks_are_allowed(raw_command: str) -> No
     ],
 )
 def test_expanded_local_file_tools_are_allowed(raw_command: str) -> None:
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None
+
+
+@pytest.mark.parametrize(
+    "raw_command",
+    [
+        "python3 -c 'import requests'",
+        'python3 -c "import httpx"',
+        "python3 -c 'import urllib.request, json'",
+    ],
+)
+def test_local_package_import_checks_are_allowed(raw_command: str) -> None:
     assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None

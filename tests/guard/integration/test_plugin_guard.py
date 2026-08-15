@@ -20,6 +20,7 @@ _PLATFORM_SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
   in_scope_urls: []
 exclusions: {}
+research_hosts: [services.nvd.nist.gov, api.osv.dev]
 authorized_parties: ["test owner"]
 authorisation:
   confirmed: true
@@ -186,6 +187,7 @@ def test_recon_does_not_require_hypothesis(tmp_path):
         )
     )
     assert any("requires at least one hypothesis" in error.lower() for error in research.errors)
+    assert any("violin_record_hypothesis" in error for error in research.errors)
 
     # Add a fresh hypothesis - should pass without warnings
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
@@ -217,6 +219,18 @@ def test_recon_does_not_require_hypothesis(tmp_path):
     assert not research2.errors
     assert not any("hypothesis" in warning.lower() for warning in research2.warnings)
 
+    osv_research = command.check_command(
+        command.CheckCommandArgs(
+            command="curl -s https://api.osv.dev/v1/query",
+            phase="vuln-research",
+            eng_dir=str(eng),
+            target="api.osv.dev",
+            session_id="ts",
+        )
+    )
+    assert not osv_research.errors
+    assert any("authorized research endpoint" in info for info in osv_research.infos)
+
     # Add a stale hypothesis - should warn
     old_ts = "2020-01-01 00:00"
     (eng / "hypotheses.md").write_text(
@@ -237,6 +251,76 @@ def test_recon_does_not_require_hypothesis(tmp_path):
         )
     )
     assert any("hypothesis guard:" in warning for warning in research3.warnings)
+
+
+def test_exploit_research_gate_scopes_to_named_hypothesis(tmp_path):
+    """Online-research gate: with hypothesis_id, only that hypothesis needs rows.
+
+    A command that names H-001 must not be blocked because unrelated hypotheses
+    (H-002) lack CVE/Exploit Research — otherwise a single unresearched
+    candidate walls off the whole exploit phase.
+    """
+    skill_file = tmp_path / ".skill-loaded-ts"
+    eng = _init_e2e(tmp_path, skill_file)
+    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
+    (eng / "hypotheses.md").write_text(
+        (eng / "hypotheses.md").read_text(encoding="utf-8")
+        + (
+            f"\n### H-001: JWT alg none\n- **Status:** Validated\n- **Phase:** EXPLOITATION\n"
+            f"- **Target:** duck-store.escape.tech\n- **CVE Research:** NVD queried; no CVE\n"
+            f"- **Exploit Research:** ExploitDB; none applicable\n- **Updated:** {ts} UTC\n"
+            f"\n### H-002: No research done\n- **Status:** Candidate\n- **Phase:** EXPLOITATION\n"
+            f"- **Target:** duck-store.escape.tech\n- **Updated:** {ts} UTC\n"
+        ),
+        encoding="utf-8",
+    )
+    ptt_path = eng / "state" / "ptt.md"
+    ptt_path.write_text(
+        ptt_path.read_text(encoding="utf-8")
+        .replace("| PT-010 | [~] |", "| PT-010 | [x] |")
+        .replace("| PT-030 | [ ] |", "| PT-030 | [~] |"),
+        encoding="utf-8",
+    )
+    bind_active_task(eng, "ts")
+
+    # Named hypothesis has research rows -> passes even though H-002 is bare.
+    ok = command.check_command(
+        command.CheckCommandArgs(
+            command="curl -sk -i https://duck-store.escape.tech/api/v1/admin",
+            phase="exploitation",
+            eng_dir=str(eng),
+            scope=str(eng / "scope" / "scope.yaml"),
+            hypothesis_id="H-001",
+            session_id="ts",
+        )
+    )
+    assert not any("online research" in error.lower() for error in ok.errors)
+
+    # H-002 itself is still blocked (no research rows).
+    blocked = command.check_command(
+        command.CheckCommandArgs(
+            command="curl -sk -i https://duck-store.escape.tech/api/v1/admin",
+            phase="exploitation",
+            eng_dir=str(eng),
+            scope=str(eng / "scope" / "scope.yaml"),
+            hypothesis_id="H-002",
+            session_id="ts",
+        )
+    )
+    assert any("online research must be attempted" in e.lower() for e in blocked.errors)
+
+    # Without hypothesis_id, every candidate must carry research rows.
+    all_blocked = command.check_command(
+        command.CheckCommandArgs(
+            command="curl -sk -i https://duck-store.escape.tech/api/v1/admin",
+            phase="exploitation",
+            eng_dir=str(eng),
+            scope=str(eng / "scope" / "scope.yaml"),
+            session_id="ts",
+        )
+    )
+    assert any("H-002 missing" in e for e in all_blocked.errors)
+    assert not any("H-001 missing" in e for e in all_blocked.errors)
 
 
 def test_target_scanner_ignores_dotted_files_and_handles_dev_tcp_endpoint():
@@ -414,6 +498,70 @@ def test_hypothesis_enforces_scope_target_fallback(tmp_path):
     assert any(
         "requires a non-rejected hypothesis matching the command target" in err
         for err in result.errors
+    )
+
+
+def test_rejected_hypothesis_testable_when_explicitly_linked(tmp_path):
+    """A Rejected hypothesis must remain testable when the agent explicitly
+    links its hypothesis_id, so the cheapest-test that the VULN_RESEARCH
+    close gate requires can actually run (reject-then-test deadlock fix)."""
+    (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "scope" / "scope.yaml").write_text(
+        "targets:\n  in_scope_urls: [https://duck-store.escape.tech]\n"
+        "  ip_addresses: []\n"
+        "rules_of_engagement:\n  allowed_actions: [RECON, VULN_RESEARCH]\n"
+        "engagement:\n  name: Test\n"
+        "authorized_parties: [Tester]\n"
+        "authorisation:\n  confirmed: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "hypotheses.md").write_text(
+        "### H-001: Default creds login\n"
+        "- **Target:** https://duck-store.escape.tech\n"
+        "- **Status:** Rejected\n"
+        "- **Phase:** VULN_RESEARCH\n",
+        encoding="utf-8",
+    )
+
+    # Explicitly linked to H-001: the Rejected hypothesis must be eligible so
+    # its cheapest test can run.
+    result = command.check_hypothesis_freshness(
+        tmp_path,
+        command.Phase.VULN_RESEARCH,
+        "curl -i https://duck-store.escape.tech/api/v1/auth/login",
+        hypothesis_id="H-001",
+    )
+    assert not result.errors, f"Rejected-but-linked hypothesis should be testable: {result.errors}"
+
+
+def test_unphased_hypothesis_defaults_to_current_phase_when_linked(tmp_path):
+    """An unphased hypothesis explicitly linked during VULN_RESEARCH defaults
+    to the current phase so it can be dispositioned (empty-phase deadlock fix)."""
+    (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "scope" / "scope.yaml").write_text(
+        "targets:\n  in_scope_urls: [https://duck-store.escape.tech]\n"
+        "rules_of_engagement:\n  allowed_actions: [RECON, VULN_RESEARCH]\n"
+        "engagement:\n  name: Test\n"
+        "authorized_parties: [Tester]\n"
+        "authorisation:\n  confirmed: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "hypotheses.md").write_text(
+        "### H-001: API surface\n"
+        "- **Target:** https://duck-store.escape.tech\n"
+        "- **Status:** Candidate\n"
+        "- **Phase:**\n",  # empty phase
+        encoding="utf-8",
+    )
+
+    result = command.check_hypothesis_freshness(
+        tmp_path,
+        command.Phase.VULN_RESEARCH,
+        "curl -i https://duck-store.escape.tech/api/v1/products",
+        hypothesis_id="H-001",
+    )
+    assert not result.errors, (
+        f"Unphased-but-linked hypothesis should default to current phase: {result.errors}"
     )
 
 

@@ -18,7 +18,7 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
 
 ### Submitting Changes
 
-1. Fork the repo and create a feature branch from `master`
+1. Fork the repo and create a feature branch from `dev`
 2. Follow the existing file structure and conventions:
    - Engagement phases and shared vulnerability playbooks go in `skills/pentest/playbooks/`
    - Injection/web playbooks go in `skills/web-attacks/playbooks/`

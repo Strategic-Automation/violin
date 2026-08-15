@@ -22,8 +22,21 @@ class CheckCommandArgsModel(BaseModel):
     eng_dir: str
     phase: str
     command: str
-    target: str = Field(..., description="Explicit primary target host/IP/URL")
+    target: str = Field(
+        ...,
+        description=(
+            "Explicit in-scope assessment host/IP/URL, or an explicitly listed research_host "
+            "when phase is VULN_RESEARCH"
+        ),
+    )
     session_id: str = ""
+    hypothesis_id: str = Field(
+        "",
+        description=(
+            "Optional hypothesis the command targets (H-00N). When provided, exploit-phase "
+            "guards (e.g. online-research requirement) check only this hypothesis."
+        ),
+    )
 
 
 class RecordPttArgsModel(BaseModel):
@@ -33,7 +46,13 @@ class RecordPttArgsModel(BaseModel):
 
     eng_dir: str
     id: str
-    status: str = ""
+    status: str = Field(
+        "",
+        description=(
+            "Task lifecycle status token: '[~]' (active/start), '[x]' (completed), "
+            "'[-]' (cancelled), '[!]' (blocked). Must be a literal bracket token (not 'in_progress')."
+        ),
+    )
     note: str = ""
     skill: str = Field(..., description="Selected Violin skill required before task activation")
     technique: str = Field(..., description="Concrete technique required before task activation")
@@ -50,14 +69,22 @@ class RecordPttArgsModel(BaseModel):
 class RecordHypothesisArgsModel(BaseModel):
     """Record or update a hypothesis row in the engagement state."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     eng_dir: str
     service: str = ""
     port: str = ""
     id: str = ""
     title: str = ""
-    status: str = ""
+    status: str = Field(
+        "",
+        description=(
+            "Canonical status: 'Candidate', 'Likely', 'Validated', or 'Rejected'. "
+            "When status='Validated', 'runtime_evidence' is required (path under evidence/). "
+            "When status='Rejected', 'verification_status' ('syntax_confirmed' or 'not_implemented'), "
+            "'test_command', 'test_response', and 'rejection_reason' are required."
+        ),
+    )
     confidence: str = Field("", description="0.1-1.0 guesstimate; escalate only with evidence")
     timebox: str = Field("", description="e.g. 4 tool batches or 30 min — then re-evaluate")
     cheapest_test: str = Field(
@@ -84,7 +111,13 @@ class RecordHypothesisArgsModel(BaseModel):
     )
     test_command: str = Field("", description="Exact syntax tested, including argument order")
     test_response: str = Field("", description="Exact decisive response or error")
-    verification_status: str = ""
+    verification_status: str = Field(
+        "",
+        description=(
+            "Required when status='Rejected': must be 'syntax_confirmed' or 'not_implemented'. "
+            "Use 'syntax_uncertain' or 'not_tested' to keep hypothesis active for re-testing."
+        ),
+    )
     kill_criteria: str = Field(
         "",
         description="Evidence that contradicts, or no new info in N batches — then kill & log in Decoy Trail",
@@ -94,15 +127,28 @@ class RecordHypothesisArgsModel(BaseModel):
     )
     next_step: str = ""
     linked_findings: str = ""
-    candidate_source: str = ""
+    candidate_source: str = Field(
+        "",
+        description=(
+            "Optional normalized source route: domain, osint, public-records, username, identity, "
+            "repository, supply-chain, codebase, source, semgrep, codeql, or sarif. "
+            "When present, it can select the PTT skill unless vuln_class has a higher-priority route."
+        ),
+    )
     entry_point: str = ""
     data_flow: str = ""
     source_evidence: str = ""
-    runtime_evidence: str = ""
+    runtime_evidence: str = Field(
+        "",
+        description=(
+            "Required when status is Validated. Path to runtime execution receipt or evidence file "
+            "(e.g. evidence/executions/001-command.json, evidence/exploitation/poc.txt)."
+        ),
+    )
 
 
 class ExecArgsModel(BaseModel):
-    """Authorize and execute one target command using any installed non-interactive Kali/Parrot CLI tool; there is no binary allowlist. Requires one unambiguous [~] PTT task. Scope, phase, hypothesis, history, evidence, timeout, and sync gates still apply, and runtime requirements such as installation, root, hardware, services, GUI, or a TTY are not bypassed. The tool appends exact command history but never updates PTT progress. Hard BLOCK and sync_required never create a process."""
+    """Authorize and execute one target command using any installed non-interactive Kali/Parrot CLI tool; there is no binary allowlist. Commands execute under POSIX shell (/bin/sh, dash on Debian/Ubuntu containers). Builtins like 'source' do not exist in POSIX shell ('source: not found'); use '. file.env' or 'export $(cat file.env)' / 'export $(grep -v "^#" file | xargs)' to load environment variables. Multi-command syntax (&&, ;) is supported, but bash-isms (source, [[ ]], <()) will fail. Requires one unambiguous [~] PTT task. Scope, phase, hypothesis, history, evidence, timeout, and sync gates still apply, and runtime requirements such as installation, root, hardware, services, GUI, or a TTY are not bypassed. The tool appends exact command history but never updates PTT progress. Hard BLOCK and sync_required never create a process."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -141,17 +187,23 @@ class FindingModel(BaseModel):
 
 
 class ReviewBatchArgsModel(BaseModel):
-    """Review the current completed batch, optionally create one receipt-backed finding, update the active PTT task, and release the sync lock. All inputs are validated before mutation; the lock clears last."""
+    """Review the current completed batch, optionally create one receipt-backed finding, and release the sync lock. The active PTT task stays active unless status='[x]' is explicitly requested. All inputs are validated before mutation; the lock clears last."""
 
     model_config = ConfigDict(extra="forbid")
 
     eng_dir: str
     id: str = Field(..., description="Active PTT task id")
-    status: str
+    status: str = Field(
+        "[~]",
+        description=(
+            "PTT status after review. Defaults to '[~]' so continued same-phase work keeps the "
+            "same task; use '[x]' only when deliberately closing it."
+        ),
+    )
     note: str = Field(..., description="Truthful result/evidence review")
     skill: str = Field(
         "",
-        description="Review skill; defaults to the active execution binding, or fp-check for findings",
+        description="Review skill; defaults to the active execution binding (or fp-check if specified)",
     )
     hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
     outcome: str = ""
@@ -178,7 +230,7 @@ class RebindPendingBatchArgsModel(BaseModel):
 
 
 class HeartbeatDoneArgsModel(BaseModel):
-    """Call AFTER heartbeat review."""
+    """Call AFTER heartbeat review. Clear sequence: 1) violin_status -> 2) violin_review_batch (if pending batch exists) -> 3) violin_heartbeat_done(eng_dir=...)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -186,9 +238,9 @@ class HeartbeatDoneArgsModel(BaseModel):
 
 
 class ExecBurstArgsModel(BaseModel):
-    """Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Use for recon and exploit/race batches; never raw terminal for targets."""
+    """Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Sync credit limits per phase apply (Recon: 10, Vuln Research: 10, Exploitation/Post-Exploitation/PRIVESC/FLAGS: 20 per sync window) and are shared across execution tools. If a burst is denied with 'insufficient sync credit for burst: need N, have M', split the command set into smaller bursts (size <= M) and review the batch via violin_review_batch to refresh sync credit. Use for recon and exploit/race batches; never raw terminal for targets."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     eng_dir: str = Field(
         ...,
@@ -204,7 +256,11 @@ class ExecBurstArgsModel(BaseModel):
         description="inline newline-free commands, PRE-APPROVED AS A BATCH by the operator; preferred over commands_file",
     )
     commands_file: str = Field(
-        "", description="optional path to a newline-delimited file of commands"
+        "",
+        description=(
+            "optional engagement-relative path to a newline-delimited regular file; absolute, "
+            "symlinked, and escaping paths are rejected"
+        ),
     )
     scope: str = Field("", description="path to scope.yaml")
     session_id: str = Field("", description="session/goal label for skill-load gating")
@@ -273,13 +329,26 @@ class NucleiArgsModel(AdapterCommonModel):
 
 
 class FfufArgsModel(AdapterCommonModel):
-    """Run typed ffuf content discovery through violin_exec."""
+    """Run typed ffuf content discovery through violin_exec with portable wordlist discovery."""
 
     model_config = ConfigDict(extra="forbid")
 
-    url: str
-    wordlist: str
+    url: str = Field("", description="Fuzz URL containing FUZZ; defaults to target")
+    wordlist: str = Field(
+        "",
+        description=(
+            "Optional existing wordlist. When omitted or missing, resolve SECLISTS and common "
+            "Kali/Parrot SecLists or DIRB locations."
+        ),
+    )
     headers: list[str] = Field(default_factory=list)
+    auth_token_file: str = Field(
+        "",
+        description=(
+            "Optional token file under engagement evidence. When set, ffuf sends "
+            "Authorization: Bearer <token>; shell substitution is not supported."
+        ),
+    )
 
 
 class ListenerArgsModel(BaseModel):
@@ -304,6 +373,8 @@ class ListenerArgsModel(BaseModel):
 
 class TargetArgsModel(BaseModel):
     """Resolve the canonical in-scope target for the engagement from scope.yaml (kills hardcoded-IP fragility: a box reset just edits scope.yaml, not every command in history). Query by --host (in-scope IP/CIDR) or --role (named role from scope.yaml targets.roles, e.g. 'web'). Returns the ip/url/host field. The agent should run THIS to get the target, then interpolate the result into the actual command instead of hardcoding an IP."""
+
+    model_config = ConfigDict(extra="forbid")
 
     eng_dir: str = Field(
         ..., description="engagement dir (required; target resolution is engagement-scoped)"
@@ -332,9 +403,9 @@ class StatusArgsModel(BaseModel):
 T = TypeVar("T", bound=BaseModel)
 
 
-def validate_args(model_cls: type[T], raw_args: dict[str, Any] | None) -> T:
+def validate_args(model_cls: type[T], raw_args: dict[str, Any] | None, *, strict: bool = True) -> T:
     """Validate raw payload dictionary using Pydantic model."""
-    return model_cls.model_validate(raw_args or {})
+    return model_cls.model_validate(raw_args or {}, strict=strict)
 
 
 def to_tool_schema(
@@ -344,7 +415,8 @@ def to_tool_schema(
 ) -> dict[str, Any]:
     """Dynamically export tool schema directly from Pydantic model_json_schema()."""
     schema = model_cls.model_json_schema()
-    doc = description or schema.pop("description", "") or (model_cls.__doc__ or "")
+    model_description = schema.pop("description", "")
+    doc = description or model_description or (model_cls.__doc__ or "")
     schema.pop("title", None)
 
     if "properties" in schema:
@@ -369,8 +441,9 @@ REBIND_PENDING_BATCH_SCHEMA = to_tool_schema(RebindPendingBatchArgsModel)
 HEARTBEAT_DONE_SCHEMA = to_tool_schema(
     HeartbeatDoneArgsModel,
     description=(
-        f"Call AFTER heartbeat review: re-read skills/pentest/SKILL.md and review scope.yaml /"
-        f" state/ptt.md / hypotheses.md / state/history.md. Cadence is {state.COMMAND_INTERVAL}"
+        f"Call AFTER heartbeat review. Required clear sequence: 1) violin_status -> 2) violin_review_batch "
+        f"(if pending batch exists) -> 3) violin_heartbeat_done(eng_dir=...). Re-read skills/pentest/SKILL.md "
+        f"and review scope.yaml / state/ptt.md / hypotheses.md / state/history.md. Cadence is {state.COMMAND_INTERVAL}"
         " executed target commands; exploitation/post-exploitation/PRIVESC/FLAGS suppress"
         " heartbeat. Clears heartbeat lock so violin_exec may release the next command."
     ),

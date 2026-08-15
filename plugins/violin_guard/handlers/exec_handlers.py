@@ -14,6 +14,36 @@ from .base import (
     _serialise_errors,
 )
 
+_MAX_COMMAND_FILE_BYTES = 64 * 1024
+
+
+def _commands_from_file(eng_dir: str, value: str) -> list[str]:
+    """Load a bounded engagement-local command file without following symlinks."""
+    relative = Path(value)
+    if relative.is_absolute():
+        raise ValueError("commands_file must be engagement-relative")
+    engagement = _eng_path(eng_dir).resolve()
+    candidate = engagement / relative
+    if candidate.is_symlink():
+        raise ValueError("commands_file must not be a symlink")
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(engagement):
+        raise ValueError("commands_file escapes the engagement directory")
+    current = candidate
+    while current != engagement:
+        if current.is_symlink():
+            raise ValueError("commands_file must not traverse symlinked directories")
+        current = current.parent
+    if not resolved.exists():
+        raise ValueError(f"commands file not found: {value}")
+    if not resolved.is_file():
+        raise ValueError("commands_file must be a regular file")
+    if resolved.stat().st_size > _MAX_COMMAND_FILE_BYTES:
+        raise ValueError(f"commands_file exceeds {_MAX_COMMAND_FILE_BYTES} bytes")
+    return [
+        line.strip() for line in resolved.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+
 
 @_serialise_errors
 def handle_check_command(a, **kwargs):
@@ -29,7 +59,7 @@ def handle_heartbeat_done(a, **kwargs):
 
 
 @_serialise_errors
-def handle_exec(a, **kwargs):
+def handle_exec(a, *, _internal_argv=None, _internal_background=None, **kwargs):
     r = _check_command_internal(a)
     exit_code = r.exit_code()
     status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
@@ -55,11 +85,22 @@ def handle_exec(a, **kwargs):
             cwd=a.get("cwd", ""),
             label=a.get("label", ""),
             ptt_task_id=active_task.id if active_task else "",
-            argv=a.get("_argv"),
-            background=bool(a.get("background", False)),
+            argv=_internal_argv,
+            background=(
+                bool(a.get("background", False))
+                if _internal_background is None
+                else bool(_internal_background)
+            ),
         )
-        res.pop("status", None)
-        return _json("ok", **res)
+        execution_status = res.pop("status", None)
+        if not res.get("executed"):
+            return _json(
+                "execution_failed",
+                execution_status=execution_status,
+                error=res.get("stderr_preview") or "process failed to start",
+                **res,
+            )
+        return _json("ok", execution_status=execution_status, **res)
     except Exception as e:
         return _json("execution_failed", error=str(e), executed=False)
 
@@ -90,12 +131,10 @@ def handle_exec_burst(a, **kwargs):
     cmds = list(a.get("commands") or [])
     commands_file = a.get("commands_file")
     if commands_file:
-        p = Path(commands_file)
-        if not p.exists():
-            return _json("error", error=f"commands file not found: {commands_file}")
-        cmds.extend(
-            line.strip() for line in p.read_text(encoding="utf-8").splitlines() if line.strip()
-        )
+        try:
+            cmds.extend(_commands_from_file(eng_dir, str(commands_file)))
+        except ValueError as exc:
+            return _json("error", error=str(exc))
     if not cmds:
         return _json("error", error="no commands provided (inline or commands_file)")
     if len(cmds) > state.MAX_BURST_COMMANDS:
@@ -169,37 +208,32 @@ def handle_exec_burst(a, **kwargs):
                 ptt_task_id=active_task_id,
                 sync_reservation=None if item["local"] else reservation_id,
             )
-            res.pop("status", None)
-            entry = {"index": idx + 1, "command": cmd, **res}
+            execution_status = res.pop("status", None)
+            entry = {
+                "index": idx,
+                "command": cmd,
+                "execution_status": execution_status,
+                **res,
+            }
             if review_warnings:
                 entry["review_required"] = True
                 entry["warnings"] = review_warnings
             results.append(entry)
             if res.get("executed"):
                 executed += 1
-            if (
-                reservation_id
-                and not item["local"]
-                and not res.get("sync_reservation_consumed")
-                and not res.get("sync_reservation_released")
-            ):
-                if res.get("executed"):
-                    state.consume_reserved_sync_credit(eng_dir, reservation_id)
-                else:
-                    state.release_reserved_sync_credit(eng_dir, reservation_id)
             if res.get("exit_code", 0) != 0 and not continue_on_error:
                 break
         except Exception as e:  # noqa: BLE001
-            if reservation_id:
-                state.release_reserved_sync_credit(eng_dir, reservation_id)
             if not continue_on_error:
+                if reservation_id:
+                    state.release_reserved_sync_credit(eng_dir, reservation_id)
                 return _json(
                     "execution_failed",
                     executed=executed,
-                    results=results + [{"index": idx + 1, "command": cmd, "error": str(e)}],
+                    results=results + [{"index": idx, "command": cmd, "error": str(e)}],
                     error=str(e),
                 )
-            results.append({"index": idx + 1, "command": cmd, "error": str(e)})
+            results.append({"index": idx, "command": cmd, "error": str(e)})
 
     if reservation_id:
         state.release_reserved_sync_credit(eng_dir, reservation_id)

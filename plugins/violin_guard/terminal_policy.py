@@ -93,6 +93,11 @@ _KNOWN_SOURCE_HOSTS = frozenset(
     }
 )
 _NETWORK_PATH_RE = re.compile(r"/(?:dev/)?(?:tcp|udp)/", re.IGNORECASE)
+_UNC_PATH_RE = re.compile(
+    r"(?<![:\w])(?:\\\\|//)(?![./])(?:\[[0-9a-f:]+\]|[a-z0-9][a-z0-9.-]*)(?:[\\/])",
+    re.IGNORECASE,
+)
+_ASSIGNMENT_RE = re.compile(r"(?<![\w])([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(['\"]?)([^\s;|&]+)\2")
 _NETWORK_MODULE_RE = re.compile(
     r"\b(?:http\.server|requests|httpx|urllib(?:\.request)?|socket(?:server)?|scapy|paramiko)\b",
     re.IGNORECASE,
@@ -253,14 +258,30 @@ def _is_local_compilation_or_test(seg: CommandSegment) -> bool:
     return "py_compile" in seg.raw_text or "pytest" in lower_words or "unittest" in lower_words
 
 
+def _is_local_package_import_check(seg: CommandSegment) -> bool:
+    """Return True if command is a local package availability probe (e.g. python3 -c 'import requests')."""
+    if seg.executable not in _SCRIPT_INTERPRETERS:
+        return False
+    if _url_hosts(seg.raw_text) or _IPV4_RE.search(seg.raw_text):
+        return False
+    text = seg.raw_text.strip()
+    return bool(re.search(r"""(?:python|python3)\s+-c\s+["']\s*import\s+[\w\s,.]+\s*["']""", text))
+
+
 def _block_terminal_segment(seg: CommandSegment) -> str | None:
     segment_text = seg.raw_text
     executable = seg.executable
 
     if _NETWORK_PATH_RE.search(segment_text):
         return _message("network socket path detected in the raw terminal command")
+    if _UNC_PATH_RE.search(segment_text):
+        return _message("UNC or network-share path detected in the raw terminal command")
 
-    if executable in _SCRIPT_INTERPRETERS and _NETWORK_MODULE_RE.search(segment_text):
+    if (
+        executable in _SCRIPT_INTERPRETERS
+        and _NETWORK_MODULE_RE.search(segment_text)
+        and not _is_local_package_import_check(seg)
+    ):
         return _message("network-capable script primitive detected in the raw terminal command")
 
     # Package/source retrieval is allowed for local setup (for example git
@@ -268,8 +289,8 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
     # treated as target interaction and must use the typed guard.
     is_source_command = executable in _PACKAGE_OR_SOURCE_COMMANDS
     url_hosts = _url_hosts(segment_text)
-    if not is_source_command and url_hosts:
-        return _message("URL detected in a non-package raw terminal command")
+    if not is_source_command and executable not in _LOCAL_COMMANDS and url_hosts:
+        return _message("URL detected in a non-local raw terminal command: " + ", ".join(url_hosts))
 
     # Public package/source URLs are host-local setup, not assessment traffic.
     # Keep numeric authorities conservative: a clone/install from an IP may be
@@ -312,7 +333,21 @@ def block_terminal_command(command: str) -> str | None:
     if not isinstance(command, str) or not command.strip():
         return None
 
+    tainted_variables = {
+        name
+        for name, _quote, value in _ASSIGNMENT_RE.findall(command)
+        if _word_is_target_literal(value)
+    }
     for segment in parse_bash_segments(command):
+        if (
+            tainted_variables
+            and segment.executable not in _LOCAL_COMMANDS
+            and any(
+                re.search(rf"\$(?:{{{re.escape(name)}}}|{re.escape(name)}\b)", segment.raw_text)
+                for name in tainted_variables
+            )
+        ):
+            return _message("target-bearing shell variable used by a non-local command")
         if message := _block_terminal_segment(segment):
             return message
     return None
@@ -321,8 +356,8 @@ def block_terminal_command(command: str) -> str | None:
 def _message(reason: str) -> str:
     return (
         "RAW TERMINAL TARGET EXECUTION BLOCKED by Violin: "
-        f"{reason}. Use `violin_exec` for one command or `violin_exec_burst` "
-        "for a bounded batch so scope, phase, PTT, hypotheses, history, "
+        f"{reason}. Use `violin_exec` or `violin_exec_burst` (or typed tools like `violin_ffuf`, `violin_httpx`) "
+        "for any target command so scope, phase, PTT, hypotheses, history, "
         "evidence, and sync gates are enforced. The built-in terminal remains "
         "available for host-local preparation, tests, builds, and bookkeeping."
     )

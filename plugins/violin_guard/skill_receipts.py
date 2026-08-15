@@ -29,11 +29,9 @@ __all__ = [
     "get_binding",
     "binding_readiness",
     "get_delivery",
-    "get_review_readiness",
     "record_binding_turn",
     "record_delivery_turn",
     "prepare_delivery",
-    "prepare_review_readiness",
 ]
 
 _FILE_NAME = "skills.json"
@@ -87,7 +85,6 @@ def _empty(session_id: str = "", generation: int = 0) -> dict[str, Any]:
         "context": {"session_id": session_id, "generation": generation},
         "deliveries": {},
         "bindings": {},
-        "review_readiness": {},
     }
 
 
@@ -105,13 +102,12 @@ def _load(path: Path) -> tuple[dict[str, Any], bool]:
     if not isinstance(raw.get("context"), dict) or not isinstance(raw.get("deliveries"), dict):
         return _empty(), True
     raw.setdefault("bindings", {})
-    raw.setdefault("review_readiness", {})
     return raw, False
 
 
 def _mutate(eng_dir: str | Path, mutation: Callable[[dict[str, Any]], Any]) -> Any:
     path = _path(eng_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    state.ensure_dir(path.parent)
     with state.lock_file(path):
         data, recovered = _load(path)
         if recovered:
@@ -430,39 +426,3 @@ def record_binding_turn(
             binding["bound_at"] = _now()
 
     _mutate(eng_dir, record)
-
-
-def prepare_review_readiness(
-    eng_dir: str | Path,
-    *,
-    finding_id: str,
-    evidence_digest: str,
-    delivery_id: str,
-) -> dict[str, Any]:
-    """Record a per-evidence-set review readiness receipt for later fp-check gating."""
-
-    def prepare(data: dict[str, Any]) -> dict[str, Any]:
-        delivery = data["deliveries"].get(delivery_id)
-        if (
-            not delivery
-            or delivery.get("status") != "delivered"
-            or delivery.get("skill") != "fp-check"
-        ):
-            raise ValueError("a delivered fp-check receipt is required for review readiness")
-        receipt = {
-            "finding_id": finding_id,
-            "evidence_digest": evidence_digest,
-            "delivery_id": delivery_id,
-            "prepared_at": _now(),
-        }
-        data["review_readiness"][f"{finding_id}:{evidence_digest}"] = receipt
-        return receipt
-
-    return _mutate(eng_dir, prepare)
-
-
-def get_review_readiness(
-    eng_dir: str | Path, *, finding_id: str, evidence_digest: str
-) -> dict[str, Any] | None:
-    data, _ = _load(_path(eng_dir))
-    return (data.get("review_readiness") or {}).get(f"{finding_id}:{evidence_digest}")

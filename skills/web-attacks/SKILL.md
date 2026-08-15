@@ -1,9 +1,10 @@
 ---
 name: web-attacks
-description: "Use when an authorized engagement's PTT or hypothesis identifies web injection: SQLi, XSS, command injection, SSRF, or path traversal. Select it through the Violin receipt flow, then load only the matching playbook for safe validation and evidence."
+description: "Web injection testing: SQLi, XSS, SSRF, path traversal."
 version: 1.0.0
 author: Violin
 license: MIT
+platforms: [linux]
 metadata:
   hermes:
     tags: [pentest, web, owasp, injection]

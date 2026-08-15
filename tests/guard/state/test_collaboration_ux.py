@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
 from plugins.violin_guard import (
     bootstrap,
-    findings,
     history,
     hypotheses,
     ptt,
@@ -20,13 +18,7 @@ from plugins.violin_guard import (
 from plugins.violin_guard import (
     handlers as service,
 )
-from plugins.violin_guard.skill_receipts import (
-    SkillViewResult,
-    complete_delivery,
-    get_binding,
-    prepare_delivery,
-    prepare_review_readiness,
-)
+from plugins.violin_guard.skill_receipts import SkillViewResult, get_binding
 from tests.guard.receipt_fixture import bind_active_task
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -76,7 +68,7 @@ def _pending_batch(eng: Path) -> None:
     state.mark_pending_sync(eng, command, "RECON", "PT-010")
 
 
-def _prepare_finding_review(eng: Path, finding_id: str = "FIND-001") -> None:
+def _prepare_finding_review(eng: Path) -> None:
     hypotheses.update_hypothesis(
         eng / "hypotheses.md",
         id="001",
@@ -85,22 +77,6 @@ def _prepare_finding_review(eng: Path, finding_id: str = "FIND-001") -> None:
         phase="RECON",
         target="10.10.10.10",
         runtime_evidence="evidence/executions/batch-command.stdout.txt",
-    )
-    reserved = prepare_delivery(
-        eng,
-        session_id="test-session",
-        skill="fp-check",
-        bundle_digest="sha256:" + "b" * 64,
-        phase="RETROSPECTIVE",
-    )
-    if reserved.owner:
-        reserved = complete_delivery(eng, reserved, SkillViewResult(True, content="fp-check"))
-    evidence = findings._batch_evidence(eng, state.get_pending_sync(eng))
-    prepare_review_readiness(
-        eng,
-        finding_id=finding_id,
-        evidence_digest="sha256:" + sha256("\n".join(sorted(evidence)).encode()).hexdigest(),
-        delivery_id=reserved.id,
     )
 
 
@@ -233,6 +209,48 @@ def test_review_batch_creates_finding_from_current_batch_receipts(tmp_path: Path
     text = finding.read_text(encoding="utf-8")
     assert "batch-command.stdout.txt" in text
     assert "## Remediation" in text
+
+
+def test_review_batch_creates_finding_without_fp_check_preparation(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    _pending_batch(eng)
+    hypotheses.update_hypothesis(
+        eng / "hypotheses.md",
+        id="001",
+        title="HTTP listener is externally reachable",
+        status="Validated",
+        phase="RECON",
+        target="10.10.10.10",
+        runtime_evidence="evidence/executions/batch-command.stdout.txt",
+    )
+
+    result = json.loads(
+        service.handle_review_batch(
+            {
+                "eng_dir": str(eng),
+                "id": "PT-010",
+                "status": "[~]",
+                "note": "Reviewed the HTTP service receipt",
+                "finding": {
+                    "hypothesis_id": "H-001",
+                    "title": "Exposed HTTP service",
+                    "severity": "Info",
+                    "description": "An HTTP listener is reachable on the approved target.",
+                    "impact": "The service contributes to the externally reachable attack surface.",
+                    "remediation": "Confirm the listener is intended.",
+                },
+            }
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["released"] is True
+    assert result["finding"]["finding_id"] == "FIND-001"
+    finding = eng / result["finding"]["path"]
+    assert finding.is_file()
+    text = finding.read_text(encoding="utf-8")
+    assert "# FIND-001: Exposed HTTP service" in text
+    assert "batch-command.stdout.txt" in text
 
 
 @pytest.mark.parametrize(
@@ -386,3 +404,32 @@ def test_update_hypothesis_preserves_board_sections(tmp_path: Path) -> None:
     assert "## Decoy Trail (killed approaches — do NOT re-enter)" in text
     assert "## Research Log" in text
     assert "## Resolved Theories" in text
+
+
+def test_update_hypothesis_keeps_distinct_ids_isolated(tmp_path: Path) -> None:
+    hyp_file = tmp_path / "hypotheses.md"
+    hyp_file.write_text("# Hypothesis Board\n\n", encoding="utf-8")
+    evidence = tmp_path / "evidence" / "executions" / "access-control.json"
+    evidence.parent.mkdir(parents=True)
+    evidence.write_text('{"status":"completed"}\n', encoding="utf-8")
+    hypotheses.update_hypothesis(
+        hyp_file,
+        id="H-021",
+        title="Existing access-control finding",
+        status="Validated",
+        runtime_evidence="evidence/executions/access-control.json",
+    )
+    hypotheses.update_hypothesis(
+        hyp_file,
+        id="H-030",
+        title="CVE research candidate",
+        status="Candidate",
+        cve_research="Vendor advisory checked; no relevant CVE.",
+    )
+
+    records = {item.id: item for item in hypotheses.parse_hypotheses(hyp_file)}
+    assert set(records) == {"021", "030"}
+    assert records["021"].title == "Existing access-control finding"
+    assert records["021"].status == "Validated"
+    assert records["030"].title == "CVE research candidate"
+    assert records["030"].cve_research.startswith("Vendor advisory")

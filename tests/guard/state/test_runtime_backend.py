@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import execution
+from plugins.violin_guard import execution, runtime_backend
 from plugins.violin_guard.runtime_backend import resolve_backend
 
 
@@ -43,6 +44,18 @@ def test_explicit_docker_fails_when_mount_is_invalid(tmp_path: Path) -> None:
         resolve_backend(
             "docker", tmp_path, docker_probe=lambda *_: (False, "does not mount /engagements/x")
         )
+
+
+def test_docker_probe_timeout_is_unavailable(tmp_path: Path, monkeypatch) -> None:
+    def time_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(runtime_backend.shutil, "which", lambda _: "docker")
+
+    ready, detail = runtime_backend._docker_container_ready("kali-pentest", tmp_path, run=time_out)
+
+    assert ready is False
+    assert detail == "Docker container 'kali-pentest' probe timed out"
 
 
 def test_docker_command_uses_engagement_mount(tmp_path: Path, monkeypatch) -> None:

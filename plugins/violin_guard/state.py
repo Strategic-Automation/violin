@@ -47,13 +47,18 @@ def _eng_root() -> Path:
     override = os.environ.get("VIOLIN_ENG_ROOT", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    # <profile>/plugins/violin_guard/state.py -> <profile>
+    container_root = Path("/violin")
+    if container_root.exists() and (container_root / "engagements").exists():
+        return container_root.resolve()
     return Path(__file__).resolve().parents[2]
 
 
 def resolve_eng_dir(eng_dir: str | Path) -> Path:
     """Resolve an engagement directory path (absolute or relative to profile root)."""
     if not str(eng_dir).strip() or str(eng_dir).strip() == ".":
+        env_eng = os.environ.get("ENG_DIR", "").strip()
+        if env_eng:
+            return Path(env_eng).expanduser().resolve()
         cwd = Path.cwd().resolve()
         if (cwd / "scope" / "scope.yaml").exists() or (cwd / "hypotheses.md").exists():
             return cwd
@@ -95,9 +100,19 @@ def record_session_id(eng_dir: str | Path, session_id: str | None) -> None:
             atomic_json(path, {"session_id": session_id.strip()})
 
 
+def ensure_dir(path: Path) -> Path:
+    """Ensure directory exists fail-safe against symlinks and cross-platform FileExistsError [Errno 17]."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        if not path.exists():
+            raise
+    return path
+
+
 def _state_dir(eng_dir: str | Path) -> Path:
     p = resolve_eng_dir(eng_dir) / _STATE_DIR
-    p.mkdir(parents=True, exist_ok=True)
+    ensure_dir(p)
     return p
 
 
@@ -108,7 +123,18 @@ def _state_dir(eng_dir: str | Path) -> Path:
 def lock_file(path: Path):
     """Acquire an exclusive advisory lock on ``path`` for the duration of a ``with`` block."""
     lock_path = path.with_suffix(path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(lock_path.parent)
+    with FileLock(str(lock_path), timeout=20):
+        yield
+
+
+@contextmanager
+def workflow_lock(eng_dir: str | Path):
+    """Serialize multi-file workflow transitions for one engagement.
+
+    Callers acquire this lock before any narrower JSON or receipt file lock.
+    """
+    lock_path = _state_dir(eng_dir) / "workflow.lock"
     with FileLock(str(lock_path), timeout=20):
         yield
 
@@ -138,9 +164,29 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def atomic_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON atomically by replacing a temporary swap file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_dir(path.parent)
     tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        for attempt in range(5):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+    finally:
+        if tmp.exists():
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+
+
+def atomic_text(path: Path, content: str) -> None:
+    """Write one UTF-8 text document with an atomic replace."""
+    ensure_dir(path.parent)
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp.write_text(content, encoding="utf-8")
     try:
         for attempt in range(5):
             try:
@@ -411,7 +457,8 @@ def record_semantic_review(
 
     path = _state_dir(eng_dir) / _SEMANTIC_FILE
     key = "|".join((task_id, hypothesis_id, skill, technique.strip().lower()))
-    has_evidence = bool(evidence_paths)
+    clean_evidence_paths = [p for p in evidence_paths if p]
+    has_evidence = bool(clean_evidence_paths)
     positive = outcome in {"progress", "validated", "rejected"} and has_evidence
     pivoted = bool(
         next_technique.strip().lower()
@@ -428,7 +475,7 @@ def record_semantic_review(
             {
                 "count": count,
                 "outcome": outcome,
-                "evidence_paths": evidence_paths,
+                "evidence_paths": clean_evidence_paths,
                 "next_action": next_action,
                 "next_technique": next_technique,
                 "pivoted": pivoted,
@@ -457,17 +504,6 @@ def record_semantic_review(
         }
 
     return mutate_json(path, record)
-
-
-def clear_semantic_lock(eng_dir: str | Path) -> None:
-    """Clear any active semantic progress lock."""
-    path = _state_dir(eng_dir) / _SEMANTIC_FILE
-
-    def record(data: dict[str, Any]) -> dict[str, Any]:
-        data.pop("lock", None)
-        return data
-
-    mutate_json(path, record)
 
 
 def record_research_attempt(eng_dir: str | Path, tool_name: str, success: bool) -> None:

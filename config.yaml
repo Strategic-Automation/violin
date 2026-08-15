@@ -7,13 +7,15 @@ model:
   base_url: https://inference-api.nousresearch.com/v1
 
 agent:
-  max_turns: 350
+  max_turns: 700
   service_tier: normal
   verbose: false
   reasoning_effort: medium
   tool_use_enforcement: true
   disabled_toolsets:
     - kanban
+goals:
+  max_turns: 40
 
 tool_loop_guardrails:
   warnings_enabled: true
@@ -29,8 +31,8 @@ tool_loop_guardrails:
 
 compression:
   enabled: true
-  threshold: 0.25
-  target_ratio: 0.30
+  threshold: 0.40
+  target_ratio: 0.35
   protect_last_n: 20
   protect_first_n: 8
 
@@ -151,6 +153,10 @@ security:
 
 browser:
   allow_unsafe_evaluate: true
+
+web_search:
+  provider: duckduckgo
+
 
 updates:
   pre_update_backup: false

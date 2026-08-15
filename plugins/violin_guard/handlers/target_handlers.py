@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from .. import bootstrap, ptt, runtime_backend, state
+from .. import bootstrap, command, ptt, runtime_backend, state
 from ..phases import Phase, requires_hypothesis, suppresses_heartbeat
 from ..skill_policy import resolve_skill_route
 from ..skill_receipts import binding_readiness
@@ -127,6 +127,7 @@ def _build_phase_requirements() -> dict:
             "ptt_phase": "EXPLOITATION" if phase is Phase.POST_EXPLOITATION else phase.value,
             "hypothesis_required": requires_hypothesis(phase),
             "sync_window": state.sync_credit_limit(phase.value),
+            "accepted_scope_actions": command.accepted_action_aliases(phase),
             "heartbeat_enabled": not suppresses_heartbeat(phase),
         }
         for phase in Phase

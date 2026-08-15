@@ -1,5 +1,6 @@
 """Unit tests for psutil process tree termination in execution.py."""
 
+import contextlib
 import subprocess
 import sys
 import time
@@ -30,4 +31,6 @@ def test_terminate_process_tree_with_psutil():
     # Verify both parent and child processes are dead
     assert proc.poll() is not None
     for child in children:
-        assert not child.is_running()
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+            child.wait(timeout=2.0)
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE

@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.1.0 (Unreleased)
+
+### Benchmark & Evaluation Framework
+- **Automated Benchmark Runner (`benchmark/run.py`)**: End-to-end evaluation harness supporting automated multi-turn execution, OpenRouter provider integration, Docker containerization, and soft-timeout closeout handling.
+- **Evidence-Gated Scorer & Proof Evaluator (`benchmark/score.py`, `proof.py`)**: Unified Technical-Proof Recall scoring with `require`/`require_any` sentinels, absence-proof verification for rate-limiting challenges, decisive payload matching, and reverse hypothesis-to-finding validation.
+- **Automated AI Judge & Indexer (`benchmark/ai_judge.py`, `indexer.py`)**: Heuristic proof auditing, quality verification, and bounded artifact indexing for large engagements.
+- **Calibration Suite**: 100% pass baseline on the 20-challenge Escape Duck Store reference suite (`--calibrate known-good` and `known-bad`).
+- **Canonical Closeout Synthesis**: `generate-closeout` derives `findings.yaml` and executive `report.md` exclusively from verified `FIND-NNN.md` artifacts.
+
+### Guard & Scope Policy
+- **AST Scope Parser Rewrite**: `targets.py` scope checks rewritten using `bashlex` AST tokenization and `yarl` URL parsing, eliminating benign-command false positives while independently verifying pipelines, subshells, and compound commands.
+- **Actionable Remediation Guidance**: Denials explicitly provide exact typed tool signatures and parameter templates (`violin_record_hypothesis`, `violin_record_ptt`, `violin_exec`) to eliminate turn-budget waste across models.
+- **Record-As-You-Go Recency Gates**: Prevents deferred state writes, auto-logs friction events at block time, and resolves hypothesis disposition deadlocks.
+- **Receipt Integrity & Parser Hardening**: Fail-closed state parsers, receipt integrity verifier, and single-approval bounded command batches (`violin_exec_burst`).
+
+### Methodology & Playbooks
+- **Consolidated 31 Playbooks, 17 References, 12 Templates**: Cleanly routed across the `pentest` orchestrator, `web-attacks` (5 playbooks), and `access-control` (3 playbooks) skills with single-source vulnerability routing.
+- **Parallel Reconnaissance**: Mandated multi-agent parallel discovery patterns in `/goal` prompts and `SKILL.md §3` for high-throughput asset mapping.
+- **Small Model Grounding & Worked Examples**: Added §7b worked tool-call parameter templates in `SKILL.md` to ensure seamless execution for open-weight models (Qwen 2.5/3.8/3.5, DeepSeek) without guard friction.
+- **Single-Step Win Formalization**: Immediate hypothesis validation (`Validated`) coupled with atomic `FIND-NNN.md` evidence bundling upon decisive technical proof capture.
+
 ## 3.0.1
 
 - Aligned workflow instructions in `.hermes.md`, `SKILL.md`, and `playbooks/recon.md` with Hermes v3 runtime tool contracts.

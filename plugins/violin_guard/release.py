@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,7 @@ __all__ = [
     "GuardResult",
     "ReleaseCheckResult",
     "check_release",
+    "main",
     "resolve_reference",
 ]
 
@@ -73,27 +75,69 @@ def resolve_reference(source: Path, reference: str) -> Path:
 
 
 def _check_manifest_and_changelog(root: Path, result: ReleaseCheckResult) -> list[str]:
-    """Check plugin.yaml version format and CHANGELOG.md presence."""
+    """Require exact SemVer equality across every published version surface."""
     plugin_yaml = root / "plugin.yaml"
     provides_tools: list[str] = []
+    versions: dict[str, str] = {}
     if plugin_yaml.exists():
         import yaml
 
         data = yaml.safe_load(plugin_yaml.read_text(encoding="utf-8"))
-        version = data.get("version", "0.0.0")
+        version = str(data.get("version", "0.0.0"))
+        versions["plugin manifest"] = version
         provides_tools = list(data.get("provides_tools", []) or [])
-        if not re.match(r"^\d+\.\d+\.\d+", version):
+        if not re.fullmatch(r"\d+\.\d+\.\d+", version):
             result.add_error(f"plugin.yaml version '{version}' is not a valid semver")
-        else:
-            result.add_info(f"plugin.yaml version: {version}")
     else:
         result.add_error("plugin.yaml not found")
 
-    changelog = root.parent.parent / "CHANGELOG.md"
-    if changelog.exists():
-        result.add_info("CHANGELOG.md present")
+    repo = root.parent.parent
+    pyproject = repo / "pyproject.toml"
+    if pyproject.exists():
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+        versions["project"] = str(project.get("version", ""))
+        dependencies = [str(value).lower() for value in project.get("dependencies", [])]
+        if not any(value.startswith("pyyaml") for value in dependencies):
+            result.add_error("PyYAML must be a runtime project dependency")
+        else:
+            result.add_info("PyYAML is declared as a runtime dependency")
     else:
-        result.add_warning("CHANGELOG.md not found")
+        result.add_error("pyproject.toml not found")
+
+    distribution = repo / "distribution.yaml"
+    if distribution.exists():
+        import yaml
+
+        versions["distribution"] = str(
+            yaml.safe_load(distribution.read_text(encoding="utf-8")).get("version", "")
+        )
+    else:
+        result.add_error("distribution.yaml not found")
+
+    changelog = repo / "CHANGELOG.md"
+    if changelog.exists():
+        match = re.search(
+            r"(?m)^## (\d+\.\d+\.\d+)(?: \(Unreleased\))?\s*$",
+            changelog.read_text(encoding="utf-8"),
+        )
+        if match:
+            versions["changelog"] = match.group(1)
+        else:
+            result.add_error("CHANGELOG.md has no top SemVer entry")
+    else:
+        result.add_error("CHANGELOG.md not found")
+
+    invalid = {
+        name: value for name, value in versions.items() if not re.fullmatch(r"\d+\.\d+\.\d+", value)
+    }
+    for name, value in invalid.items():
+        result.add_error(f"{name} version '{value}' is not exact SemVer")
+    if versions and len(set(versions.values())) != 1:
+        result.add_error(
+            "version mismatch: " + ", ".join(f"{name}={value}" for name, value in versions.items())
+        )
+    elif versions:
+        result.add_info(f"all version surfaces match {next(iter(versions.values()))}")
 
     return provides_tools
 
@@ -138,6 +182,13 @@ def _check_isolated_import_and_tools(
             )
         else:
             result.add_info("provides_tools matches registered tools")
+        definitions = list(getattr(mod, "TOOL_DEFINITIONS", []) or [])
+        for definition in definitions:
+            expected = mod.schemas.to_tool_schema(definition.model)["parameters"]
+            if definition.schema.get("parameters") != expected:
+                result.add_error(f"tool schema drift for {definition.name}")
+        if len(definitions) == len(registered):
+            result.add_info("tool registry models and exported schemas are consistent")
 
 
 def _check_skill_snapshot(root: Path, result: ReleaseCheckResult) -> None:
@@ -250,6 +301,23 @@ def _check_stale_skill_docs(root: Path, result: ReleaseCheckResult) -> None:
         result.add_info("skill documentation matches the current guard surface")
 
 
+def _check_active_documentation_contracts(root: Path, result: ReleaseCheckResult) -> None:
+    repo = root.parent.parent
+    docs = [repo / "README.md", *sorted((repo / "skills").rglob("*.md"))]
+    stale_credit = re.compile(
+        r"(?:Recon|RECON):?\s*5|(?:Exploitation|EXPLOITATION):?\s*10", re.IGNORECASE
+    )
+    stale_findings = re.compile(r"\|\s*Findings\s*\|[^\n]*findings\.yaml", re.IGNORECASE)
+    for path in docs:
+        text = path.read_text(encoding="utf-8")
+        if stale_credit.search(text):
+            result.add_error(f"stale sync-credit contract in {path.relative_to(repo)}")
+        if stale_findings.search(text):
+            result.add_error(f"stale canonical-finding contract in {path.relative_to(repo)}")
+    if not any("contract in" in error for error in result.errors):
+        result.add_info("active documentation contracts are current")
+
+
 def check_release() -> ReleaseCheckResult:
     """Run all release gate checks. This is a REAL gate — failures add errors
     and cause a non-zero exit code (see CLI cmd_check_release)."""
@@ -268,4 +336,21 @@ def check_release() -> ReleaseCheckResult:
         result.add_warning("tests directory not found")
 
     _check_stale_skill_docs(root, result)
+    _check_active_documentation_contracts(root, result)
     return result
+
+
+def main() -> int:
+    """Print release diagnostics and return nonzero only when errors exist."""
+    result = check_release()
+    for item in result.errors:
+        print(f"ERROR: {item}")
+    for item in result.warnings:
+        print(f"WARN: {item}")
+    for item in result.infos:
+        print(f"OK: {item}")
+    return 1 if result.errors else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -212,8 +212,3 @@ The following are **never** permitted during authorized testing unless explicitl
 | `INSERT` (malicious) | Data injection |
 | Stacked queries on production | Uncontrolled impact |
 ---
-
-last_updated: 2026-07-05
-updated_reason: |
-  Retrospective gap analysis: blind SQLi sub-technique was missing.
-  Added boolean-based blind detection payloads and Python automation script.

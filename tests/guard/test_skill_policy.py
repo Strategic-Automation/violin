@@ -39,6 +39,10 @@ def test_every_phase_has_one_deterministic_default_route(phase: Phase) -> None:
         ("JWT", "access-control"),
         ("IDOR", "access-control"),
         ("auth bypass", "access-control"),
+        ("broken access control", "access-control"),
+        ("broken object level authorization", "access-control"),
+        ("server side request forgery", "web-attacks"),
+        ("cross site scripting", "web-attacks"),
         ("source analysis", "audit-context-building"),
         ("static analysis", "semgrep"),
         ("sarif", "sarif-parsing"),
@@ -77,7 +81,20 @@ def test_unknown_policy_input_fails_closed() -> None:
 
     assert decision.selected == "pentest"
     assert not decision.allowed
-    assert "unknown vulnerability class: deserialization" in decision.mismatch_reasons
+    assert any(
+        "unknown vulnerability class: deserialization; valid classes are:" in r
+        for r in decision.mismatch_reasons
+    )
+
+
+def test_unknown_candidate_source_returns_accepted_values_and_routes() -> None:
+    decision = resolve_skill_route("recon", candidate_source="internet-search")
+
+    assert not decision.allowed
+    message = "\n".join(decision.mismatch_reasons)
+    assert "accepted normalized values and routes" in message
+    assert "source -> audit-context-building" in message
+    assert "username -> sherlock" in message
 
 
 @pytest.mark.parametrize("selected", ["godmode", "web-pentest", "yayalingo", "hack-skills"])
@@ -94,6 +111,15 @@ def test_selection_must_match_the_vulnerability_route() -> None:
     assert not decision.allowed
     assert decision.selected == "web-attacks"
     assert "not permitted" in decision.mismatch_reasons[-1]
+
+
+def test_skill_mismatch_explains_the_route_basis_and_exact_fix() -> None:
+    decision = validate_skill_selection("pentest", "vuln-research", "jwt")
+
+    message = decision.mismatch_reasons[-1]
+    assert "expected 'access-control'" in message
+    assert "vulnerability_class 'jwt'" in message
+    assert "Set skill='access-control'" in message
 
 
 @pytest.mark.parametrize(

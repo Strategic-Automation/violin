@@ -85,8 +85,7 @@ def test_listener_with_vpn_ip_allowed(ctf_eng, monkeypatch):
     assert "10.10.14.233" in res.get("command", "")
 
 
-def test_semantic_lock_auto_release_on_hypothesis_and_evidence(ctf_eng):
-    """Verify recording a hypothesis auto-releases an active semantic lock."""
+def test_semantic_lock_requires_research_plus_meaningful_pivot(ctf_eng):
     state.record_semantic_review(
         ctf_eng,
         task_id="PT-001",
@@ -106,7 +105,7 @@ def test_semantic_lock_auto_release_on_hypothesis_and_evidence(ctf_eng):
 
     assert state.read_json(semantic_file).get("lock") is not None
 
-    # Record a hypothesis which should auto-release the lock
+    # A hypothesis edit alone is not evidence of progress and must retain the lock.
     service.handle_record_hypothesis(
         {
             "eng_dir": str(ctf_eng),
@@ -117,6 +116,20 @@ def test_semantic_lock_auto_release_on_hypothesis_and_evidence(ctf_eng):
         }
     )
 
+    assert state.read_json(semantic_file).get("lock") is not None
+
+    state.record_research_attempt(ctf_eng, "web_search", True)
+    state.record_semantic_review(
+        ctf_eng,
+        task_id="PT-001",
+        hypothesis_id="H-001",
+        skill="recon",
+        technique="port-scan",
+        outcome="no_progress",
+        evidence_paths=[],
+        next_action="test HTTP behavior",
+        next_technique="http-enumeration",
+    )
     assert state.read_json(semantic_file).get("lock") is None
 
 
@@ -271,7 +284,10 @@ def test_update_hypothesis_merge_existing_fields(ctf_eng):
     """Verify update_hypothesis preserves existing runtime_evidence during partial field update."""
     from plugins.violin_guard import hypotheses
 
-    h_file = ctf_eng / "state" / "hypotheses.md"
+    h_file = ctf_eng / "hypotheses.md"
+    evidence = ctf_eng / "evidence" / "executions" / "1.json"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text('{"status":"completed"}', encoding="utf-8")
     h1 = hypotheses.update_hypothesis(
         h_file,
         id="H-001",
@@ -295,11 +311,14 @@ def test_update_hypothesis_merge_existing_fields(ctf_eng):
     assert h2.status == "Validated"
 
 
-def test_findings_lowercase_hypothesis_id(ctf_eng, monkeypatch):
+def test_findings_lowercase_hypothesis_id(ctf_eng):
     """Verify _validate_from_pending_batch accepts lowercase 'h-001' hypothesis_id."""
     from plugins.violin_guard import findings, hypotheses
 
     h_file = ctf_eng / "hypotheses.md"
+    evidence = ctf_eng / "evidence" / "executions" / "1.json"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text('{"status":"completed"}', encoding="utf-8")
     hypotheses.update_hypothesis(
         h_file,
         id="H-001",
@@ -308,11 +327,6 @@ def test_findings_lowercase_hypothesis_id(ctf_eng, monkeypatch):
         runtime_evidence="evidence/executions/1.json",
         in_scope_hosts={"10.129.2.5"},
         target="10.129.2.5",
-    )
-
-    # Mock review readiness check
-    monkeypatch.setattr(
-        findings, "get_review_readiness", lambda *args, **kwargs: {"status": "ready"}
     )
 
     pending = {
