@@ -191,7 +191,9 @@ def test_ffuf_handler_dispatches_the_resolved_wordlist(monkeypatch):
         return json.dumps({"status": "ok"})
 
     monkeypatch.setattr(
-        adapter_handlers, "resolve_ffuf_wordlist", lambda _requested: "/resolved/common.txt"
+        adapter_handlers,
+        "resolve_ffuf_wordlist",
+        lambda _requested, **_kwargs: "/resolved/common.txt",
     )
     monkeypatch.setattr(adapter_handlers, "_get_handle_exec", lambda: fake_exec)
     result = json.loads(
@@ -223,7 +225,9 @@ def test_ffuf_handler_resolves_auth_token_from_engagement_evidence(tmp_path, mon
         return json.dumps({"status": "ok"})
 
     monkeypatch.setattr(
-        adapter_handlers, "resolve_ffuf_wordlist", lambda _requested: "/resolved/common.txt"
+        adapter_handlers,
+        "resolve_ffuf_wordlist",
+        lambda _requested, **_kwargs: "/resolved/common.txt",
     )
     monkeypatch.setattr(adapter_handlers, "_get_handle_exec", lambda: fake_exec)
     result = json.loads(
@@ -243,7 +247,9 @@ def test_ffuf_handler_resolves_auth_token_from_engagement_evidence(tmp_path, mon
 
 def test_ffuf_auth_token_file_must_be_under_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        adapter_handlers, "resolve_ffuf_wordlist", lambda _requested: "/resolved/common.txt"
+        adapter_handlers,
+        "resolve_ffuf_wordlist",
+        lambda _requested, **_kwargs: "/resolved/common.txt",
     )
     result = json.loads(
         adapter_handlers.handle_ffuf(

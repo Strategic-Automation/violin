@@ -4,6 +4,7 @@ import pytest
 
 from plugins.violin_guard import adapters, ptt, state
 from plugins.violin_guard import handlers as service
+from plugins.violin_guard.handlers import exec_handlers
 from plugins.violin_guard.skill_receipts import SkillViewResult
 from tests.guard.receipt_fixture import bind_active_task
 
@@ -70,7 +71,7 @@ def test_listener_with_vpn_ip_allowed(ctf_eng, monkeypatch):
     def fake_exec(args, **kwargs):
         return json.dumps({"status": "ok", "executed": True, "command": args.get("command")})
 
-    monkeypatch.setattr(service, "handle_exec", fake_exec)
+    monkeypatch.setattr(exec_handlers, "handle_exec", fake_exec)
 
     res_str = service.handle_listener(
         {
@@ -233,7 +234,7 @@ def test_listener_with_ipv6_bind_host_allowed(ctf_eng, monkeypatch):
     def fake_exec(args, **kwargs):
         return json.dumps({"status": "ok", "executed": True, "command": args.get("command")})
 
-    monkeypatch.setattr(service, "handle_exec", fake_exec)
+    monkeypatch.setattr(exec_handlers, "handle_exec", fake_exec)
 
     res_str = service.handle_listener(
         {

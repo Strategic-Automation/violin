@@ -47,6 +47,7 @@ from plugins.violin_guard import (
 from plugins.violin_guard import (
     handlers as TOOLS,
 )
+from plugins.violin_guard.handlers import ptt_handlers
 from plugins.violin_guard.targets import extract_target_candidates
 
 
@@ -614,7 +615,7 @@ def test_record_ptt_can_start_pristine_task(tmp_path, monkeypatch):
     from plugins.violin_guard.skill_receipts import SkillViewResult
 
     monkeypatch.setattr(
-        TOOLS,
+        ptt_handlers,
         "HermesSkillViewAdapter",
         lambda: type("Ready", (), {"view": lambda *_a, **_k: SkillViewResult(True, "skill")})(),
     )

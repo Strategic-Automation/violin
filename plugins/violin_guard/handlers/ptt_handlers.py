@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import sys
 from pathlib import Path
 
 import yaml
@@ -411,14 +410,6 @@ def _validate_review_batch(a: dict, pending: dict) -> dict:
 
 
 def _get_skill_view_adapter():
-    for _name, mod in list(sys.modules.items()):
-        if mod and hasattr(mod, "HermesSkillViewAdapter"):
-            cls = mod.HermesSkillViewAdapter
-            if getattr(cls, "__module__", "") not in (
-                "plugins.violin_guard.skill_receipts",
-                "vgpkg.skill_receipts",
-            ):
-                return cls
     return HermesSkillViewAdapter
 
 

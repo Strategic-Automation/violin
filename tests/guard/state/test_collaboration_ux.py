@@ -18,6 +18,7 @@ from plugins.violin_guard import (
 from plugins.violin_guard import (
     handlers as service,
 )
+from plugins.violin_guard.handlers import ptt_handlers
 from plugins.violin_guard.skill_receipts import SkillViewResult, get_binding
 from tests.guard.receipt_fixture import bind_active_task
 
@@ -146,7 +147,7 @@ def test_review_batch_does_not_replace_execution_skill_binding(tmp_path: Path, m
     _pending_batch(eng)
     original_binding = get_binding(eng, "PT-010")
     monkeypatch.setattr(
-        service,
+        ptt_handlers,
         "HermesSkillViewAdapter",
         lambda: type(
             "Ready",

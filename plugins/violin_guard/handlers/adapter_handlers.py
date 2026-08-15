@@ -1,6 +1,4 @@
-import os
 import shlex
-import sys
 from pathlib import Path
 
 from ..adapters import (
@@ -17,9 +15,6 @@ from .base import _call, _eng_path, _json, _serialise_errors
 
 
 def _get_handle_exec():
-    handlers_mod = sys.modules.get("plugins.violin_guard.handlers")
-    if handlers_mod and hasattr(handlers_mod, "handle_exec"):
-        return handlers_mod.handle_exec
     return exec_handlers.handle_exec
 
 
@@ -52,16 +47,9 @@ def handle_ffuf(args, **kwargs):
 
     values = dict(args or {})
     try:
-        orig_eng_dir = os.environ.get("ENG_DIR")
-        if values.get("eng_dir"):
-            os.environ["ENG_DIR"] = str(values["eng_dir"])
-        try:
-            values["wordlist"] = resolve_ffuf_wordlist(values.get("wordlist"))
-        finally:
-            if orig_eng_dir is None:
-                os.environ.pop("ENG_DIR", None)
-            else:
-                os.environ["ENG_DIR"] = orig_eng_dir
+        values["wordlist"] = resolve_ffuf_wordlist(
+            values.get("wordlist"), eng_dir=values.get("eng_dir")
+        )
         token_file = str(values.get("auth_token_file") or "").strip()
         if token_file:
             engagement = _eng_path(str(values.get("eng_dir") or ""))

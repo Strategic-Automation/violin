@@ -79,7 +79,7 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
         )
     if not lines:
         return
-    with feedback.open("a", encoding="utf-8") as fh:
+    with state.lock_file(feedback), feedback.open("a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 
 

@@ -17,6 +17,7 @@ from plugins.violin_guard import (
     handlers as service,
 )
 from plugins.violin_guard.command import CheckCommandArgs, CheckResult, check_scope_authorization
+from plugins.violin_guard.handlers import ptt_handlers
 from plugins.violin_guard.history import append_history, check_history_staleness
 from plugins.violin_guard.phases import Phase
 from plugins.violin_guard.skill_receipts import SkillViewResult
@@ -64,7 +65,7 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr(
-        service,
+        ptt_handlers,
         "HermesSkillViewAdapter",
         lambda: type("Ready", (), {"view": lambda *_a, **_k: SkillViewResult(True, "skill")})(),
     )

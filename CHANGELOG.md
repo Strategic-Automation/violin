@@ -9,6 +9,19 @@
 - Normalize command history with `splitlines()` (handles legacy CR line breaks).
 - Correct reference-count in README banner/tree (17 to 18 references).
 
+### Non-Pythonic Cleanup & Dead Code
+- Use `hashlib.file_digest()` for single-pass SHA-256 in `receipt_integrity.py`.
+- Replace multi-format `strptime` trials with `datetime.fromisoformat()` (+ `contextlib.suppress` for Ruff SIM105) in `command.py`.
+- Migrate manual `argv` loop to `argparse.ArgumentParser` in `benchmark/score.py`.
+- Use `re.sub()` for template HTML comment removal in `hypotheses.py`.
+- Remove unreachable `RuntimeError("unreachable")` in `state.py`.
+- Rename `findings` → `finding_files` in `findings.py` to avoid module shadowing.
+
+### Process & Concurrency Safety
+- Remove global `os.environ["ENG_DIR"]` mutation in `handle_ffuf`; pass `eng_dir` directly to `resolve_ffuf_wordlist`.
+- Drop dynamic `sys.modules` lookups in `adapter_handlers._get_handle_exec()` and `ptt_handlers._get_skill_view_adapter()`; use direct imports.
+- Acquire advisory `lock_file` on `framework_feedback.md` appends in `base._log_guard_friction`.
+
 ## 3.1.0
 
 ### Benchmark & Evaluation Framework

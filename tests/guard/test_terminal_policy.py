@@ -27,6 +27,7 @@ from plugins.violin_guard import (
 from plugins.violin_guard import (
     history as execution_history,
 )
+from plugins.violin_guard.handlers import ptt_handlers
 from plugins.violin_guard.skill_receipts import SkillViewResult
 from tests.guard.receipt_fixture import bind_active_task
 
@@ -400,7 +401,7 @@ def test_ptt_receipts_bind_to_real_runtime_session(tmp_path, monkeypatch) -> Non
         == 0
     )
     monkeypatch.setattr(
-        service,
+        ptt_handlers,
         "HermesSkillViewAdapter",
         lambda: type(
             "Ready",
