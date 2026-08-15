@@ -6,6 +6,7 @@ No subprocess calls — pure functions returning dataclasses.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -599,10 +600,8 @@ def check_hypothesis_freshness(
         ts = None
         raw = h.updated.strip()
         candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
-        try:
+        with contextlib.suppress(ValueError):
             ts = datetime.fromisoformat(candidate)
-        except ValueError:
-            pass
         if ts is None:
             continue
         ts = ts.replace(tzinfo=UTC)
@@ -635,10 +634,8 @@ def check_hypothesis_freshness(
             raw = h.updated.strip()
             candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
             updated_ts = None
-            try:
+            with contextlib.suppress(ValueError):
                 updated_ts = datetime.fromisoformat(candidate)
-            except ValueError:
-                pass
             if updated_ts is None:
                 continue
             updated_ts = updated_ts.replace(tzinfo=UTC)
