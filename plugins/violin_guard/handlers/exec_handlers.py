@@ -192,51 +192,50 @@ def handle_exec_burst(a, **kwargs):
 
     results = []
     executed = 0
-    for item in preflight:
-        idx = item["index"]
-        cmd = item["command"]
-        review_warnings = item["review_warnings"]
-        try:
-            res = execution.execute(
-                command=cmd,
-                eng_dir=eng_dir,
-                phase=phase,
-                backend=backend,
-                timeout_seconds=timeout_seconds,
-                cwd=cwd,
-                label=label,
-                ptt_task_id=active_task_id,
-                sync_reservation=None if item["local"] else reservation_id,
-            )
-            execution_status = res.pop("status", None)
-            entry = {
-                "index": idx,
-                "command": cmd,
-                "execution_status": execution_status,
-                **res,
-            }
-            if review_warnings:
-                entry["review_required"] = True
-                entry["warnings"] = review_warnings
-            results.append(entry)
-            if res.get("executed"):
-                executed += 1
-            if res.get("exit_code", 0) != 0 and not continue_on_error:
-                break
-        except Exception as e:  # noqa: BLE001
-            if not continue_on_error:
-                if reservation_id:
-                    state.release_reserved_sync_credit(eng_dir, reservation_id)
-                return _json(
-                    "execution_failed",
-                    executed=executed,
-                    results=results + [{"index": idx, "command": cmd, "error": str(e)}],
-                    error=str(e),
+    try:
+        for item in preflight:
+            idx = item["index"]
+            cmd = item["command"]
+            review_warnings = item["review_warnings"]
+            try:
+                res = execution.execute(
+                    command=cmd,
+                    eng_dir=eng_dir,
+                    phase=phase,
+                    backend=backend,
+                    timeout_seconds=timeout_seconds,
+                    cwd=cwd,
+                    label=label,
+                    ptt_task_id=active_task_id,
+                    sync_reservation=None if item["local"] else reservation_id,
                 )
-            results.append({"index": idx, "command": cmd, "error": str(e)})
-
-    if reservation_id:
-        state.release_reserved_sync_credit(eng_dir, reservation_id)
+                execution_status = res.pop("status", None)
+                entry = {
+                    "index": idx,
+                    "command": cmd,
+                    "execution_status": execution_status,
+                    **res,
+                }
+                if review_warnings:
+                    entry["review_required"] = True
+                    entry["warnings"] = review_warnings
+                results.append(entry)
+                if res.get("executed"):
+                    executed += 1
+                if res.get("exit_code", 0) != 0 and not continue_on_error:
+                    break
+            except Exception as e:  # noqa: BLE001
+                if not continue_on_error:
+                    return _json(
+                        "execution_failed",
+                        executed=executed,
+                        results=results + [{"index": idx, "command": cmd, "error": str(e)}],
+                        error=str(e),
+                    )
+                results.append({"index": idx, "command": cmd, "error": str(e)})
+    finally:
+        if reservation_id:
+            state.release_reserved_sync_credit(eng_dir, reservation_id)
 
     return _json(
         "batch_complete",

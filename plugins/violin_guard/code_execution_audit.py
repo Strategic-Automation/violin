@@ -311,7 +311,7 @@ def abandon_execution(receipt_path: str | Path, reason: str) -> None:
     receipt = state.read_json(receipt_file)
     if receipt.get("status") != "starting":
         return
-    eng_dir = receipt_file.parents[2]
+    eng_dir = receipt_file.resolve().parents[2]
     command_text = str(receipt.get("command") or "").strip()
     abandoned = {
         **receipt,

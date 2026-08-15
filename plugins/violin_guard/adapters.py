@@ -296,8 +296,11 @@ def _installed_netcat_variant(binary: str) -> tuple[str, str]:
 
 
 def _listener_port(args: dict) -> int:
+    port_val = args.get("port")
+    if port_val is None:
+        raise AdapterError("listener port is required")
     try:
-        port = int(args.get("port"))
+        port = int(port_val)
     except (TypeError, ValueError) as exc:
         raise AdapterError("listener port must be an integer") from exc
     if not 1 <= port <= 65535:

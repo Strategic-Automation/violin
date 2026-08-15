@@ -1,6 +1,15 @@
 # Changelog
 
-## 3.1.0 (Unreleased)
+## 3.2.0 (Unreleased)
+
+### Code Quality Sweep
+- Fix relative-path resolution in `abandon_execution` history tracking (`.resolve()`).
+- Release sync-credit reservations via `try/finally` on mid-burst process kill.
+- Validate listener port presence before integer coercion.
+- Normalize command history with `splitlines()` (handles legacy CR line breaks).
+- Correct reference-count in README banner/tree (17 to 18 references).
+
+## 3.1.0
 
 ### Benchmark & Evaluation Framework
 - **Automated Benchmark Runner (`benchmark/run.py`)**: End-to-end evaluation harness supporting automated multi-turn execution, OpenRouter provider integration, Docker containerization, and soft-timeout closeout handling.

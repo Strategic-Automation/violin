@@ -21,7 +21,7 @@ def normalize_command(command: str) -> str:
     """Normalize whitespace and newlines in a command string for reliable history matching."""
     if not command:
         return ""
-    lines = command.replace("\r\n", "\n").split("\n")
+    lines = command.splitlines()
     cleaned_parts = [part.strip() for part in lines if part.strip()]
     return " ".join(cleaned_parts)
 

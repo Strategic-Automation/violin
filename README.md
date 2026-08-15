@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <b>31 playbooks · 17 references · 12 templates · required execution guard · Hermes-native</b>
+  <b>31 playbooks · 18 references · 12 templates · required execution guard · Hermes-native</b>
 </p>
 
 Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, three routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
@@ -122,7 +122,7 @@ graph TB
         WEB["web-attacks skill"]
         AC["access-control skill"]
         PB["31 Playbooks"]
-        REF["17 References"]
+        REF["18 References"]
         TEMP["12 Templates"]
     end
     
@@ -277,7 +277,7 @@ violin/
 │   ├── smoke-test.ps1      # Windows supplemental smoke
 │   └── kali.sh             # Docker Kali helper
 └── skills/
-    ├── pentest/            # Engagement orchestrator (23 playbooks, 17 refs, 12 templates)
+    ├── pentest/            # Engagement orchestrator (23 playbooks, 18 refs, 12 templates)
     │   ├── SKILL.md
     │   ├── playbooks/      # 7 operational + 16 vulnerability-class playbooks
     │   ├── references/     # 17 reference files
