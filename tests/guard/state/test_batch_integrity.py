@@ -7,6 +7,7 @@ from pathlib import Path
 
 from plugins.violin_guard import bootstrap, history, state
 from plugins.violin_guard import handlers as service
+from plugins.violin_guard.handlers.ptt_handlers import _redact_sensitive_note
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -166,3 +167,11 @@ def test_rebind_rejects_incomplete_or_phase_incompatible_batch(tmp_path: Path) -
         )
     )
     assert "not phase-compatible" in incompatible["error"]
+
+
+def test_redact_sensitive_note_collapses_multiline() -> None:
+    collapsed = _redact_sensitive_note("line one\nline two\rmixed")
+    assert collapsed == "line one line two mixed"
+    # No line is left with a trailing ``|`` orphaned / row framework intact.
+    assert "\n" not in collapsed
+    assert "\r" not in collapsed

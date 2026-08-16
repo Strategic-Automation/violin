@@ -31,6 +31,7 @@ On-demand reference skill for web-application injection vuln classes. The `pente
 | Command Injection | `playbooks/command-injection.md` |
 | Server-Side Request Forgery | `playbooks/ssrf.md` |
 | Path Traversal / LFI | `playbooks/path-traversal.md` |
+| Business Logic Flaw | `playbooks/business-logic.md` |
 
 ## Common Pitfalls
 

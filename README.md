@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <b>31 playbooks · 18 references · 12 templates · required execution guard · Hermes-native</b>
+  <b>32 playbooks · 18 references · 12 templates · required execution guard · Hermes-native</b>
 </p>
 
 Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, three routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
@@ -28,7 +28,7 @@ hermes -p violin
 ## Features
 
 <table>
-<tr><td width="280"><b>🔬 31 Methodology Playbooks</b></td><td>7 operational playbooks (five execution phases, optional post-exploitation, and the tools catalog) + 24 vulnerability-class playbooks, routed across the `pentest`, `web-attacks`, and `access-control` skills.</td></tr>
+<tr><td width="280"><b>🔬 32 Methodology Playbooks</b></td><td>7 operational playbooks (five execution phases, optional post-exploitation, and the tools catalog) + 25 vulnerability-class playbooks, routed across the `pentest`, `web-attacks`, and `access-control` skills.</td></tr>
 <tr><td><b>🛡️ Multi-Layer Safety</b></td><td>Interactive scoping (9 questions) → scope validation → guard check → approval gates — every target-touching command validated before execution.</td></tr>
 <tr><td><b>🧠 Pentesting Task Tree</b></td><td>Structured artifact tracking every task via `[x]/[ ]/[~]` markers across phases, with executor-owned history, hypothesis linking, and guard-bound batch reviews.</td></tr>
 <tr><td><b>🌐 Browser + Web Research</b></td><td>Browser toolset for approved in-scope website enumeration; v3.0.0 gates the engagement workflow but does not provide a network-level browser allowlist. Web toolset for CVE lookup, exploit search, and OSINT.</td></tr>
@@ -280,11 +280,11 @@ violin/
     ├── pentest/            # Engagement orchestrator (23 playbooks, 18 refs, 12 templates)
     │   ├── SKILL.md
     │   ├── playbooks/      # 7 operational + 16 vulnerability-class playbooks
-    │   ├── references/     # 17 reference files
+    │   ├── references/     # 18 reference files
     │   └── templates/      # 12 templates (reports, evidence, methodology, contracts, PTY controller)
-    ├── web-attacks/        # Routed skill — 5 injection/web playbooks (SQLi, XSS, SSRF, cmdi, traversal)
-    └── access-control/     # Routed skill — 3 auth/authorisation playbooks (auth-bypass, IDOR, JWT)
-```
+    ├── access-control/     # Routed skill — 3 auth/authorisation playbooks (auth-bypass, IDOR, JWT)
+    └── web-attacks/        # Routed skill — 6 injection/web playbooks (SQLi, XSS, SSRF, cmdi, traversal, business-logic)
+    ```
 
 ---
 

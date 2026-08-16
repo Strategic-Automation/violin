@@ -32,8 +32,14 @@ _OPENROUTER_KEY_RE = re.compile(r"\bsk-or-v1-[A-Za-z0-9]+\b")
 
 
 def _redact_sensitive_note(note: str) -> str:
-    """Prevent credentials and bearer tokens from entering PTT state notes."""
-    redacted = _JWT_RE.sub("[REDACTED_JWT]", note)
+    """Prevent credentials and bearer tokens from entering PTT state notes.
+
+    Multiline notes must also be collapsed to a single line: the PTT row table
+    format requires a trailing ``|`` on one physical line, and embedded line
+    breaks split the row so the row parser drops the task.
+    """
+    one_line = " ".join(note.splitlines()).strip()
+    redacted = _JWT_RE.sub("[REDACTED_JWT]", one_line)
     redacted = _BEARER_RE.sub(r"\1[REDACTED_TOKEN]", redacted)
     return _OPENROUTER_KEY_RE.sub("[REDACTED_API_KEY]", redacted)
 
@@ -564,7 +570,7 @@ def handle_record_ptt(a, **kwargs):
     eng_dir = a["eng_dir"]
     doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
     pending = state.get_pending_sync(eng_dir)
-    status = a.get("status", "[~]")
+    status = (a.get("status") or "[~]").strip() or "[~]"
 
     (
         task,

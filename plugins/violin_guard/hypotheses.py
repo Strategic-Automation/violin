@@ -10,7 +10,7 @@ valid phase, and a target that is in scope (audit P1-hyp).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -98,36 +98,9 @@ class Hypothesis:
         return LEGACY_ALIASES.get(self.status, self.status)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "title": self.title,
-            "status": self.canonical_status(),
-            "confidence": self.confidence,
-            "timebox": self.timebox,
-            "cheapest_test": self.cheapest_test,
-            "phase": self.phase,
-            "service": self.service,
-            "port": self.port,
-            "target": self.target,
-            "vuln_class": self.vuln_class,
-            "rationale": self.rationale,
-            "evidence": self.evidence,
-            "cve_research": self.cve_research,
-            "exploit_research": self.exploit_research,
-            "test_command": self.test_command,
-            "test_response": self.test_response,
-            "verification_status": self.verification_status,
-            "kill_criteria": self.kill_criteria,
-            "rejection_reason": self.rejection_reason,
-            "next_step": self.next_step,
-            "linked_findings": self.linked_findings,
-            "candidate_source": self.candidate_source,
-            "entry_point": self.entry_point,
-            "data_flow": self.data_flow,
-            "source_evidence": self.source_evidence,
-            "runtime_evidence": self.runtime_evidence,
-            "updated": self.updated,
-        }
+        data = asdict(self)
+        data["status"] = self.canonical_status()
+        return data
 
     def to_markdown(self) -> str:
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
