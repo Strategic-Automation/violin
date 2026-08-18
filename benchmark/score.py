@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Evidence-gated, provenance-aware Violin benchmark scorer."""
 
+import argparse
 import json
 import re
 import sys
@@ -552,36 +553,31 @@ def generate_markdown_summary(r: dict) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(
-            "Usage: score.py <ENG_DIR> [--calibrate known-good|known-bad] [--json-out <file>] [--markdown-out <file>]"
-        )
+    parser = argparse.ArgumentParser(
+        prog="score.py",
+        description="Evidence-gated, provenance-aware Violin benchmark scorer.",
+    )
+    parser.add_argument("eng_dir", nargs="?", type=Path, help="Engagement directory path")
+    parser.add_argument(
+        "--calibrate",
+        type=str,
+        metavar="ENG_DIR",
+        help="Run benchmark calibration on known-good/known-bad dataset",
+    )
+    parser.add_argument("--json-out", type=Path, help="Write score result to JSON file")
+    parser.add_argument("--markdown-out", type=Path, help="Write score summary to Markdown file")
+    ns = parser.parse_args(sys.argv[1:])
+
+    if ns.calibrate:
+        cmd_calibrate(ns.calibrate)
+        return
+
+    eng_dir, json_out, md_out = ns.eng_dir, ns.json_out, ns.markdown_out
+    if not eng_dir:
+        parser.print_help()
         sys.exit(1)
 
-    # Calibration mode (P5)
-    if len(sys.argv) >= 3 and sys.argv[1] == "--calibrate":
-        cmd_calibrate(sys.argv[2])
-
-    eng_dir = None
-    json_out = None
-    md_out = None
-
-    idx = 1
-    while idx < len(sys.argv):
-        arg = sys.argv[idx]
-        if arg == "--json-out" and idx + 1 < len(sys.argv):
-            json_out = Path(sys.argv[idx + 1])
-            idx += 2
-        elif arg == "--markdown-out" and idx + 1 < len(sys.argv):
-            md_out = Path(sys.argv[idx + 1])
-            idx += 2
-        elif not arg.startswith("--") and eng_dir is None:
-            eng_dir = Path(arg)
-            idx += 1
-        else:
-            idx += 1
-
-    if not eng_dir or not eng_dir.exists():
+    if not eng_dir.exists():
         print(f"ERROR: engagement directory not found: {eng_dir}")
         sys.exit(1)
 

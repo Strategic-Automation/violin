@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import yaml
 
-from .. import hypotheses, state
-from ..targets import scope_hosts
-from .base import _eng_path, _json, _serialise_errors
+from ..core import hypotheses, state
+from ..core.targets import scope_hosts
+from .base import _eng_path, _json, _serialize_errors
 
 
 def _scope_hosts(eng_dir: str) -> set[str] | None:
@@ -21,10 +21,10 @@ def _scope_hosts(eng_dir: str) -> set[str] | None:
     return scope_hosts(data) or None
 
 
-@_serialise_errors
-def handle_record_hypothesis(a, **kwargs):
-    eng_dir = a["eng_dir"]
-    fields = {k: v for k, v in a.items() if k != "eng_dir"}
+@_serialize_errors
+def handle_record_hypothesis(args, **kwargs):
+    eng_dir = args["eng_dir"]
+    fields = {k: v for k, v in args.items() if k != "eng_dir"}
     in_scope = _scope_hosts(eng_dir)
     with state.workflow_lock(eng_dir):
         requested_id = str(fields.get("id") or "").strip()

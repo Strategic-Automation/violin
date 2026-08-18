@@ -13,10 +13,10 @@
 </p>
 
 <p align="center">
-  <b>31 playbooks · 17 references · 12 templates · required execution guard · Hermes-native</b>
+  <b>35 playbooks · 17 references · 13 templates · required execution guard · Hermes-native</b>
 </p>
 
-Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, three routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
+Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, seven routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
 
 ```
 hermes profile install https://github.com/Strategic-Automation/violin
@@ -28,7 +28,7 @@ hermes -p violin
 ## Features
 
 <table>
-<tr><td width="280"><b>🔬 31 Methodology Playbooks</b></td><td>7 operational playbooks (five execution phases, optional post-exploitation, and the tools catalog) + 24 vulnerability-class playbooks, routed across the `pentest`, `web-attacks`, and `access-control` skills.</td></tr>
+<tr><td width="280"><b>🔬 35 Methodology Playbooks</b></td><td>9 operational playbooks (phase lifecycle, tools, and shared config/ops) + 26 vulnerability-class playbooks, routed across the `pentest`, `web-app`, `identity-auth`, `api-testing`, `business-logic`, `llm-security`, and `misconfig` skills.</td></tr>
 <tr><td><b>🛡️ Multi-Layer Safety</b></td><td>Interactive scoping (9 questions) → scope validation → guard check → approval gates — every target-touching command validated before execution.</td></tr>
 <tr><td><b>🧠 Pentesting Task Tree</b></td><td>Structured artifact tracking every task via `[x]/[ ]/[~]` markers across phases, with executor-owned history, hypothesis linking, and guard-bound batch reviews.</td></tr>
 <tr><td><b>🌐 Browser + Web Research</b></td><td>Browser toolset for approved in-scope website enumeration; v3.0.0 gates the engagement workflow but does not provide a network-level browser allowlist. Web toolset for CVE lookup, exploit search, and OSINT.</td></tr>
@@ -119,11 +119,15 @@ graph TB
     
     subgraph "Violin Skills"
         SK["pentest orchestrator"]
-        WEB["web-attacks skill"]
-        AC["access-control skill"]
-        PB["31 Playbooks"]
+        WEB["web-app skill"]
+        ID["identity-auth skill"]
+        API["api-testing skill"]
+        BL["business-logic skill"]
+        LLM["llm-security skill"]
+        MIS["misconfig skill"]
+        PB["35 Playbooks"]
         REF["17 References"]
-        TEMP["12 Templates"]
+        TEMP["13 Templates"]
     end
     
     subgraph "Configured Toolsets"
@@ -145,9 +149,13 @@ graph TB
     HE -->|"hermes -p violin"| VI
     VI -->|"loads"| SK
     VI -->|"requires"| GUARD
-    SK -->|"routes to"| WEB & AC & PB
+    SK -->|"routes to"| WEB & ID & API & BL & LLM & MIS & PB
     WEB --> PB
-    AC --> PB
+    ID --> PB
+    API --> PB
+    BL --> PB
+    LLM --> PB
+    MIS --> PB
     SK --> REF & TEMP
     HE -->|"calls"| T & W & B & F & CE & S & CL & D & V & TD & VG
     HE -->|"inherits"| LLM
@@ -277,14 +285,18 @@ violin/
 │   ├── smoke-test.ps1      # Windows supplemental smoke
 │   └── kali.sh             # Docker Kali helper
 └── skills/
-    ├── pentest/            # Engagement orchestrator (23 playbooks, 17 refs, 12 templates)
+    ├── pentest/            # Engagement orchestrator (9 playbooks, 17 refs, 13 templates)
     │   ├── SKILL.md
-    │   ├── playbooks/      # 7 operational + 16 vulnerability-class playbooks
-    │   ├── references/     # 17 reference files
-    │   └── templates/      # 12 templates (reports, evidence, methodology, contracts, PTY controller)
-    ├── web-attacks/        # Routed skill — 5 injection/web playbooks (SQLi, XSS, SSRF, cmdi, traversal)
-    └── access-control/     # Routed skill — 3 auth/authorisation playbooks (auth-bypass, IDOR, JWT)
-```
+    │   ├── playbooks/      # Phase lifecycle + tools + config/ops playbooks
+    │   ├── references/     # 17 on-demand reference files
+    │   └── templates/      # 13 templates (reports, evidence, methodology, contracts, PTY controller)
+    ├── web-app/            # Routed skill — 13 injection/client-side playbooks
+    ├── identity-auth/      # Routed skill — 6 identity/auth/session/crypto playbooks
+    ├── api-testing/        # Routed skill — REST/SOAP/GraphQL/WebSocket playbook
+    ├── business-logic/     # Routed skill — workflow/pricing/race-condition playbook
+    ├── llm-security/       # Routed skill — 2 LLM prompt-injection + MCP playbooks
+    └── misconfig/          # Routed skill — 3 deployment/config/observability playbooks
+    ```
 
 ---
 
@@ -305,8 +317,12 @@ Violin bundles core operational playbooks out of the box, and supports optional 
 | Skill | Type | Description | Installation |
 |-------|------|-------------|--------------|
 | `pentest` | **Bundled** | Main engagement orchestrator & playbooks | *Included with Violin* |
-| `web-attacks` | **Bundled** | SQLi, XSS, SSRF, command injection, path traversal | *Included with Violin* |
-| `access-control` | **Bundled** | Auth-bypass, IDOR, JWT analysis | *Included with Violin* |
+| `web-app` | **Bundled** | SQLi, XSS, SSRF, command injection, traversal, LDAP/XPath, NoSQL, SSTI, XXE, deserialization, prototype pollution | *Included with Violin* |
+| `identity-auth` | **Bundled** | Auth-bypass, IDOR, JWT, CSRF, redirects, cryptography | *Included with Violin* |
+| `api-testing` | **Bundled** | REST/SOAP/GraphQL/WebSocket | *Included with Violin* |
+| `business-logic` | **Bundled** | Workflow, pricing, coupon, quota, race conditions | *Included with Violin* |
+| `llm-security` | **Bundled** | LLM prompt injection, MCP/JSON-RPC | *Included with Violin* |
+| `misconfig` | **Bundled** | Misconfiguration, error handling, observability | *Included with Violin* |
 | `fp-check` | Optional | False positive verification & review gating | `hermes skills install trailofbits/skills/plugins/fp-check/skills/fp-check` |
 | `domain-intel` | Optional | Domain & DNS intelligence gathering | `hermes skills install official/research/domain-intel` |
 | `osint-investigation` | Optional | Public records & OSINT investigation | `hermes skills install official/research/osint-investigation` |

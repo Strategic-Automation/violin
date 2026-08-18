@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from plugins.violin_guard import adapters, ptt, state
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.skill_receipts import SkillViewResult
+from plugins.violin_guard import ptt, state
+from plugins.violin_guard.core.skill_receipts import SkillViewResult
 from tests.guard.receipt_fixture import bind_active_task
 
 _SCOPE_YAML = """targets:
@@ -61,28 +61,6 @@ def ctf_eng(tmp_path):
     }
     (state_dir / "bootstrap.json").write_text(json.dumps(bootstrap_data), encoding="utf-8")
     return eng
-
-
-def test_listener_with_vpn_ip_allowed(ctf_eng, monkeypatch):
-    """Verify violin_listener with attacker VPN IP is not blocked as out-of-scope target."""
-    monkeypatch.setattr(adapters, "_installed_netcat_variant", lambda binary: ("nc", "openbsd"))
-
-    def fake_exec(args, **kwargs):
-        return json.dumps({"status": "ok", "executed": True, "command": args.get("command")})
-
-    monkeypatch.setattr(service, "handle_exec", fake_exec)
-
-    res_str = service.handle_listener(
-        {
-            "eng_dir": str(ctf_eng),
-            "bind_host": "10.10.14.233",
-            "port": 4444,
-            "phase": "EXPLOITATION",
-        }
-    )
-    res = json.loads(res_str)
-    assert res.get("status") == "ok", res
-    assert "10.10.14.233" in res.get("command", "")
 
 
 def test_semantic_lock_requires_research_plus_meaningful_pivot(ctf_eng):
@@ -224,38 +202,6 @@ def test_stale_active_ptt_task_auto_superseded(ctf_eng, monkeypatch):
     old_task = next(t for t in updated_tasks if t.id == "PT-001")
     assert old_task.status == "[x]"
     assert "superseded-by:PT-002" in old_task.note
-
-
-def test_listener_with_ipv6_bind_host_allowed(ctf_eng, monkeypatch):
-    """Verify violin_listener with IPv6 loopback bind_host (::1 or [::1]:4444) is allowed."""
-    monkeypatch.setattr(adapters, "_installed_netcat_variant", lambda binary: ("nc", "openbsd"))
-
-    def fake_exec(args, **kwargs):
-        return json.dumps({"status": "ok", "executed": True, "command": args.get("command")})
-
-    monkeypatch.setattr(service, "handle_exec", fake_exec)
-
-    res_str = service.handle_listener(
-        {
-            "eng_dir": str(ctf_eng),
-            "bind_host": "::1",
-            "port": 4444,
-            "phase": "EXPLOITATION",
-        }
-    )
-    res = json.loads(res_str)
-    assert res.get("status") == "ok", res
-
-    res_str_bracket = service.handle_listener(
-        {
-            "eng_dir": str(ctf_eng),
-            "bind_host": "[::1]:4444",
-            "port": 4444,
-            "phase": "EXPLOITATION",
-        }
-    )
-    res_bracket = json.loads(res_str_bracket)
-    assert res_bracket.get("status") == "ok", res_bracket
 
 
 def test_invalid_ptt_start_status_error_message(ctf_eng):

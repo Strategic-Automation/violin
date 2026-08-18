@@ -9,9 +9,9 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from .. import command as cmd_module
-from .. import state
-from ..command import CheckCommandArgs
+from ..core import state
+from ..gates import command as cmd_module
+from ..gates.command import CheckCommandArgs
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,8 @@ def _json(status_name: str, **payload) -> str:
     return json.dumps({"schema_version": 2, "status": status_name, **payload})
 
 
-def _result(r) -> dict[str, list[str]]:
-    return {"errors": r.errors, "warnings": r.warnings, "infos": r.infos}
+def _result(result) -> dict[str, list[str]]:
+    return {"errors": result.errors, "warnings": result.warnings, "infos": result.infos}
 
 
 def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
@@ -79,33 +79,33 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
         )
     if not lines:
         return
-    with feedback.open("a", encoding="utf-8") as fh:
+    with state.lock_file(feedback), feedback.open("a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 
 
-def _check_command_internal(a) -> cmd_module.CheckResult:
+def _check_command_internal(args: dict[str, Any]) -> cmd_module.CheckResult:
     result = cmd_module.check_command(
         CheckCommandArgs(
-            command=a.get("command", ""),
-            phase=a.get("phase", ""),
-            eng_dir=a.get("eng_dir", ""),
-            scope=a.get("scope", ""),
-            target=a.get("target"),
-            session_id=a.get("session_id"),
-            hypothesis_id=a.get("hypothesis_id"),
+            command=args.get("command", ""),
+            phase=args.get("phase", ""),
+            eng_dir=args.get("eng_dir", ""),
+            scope=args.get("scope", ""),
+            target=args.get("target"),
+            session_id=args.get("session_id"),
+            hypothesis_id=args.get("hypothesis_id"),
         )
     )
     try:
-        eng_path = state.resolve_eng_dir(a.get("eng_dir", ""))
+        eng_path = state.resolve_eng_dir(args.get("eng_dir", ""))
     except Exception:  # noqa: BLE001 — logging must never break the gate
         eng_path = None
     if eng_path is not None and (result.errors or result.warnings):
-        _log_guard_friction(eng_path, result, a.get("command", ""))
+        _log_guard_friction(eng_path, result, args.get("command", ""))
     return result
 
 
 def _call(fn, args, **kwargs) -> Any:
-    """Wrap a handler function with uniform error serialisation."""
+    """Wrap a handler function with uniform error serialization."""
     try:
         return fn(args or {}, **kwargs)
     except (ValueError, TypeError, OSError, KeyError) as exc:
@@ -115,7 +115,7 @@ def _call(fn, args, **kwargs) -> Any:
         return _json("error", error=str(exc))
 
 
-def _serialise_errors(fn):
+def _serialize_errors(fn):
     """Keep every model-visible handler on the stable JSON response contract."""
 
     @wraps(fn)

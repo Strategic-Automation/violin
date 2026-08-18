@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from plugins.violin_guard.receipt_integrity import verified_evidence_paths
+from plugins.violin_guard.core.receipt_integrity import verified_evidence_paths
 
 _HTTP_RESPONSE_RE = re.compile(r"HTTP/\d(?:\.\d)?\s+[1-5]\d{2}", re.IGNORECASE)
 _HTTP_REQUEST_RE = re.compile(

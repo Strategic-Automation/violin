@@ -1,6 +1,32 @@
 # Changelog
 
-## 3.1.0 (Unreleased)
+## 3.2.0
+
+### Core Architecture & Tool Consolidation
+- **11 Core Tools**: Consolidated registered tool surface (17 -> 11 tools) by pruning 6 thin-proxy wrappers (`violin_httpx`, `violin_nuclei`, `violin_ffuf`, `violin_listener`, `violin_search_exploit`, `violin_check_command`) in favor of direct, unified `violin_exec`.
+- **Subpackage Architecture**: Modularized `plugins/violin_guard` into direct subpackages (`core`, `gates`, `engine`, `handlers`) with explicit `__all__` exports and clean dependency isolation.
+
+### Skills & Methodology Framework
+- **7 Domain Skills**: Reorganized and routed pentest methodology across 7 distinct skill packages (`pentest`, `web-app`, `identity-auth`, `api-testing`, `business-logic`, `misconfig`, `llm-security`).
+- **Coverage Matrix**: Automated bootstrap generation of coverage matrix from scope obligations with strict schema validation.
+- **WSTG Methodology Gates**: Enforced methodology disposition checks before phase transitions and standardized canonical `FIND-NNN.md` schemas and templates.
+- **Evidence & Discipline**: Documented two-step skill binding mechanics, evidence redaction patterns, and decisive raw response byte capture.
+
+### Performance, Ergonomics & Concurrency Safety
+- **AST Scope & Backend Caching**: LRU and TTL caching for AST scope parsing (`bashlex` + `yarl` + `netaddr`) and container probing.
+- **Adaptive Poll Throttling**: Jittered backoff during long-running execution checks to eliminate CPU spin.
+- **Robust Hypothesis Parsing**: Tolerates variable heading depths (`#`, `##`, `###`, bare) and parenthetical/confidence annotations without dropping validated records.
+- **Process Safety**: Removed global environment mutations (`os.environ["ENG_DIR"]`), eliminated dynamic module inspection, and added advisory `filelock` protection on state/feedback logs.
+
+### Code Quality & Maintenance
+- Fix relative-path resolution in `abandon_execution` history tracking (`.resolve()`).
+- Release sync-credit reservations via `try/finally` on mid-burst process kill.
+- Validate listener port presence before integer coercion.
+- Normalize command history with `splitlines()` (handles legacy CR line breaks).
+- Use `hashlib.file_digest()` for single-pass SHA-256 in `receipt_integrity.py`.
+- Automated GitHub release and tagging workflow (`.github/workflows/release.yml`) on push to `master`.
+
+## 3.1.0
 
 ### Benchmark & Evaluation Framework
 - **Automated Benchmark Runner (`benchmark/run.py`)**: End-to-end evaluation harness supporting automated multi-turn execution, OpenRouter provider integration, Docker containerization, and soft-timeout closeout handling.
@@ -18,7 +44,7 @@
 ### Methodology & Playbooks
 - **Consolidated 31 Playbooks, 17 References, 12 Templates**: Cleanly routed across the `pentest` orchestrator, `web-attacks` (5 playbooks), and `access-control` (3 playbooks) skills with single-source vulnerability routing.
 - **Parallel Reconnaissance**: Mandated multi-agent parallel discovery patterns in `/goal` prompts and `SKILL.md §3` for high-throughput asset mapping.
-- **Small Model Grounding & Worked Examples**: Added §7b worked tool-call parameter templates in `SKILL.md` to ensure seamless execution for open-weight models (Qwen 2.5/3.8/3.5, DeepSeek) without guard friction.
+- **Small Model Grounding & Worked Examples**: Added §7b worked tool-call parameter templates in `SKILL.md` to ensure seamless execution for open-weight models (Qwen 3.5/3.8, DeepSeek) without guard friction.
 - **Single-Step Win Formalization**: Immediate hypothesis validation (`Validated`) coupled with atomic `FIND-NNN.md` evidence bundling upon decisive technical proof capture.
 
 ## 3.0.1

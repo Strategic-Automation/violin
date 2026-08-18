@@ -1,10 +1,9 @@
 name: violin-guard
-version: 3.1.0
+version: 3.2.0
 description: Typed scope guards and an execute-and-record boundary with bounded synchronization
   windows.
 kind: standalone
 provides_tools:
-- violin_check_command
 - violin_record_ptt
 - violin_record_hypothesis
 - violin_exec
@@ -16,11 +15,6 @@ provides_tools:
 - violin_exec_burst
 - violin_target
 - violin_status
-- violin_search_exploit
-- violin_httpx
-- violin_nuclei
-- violin_ffuf
-- violin_listener
 hooks:
 - pre_tool_call
 - post_tool_call

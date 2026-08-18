@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from plugins.violin_guard import execution, runtime_backend
+from plugins.violin_guard.core.runtime_backend import resolve_backend
+
+
+def _reset_backend_cache() -> None:
+    runtime_backend._BACKEND_CACHE.clear()
+
+
+def test_docker_probe_is_memoized_within_ttl(tmp_path: Path) -> None:
+    _reset_backend_cache()
+    calls: list[str] = []
+
+    def probing(*_a, **_k):
+        calls.append("probe")
+        return (True, "/engagements/x")
+
+    # Two auto resolves inside the TTL window -> probe runs once.
+    resolve_backend("auto", tmp_path, native_probe=lambda: False, docker_probe=probing)
+    resolve_backend("auto", tmp_path, native_probe=lambda: False, docker_probe=probing)
+    assert len(calls) == 1
+
+    # Distinct engagement -> separate cache key, probes again.
+    resolve_backend("auto", tmp_path / "other", native_probe=lambda: False, docker_probe=probing)
+    assert len(calls) == 2
+
+
+def test_auto_uses_native_kali_or_parrot(tmp_path: Path) -> None:
+    resolution = resolve_backend(
+        "auto", tmp_path, native_probe=lambda: True, docker_probe=lambda *_: (False, "unused")
+    )
+    assert resolution.resolved == "local"
+    assert not resolution.fallback_reason
+
+
+def test_auto_uses_valid_docker_container(tmp_path: Path) -> None:
+    resolution = resolve_backend(
+        "auto",
+        tmp_path,
+        native_probe=lambda: False,
+        docker_probe=lambda *_: (True, "/engagements/x"),
+    )
+    assert resolution.resolved == "docker"
+    assert resolution.mount == "/engagements/x"
+
+
+def test_auto_falls_back_locally_with_a_reason(tmp_path: Path) -> None:
+    resolution = resolve_backend(
+        "auto",
+        tmp_path,
+        native_probe=lambda: False,
+        docker_probe=lambda *_: (False, "docker missing"),
+    )
+    assert resolution.resolved == "local"
+    assert resolution.fallback_reason == "docker missing"
+
+
+def test_explicit_docker_fails_when_mount_is_invalid(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="does not mount"):
+        resolve_backend(
+            "docker", tmp_path, docker_probe=lambda *_: (False, "does not mount /engagements/x")
+        )
+
+
+def test_docker_probe_timeout_is_unavailable(tmp_path: Path, monkeypatch) -> None:
+    def time_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(runtime_backend.shutil, "which", lambda _: "docker")
+
+    ready, detail = runtime_backend._docker_container_ready("kali-pentest", tmp_path, run=time_out)
+
+    assert ready is False
+    assert detail == "Docker container 'kali-pentest' probe timed out"
+
+
+def test_docker_command_uses_engagement_mount(tmp_path: Path, monkeypatch) -> None:
+    eng = tmp_path / "assessment-a"
+    eng.mkdir()
+    monkeypatch.setattr(execution.shutil, "which", lambda _: "docker")
+    argv = execution._command_argv("id", "docker", eng, eng, "kali-pentest")
+    assert argv[:5] == ["docker", "exec", "-i", "-w", "/engagements/assessment-a"]

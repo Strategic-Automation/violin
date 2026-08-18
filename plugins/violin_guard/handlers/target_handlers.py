@@ -7,19 +7,20 @@ from pathlib import Path
 
 import yaml
 
-from .. import bootstrap, command, ptt, runtime_backend, state
-from ..phases import Phase, requires_hypothesis, suppresses_heartbeat
-from ..skill_policy import resolve_skill_route
-from ..skill_receipts import binding_readiness
-from ..targets import resolve_target
-from .base import _eng_path, _json, _serialise_errors
+from ..core import bootstrap, ptt, runtime_backend, state
+from ..core.phases import Phase, requires_hypothesis, suppresses_heartbeat
+from ..core.skill_policy import resolve_skill_route
+from ..core.skill_receipts import binding_readiness
+from ..core.targets import resolve_target
+from ..gates import command
+from .base import _eng_path, _json, _serialize_errors
 
 
-@_serialise_errors
-def handle_target(a, **kwargs):
+@_serialize_errors
+def handle_target(args, **kwargs):
     """Resolve a target value from scope.yaml."""
-    canonical = (_eng_path(a["eng_dir"]) / "scope" / "scope.yaml").resolve()
-    scope_path_arg = str(a.get("scope") or "").strip()
+    canonical = (_eng_path(args["eng_dir"]) / "scope" / "scope.yaml").resolve()
+    scope_path_arg = str(args.get("scope") or "").strip()
     if scope_path_arg and Path(scope_path_arg).expanduser().resolve() != canonical:
         return _json(
             "blocked",
@@ -37,9 +38,9 @@ def handle_target(a, **kwargs):
 
     value = resolve_target(
         scope_data,
-        role=a.get("role"),
-        host_query=a.get("host"),
-        field=a.get("field") or "ip",
+        role=args.get("role"),
+        host_query=args.get("host"),
+        field=args.get("field") or "ip",
     )
     if value is None:
         return _json("error", error="no targets in scope")
@@ -157,11 +158,11 @@ def _build_status_skill_summary(
     }
 
 
-@_serialise_errors
-def handle_status(a, **kwargs):
-    if not str(a.get("eng_dir") or "").strip():
+@_serialize_errors
+def handle_status(args, **kwargs):
+    if not str(args.get("eng_dir") or "").strip():
         raise ValueError("eng_dir is required")
-    eng_dir = state.resolve_eng_dir(a.get("eng_dir", ""))
+    eng_dir = state.resolve_eng_dir(args.get("eng_dir", ""))
     bootstrap_result = bootstrap.check_bootstrap(eng_dir, auto_repair=False)
     tasks = ptt.parse_ptt(eng_dir / "state" / "ptt.md")
     ptt_result = ptt.validate_ptt(tasks)

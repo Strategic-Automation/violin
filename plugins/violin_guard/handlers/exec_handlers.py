@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .. import execution, ptt, state
+from ..core import ptt, state
+from ..engine import execution
 from .base import (
     _check_command_internal,
     _eng_path,
     _json,
     _result,
-    _serialise_errors,
+    _serialize_errors,
 )
 
 _MAX_COMMAND_FILE_BYTES = 64 * 1024
@@ -45,49 +46,46 @@ def _commands_from_file(eng_dir: str, value: str) -> list[str]:
     ]
 
 
-@_serialise_errors
-def handle_check_command(a, **kwargs):
-    r = _check_command_internal(a)
-    status_name = "ok" if r.exit_code() == 0 else "review" if r.exit_code() == 2 else "block"
-    return _json(status_name, **_result(r))
-
-
-@_serialise_errors
-def handle_heartbeat_done(a, **kwargs):
-    state.clear_heartbeat_pending(a["eng_dir"])
+@_serialize_errors
+@_serialize_errors
+def handle_heartbeat_done(args: dict, **kwargs):
+    state.clear_heartbeat_pending(args["eng_dir"])
     return _json("ok")
 
 
-@_serialise_errors
-def handle_exec(a, *, _internal_argv=None, _internal_background=None, **kwargs):
-    r = _check_command_internal(a)
-    exit_code = r.exit_code()
+@_serialize_errors
+def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, **kwargs):
+    result = _check_command_internal(args)
+    exit_code = result.exit_code()
     status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
     if status_name not in ("ok",) and not (
         status_name == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
     ):
         sync_status = (
             "sync_required"
-            if any("sync-credit" in str(x) or "not synced" in str(x) for x in r.errors)
+            if any(
+                "sync-credit" in str(error_item) or "not synced" in str(error_item)
+                for error_item in result.errors
+            )
             else "denied"
         )
-        return _json(sync_status, executed=False, **_result(r))
+        return _json(sync_status, executed=False, **_result(result))
     try:
         active_task = ptt.find_active_task(
-            ptt.parse_ptt(_eng_path(a["eng_dir"]) / "state" / "ptt.md")
+            ptt.parse_ptt(_eng_path(args["eng_dir"]) / "state" / "ptt.md")
         )
         res = execution.execute(
-            command=a["command"],
-            eng_dir=a["eng_dir"],
-            phase=a["phase"],
-            backend=a.get("backend", "auto"),
-            timeout_seconds=a.get("timeout_seconds", 180),
-            cwd=a.get("cwd", ""),
-            label=a.get("label", ""),
+            command=args["command"],
+            eng_dir=args["eng_dir"],
+            phase=args["phase"],
+            backend=args.get("backend", "auto"),
+            timeout_seconds=args.get("timeout_seconds", 180),
+            cwd=args.get("cwd", ""),
+            label=args.get("label", ""),
             ptt_task_id=active_task.id if active_task else "",
             argv=_internal_argv,
             background=(
-                bool(a.get("background", False))
+                bool(args.get("background", False))
                 if _internal_background is None
                 else bool(_internal_background)
             ),
@@ -100,36 +98,43 @@ def handle_exec(a, *, _internal_argv=None, _internal_background=None, **kwargs):
                 error=res.get("stderr_preview") or "process failed to start",
                 **res,
             )
-        return _json("ok", execution_status=execution_status, **res)
-    except Exception as e:
-        return _json("execution_failed", error=str(e), executed=False)
+        hint = (
+            "record this result on the hypothesis board now (violin_record_hypothesis: "
+            "status, Test Response, Runtime Evidence path) and link a canonical "
+            "FIND-NNN.md before the next command"
+            if active_task
+            else ""
+        )
+        return _json("ok", execution_status=execution_status, next_action=hint, **res)
+    except Exception as exc:
+        return _json("execution_failed", error=str(exc), executed=False)
 
 
-@_serialise_errors
-def handle_exec_status(a, **kwargs):
-    return _json("ok", **execution.status(a.get("eng_dir"), a.get("execution_id")))
+@_serialize_errors
+def handle_exec_status(args: dict, **kwargs):
+    return _json("ok", **execution.status(args.get("eng_dir"), args.get("execution_id")))
 
 
-@_serialise_errors
-def handle_exec_cancel(a, **kwargs):
-    return _json("ok", **execution.cancel(a.get("eng_dir"), a.get("execution_id")))
+@_serialize_errors
+def handle_exec_cancel(args: dict, **kwargs):
+    return _json("ok", **execution.cancel(args.get("eng_dir"), args.get("execution_id")))
 
 
-@_serialise_errors
-def handle_exec_burst(a, **kwargs):
+@_serialize_errors
+def handle_exec_burst(args: dict, **kwargs):
     """Single-approval bounded command batch with real burst semantics."""
-    eng_dir = a.get("eng_dir", "")
-    phase = a.get("phase", "")
-    scope = a.get("scope", "")
-    session_id = a.get("session_id", "")
-    label = a.get("label", "")
-    backend = a.get("backend", "auto")
-    timeout_seconds = a.get("timeout_seconds", 180)
-    cwd = a.get("cwd", "")
-    continue_on_error = bool(a.get("continue_on_error", False))
+    eng_dir = args.get("eng_dir", "")
+    phase = args.get("phase", "")
+    scope = args.get("scope", "")
+    session_id = args.get("session_id", "")
+    label = args.get("label", "")
+    backend = args.get("backend", "auto")
+    timeout_seconds = args.get("timeout_seconds", 180)
+    cwd = args.get("cwd", "")
+    continue_on_error = bool(args.get("continue_on_error", False))
 
-    cmds = list(a.get("commands") or [])
-    commands_file = a.get("commands_file")
+    cmds = list(args.get("commands") or [])
+    commands_file = args.get("commands_file")
     if commands_file:
         try:
             cmds.extend(_commands_from_file(eng_dir, str(commands_file)))
@@ -151,10 +156,10 @@ def handle_exec_burst(a, **kwargs):
             "eng_dir": eng_dir,
             "scope": scope,
             "session_id": session_id,
-            "target": a.get("target"),
+            "target": args.get("target"),
         }
-        r = _check_command_internal(cmd_args)
-        exit_code = r.exit_code()
+        cmd_result = _check_command_internal(cmd_args)
+        exit_code = cmd_result.exit_code()
         status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
         if status_name == "block":
             return _json(
@@ -165,12 +170,12 @@ def handle_exec_burst(a, **kwargs):
                         "index": idx + 1,
                         "command": cmd,
                         "status": "blocked",
-                        "errors": r.errors,
+                        "errors": cmd_result.errors,
                     }
                 ],
-                reason=f"command [{idx + 1}] blocked: {r.errors[0] if r.errors else 'blocked'}",
+                reason=f"command [{idx + 1}] blocked: {cmd_result.errors[0] if cmd_result.errors else 'blocked'}",
             )
-        review_warnings = r.warnings if status_name == "review" else []
+        review_warnings = cmd_result.warnings if status_name == "review" else []
         local = state.is_local_bookkeeping_command(cmd)
         if not local:
             required_slots += 1
@@ -192,51 +197,50 @@ def handle_exec_burst(a, **kwargs):
 
     results = []
     executed = 0
-    for item in preflight:
-        idx = item["index"]
-        cmd = item["command"]
-        review_warnings = item["review_warnings"]
-        try:
-            res = execution.execute(
-                command=cmd,
-                eng_dir=eng_dir,
-                phase=phase,
-                backend=backend,
-                timeout_seconds=timeout_seconds,
-                cwd=cwd,
-                label=label,
-                ptt_task_id=active_task_id,
-                sync_reservation=None if item["local"] else reservation_id,
-            )
-            execution_status = res.pop("status", None)
-            entry = {
-                "index": idx,
-                "command": cmd,
-                "execution_status": execution_status,
-                **res,
-            }
-            if review_warnings:
-                entry["review_required"] = True
-                entry["warnings"] = review_warnings
-            results.append(entry)
-            if res.get("executed"):
-                executed += 1
-            if res.get("exit_code", 0) != 0 and not continue_on_error:
-                break
-        except Exception as e:  # noqa: BLE001
-            if not continue_on_error:
-                if reservation_id:
-                    state.release_reserved_sync_credit(eng_dir, reservation_id)
-                return _json(
-                    "execution_failed",
-                    executed=executed,
-                    results=results + [{"index": idx, "command": cmd, "error": str(e)}],
-                    error=str(e),
+    try:
+        for item in preflight:
+            idx = item["index"]
+            cmd = item["command"]
+            review_warnings = item["review_warnings"]
+            try:
+                res = execution.execute(
+                    command=cmd,
+                    eng_dir=eng_dir,
+                    phase=phase,
+                    backend=backend,
+                    timeout_seconds=timeout_seconds,
+                    cwd=cwd,
+                    label=label,
+                    ptt_task_id=active_task_id,
+                    sync_reservation=None if item["local"] else reservation_id,
                 )
-            results.append({"index": idx, "command": cmd, "error": str(e)})
-
-    if reservation_id:
-        state.release_reserved_sync_credit(eng_dir, reservation_id)
+                execution_status = res.pop("status", None)
+                entry = {
+                    "index": idx,
+                    "command": cmd,
+                    "execution_status": execution_status,
+                    **res,
+                }
+                if review_warnings:
+                    entry["review_required"] = True
+                    entry["warnings"] = review_warnings
+                results.append(entry)
+                if res.get("executed"):
+                    executed += 1
+                if res.get("exit_code", 0) != 0 and not continue_on_error:
+                    break
+            except Exception as exc:  # noqa: BLE001
+                if not continue_on_error:
+                    return _json(
+                        "execution_failed",
+                        executed=executed,
+                        results=results + [{"index": idx, "command": cmd, "error": str(exc)}],
+                        error=str(exc),
+                    )
+                results.append({"index": idx, "command": cmd, "error": str(exc)})
+    finally:
+        if reservation_id:
+            state.release_reserved_sync_credit(eng_dir, reservation_id)
 
     return _json(
         "batch_complete",

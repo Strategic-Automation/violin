@@ -32,8 +32,8 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from benchmark.score import generate_markdown_summary, print_result, score_engagement  # noqa: E402
-from plugins.violin_guard.command import validate_scope  # noqa: E402
-from plugins.violin_guard.receipt_integrity import RECEIPT_KEY_ENV  # noqa: E402
+from plugins.violin_guard.core.receipt_integrity import RECEIPT_KEY_ENV  # noqa: E402
+from plugins.violin_guard.gates.command import validate_scope  # noqa: E402
 
 _DEFAULT_HERMES_MAX_TOKENS = 32_000
 _CLOSEOUT_TIMEOUT_SECONDS = 600
@@ -198,6 +198,10 @@ def _scope_for_target(target: str) -> dict:
     # with strict record-keeping can set the same flag. No benchmark concept
     # leaks into framework logic.
     scope.setdefault("engagement", {})["audit_mode"] = True
+    # Strict engagement record-keeping: every WSTG methodology category must be
+    # dispositioned with evidence before VULN_RESEARCH closes. Same generic
+    # client-style flag as audit_mode; a real strict client can set it too.
+    scope.setdefault("engagement", {})["require_methodology_gates"] = True
     # Coverage obligations: route-level API scope a client would provide at
     # kickoff (in-scope endpoints), NOT vulnerability names — the agent must
     # still discover what is vulnerable. Derived from the target's endpoint
@@ -329,22 +333,20 @@ CRITICAL: Whenever you inspect or read the guard codebase (e.g. plugins/violin_g
         encoding="utf-8",
     )
 
+    # Seed the matrix from the exact client-style obligations in scope.yaml.
+    # The close gate requires a flat coverage map keyed by those strings; generic
+    # nested WSTG category placeholders make every initialized engagement fail
+    # schema validation before the agent can begin testing.
+    scope = yaml.safe_load(scope_yaml.read_text(encoding="utf-8")) or {}
+    obligations = [
+        str(item).strip()
+        for item in ((scope.get("engagement") or {}).get("coverage_obligations") or [])
+        if str(item).strip()
+    ]
     coverage = {
         "coverage": {
-            name: {"status": "pending", "evidence_or_reason": ""}
-            for name in (
-                "routes",
-                "methods",
-                "parameters",
-                "role_boundaries",
-                "authentication_flows",
-                "business_logic",
-                "redirects",
-                "rate_limits",
-                "ssrf",
-                "injection",
-                "object_authorization",
-            )
+            obligation.lower(): {"status": "pending", "evidence_or_reason": ""}
+            for obligation in obligations
         }
     }
     (eng_dir / "state" / "coverage-matrix.yaml").write_text(

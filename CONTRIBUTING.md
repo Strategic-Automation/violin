@@ -21,8 +21,12 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
 1. Fork the repo and create a feature branch from `dev`
 2. Follow the existing file structure and conventions:
    - Engagement phases and shared vulnerability playbooks go in `skills/pentest/playbooks/`
-   - Injection/web playbooks go in `skills/web-attacks/playbooks/`
-   - Authentication and authorisation playbooks go in `skills/access-control/playbooks/`
+   - Injection/client-side web playbooks go in `skills/web-app/playbooks/`
+   - Identity, authentication, authorization, and session playbooks go in `skills/identity-auth/playbooks/`
+   - API protocol playbooks go in `skills/api-testing/playbooks/`
+   - Workflow, pricing, and state-transition playbooks go in `skills/business-logic/playbooks/`
+   - LLM prompt-injection and MCP playbooks go in `skills/llm-security/playbooks/`
+   - Deployment, configuration, and observability playbooks go in `skills/misconfig/playbooks/`
    - Shared references and templates stay in `skills/pentest/references/` and `skills/pentest/templates/`
    - Hermes guard implementation belongs in `plugins/violin_guard/`; `scripts/` contains CLI and smoke helpers
    - A new routed skill requires its own `skills/<name>/SKILL.md` and an update to the pentest orchestrator and README layout

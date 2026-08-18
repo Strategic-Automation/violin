@@ -1,0 +1,461 @@
+"""Declarative, fail-closed policy for Violin skill selection.
+
+This module intentionally has no Hermes or state dependency.  It defines the
+approved vocabulary and routing rules that later delivery/enforcement layers
+consume, so policy changes can be reviewed without changing execution.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
+
+from .phases import Phase, normalize_phase
+
+__all__ = [
+    "CATALOG",
+    "RouteDecision",
+    "SkillSpec",
+    "catalog_snapshot",
+    "resolve_skill_route",
+    "skill_spec",
+    "validate_catalog",
+    "validate_skill_selection",
+]
+
+
+@dataclass(frozen=True)
+class SkillSpec:
+    """One reviewed skill dependency and its provenance requirements."""
+
+    name: str
+    source: str
+    local_name: str
+    trust: str
+    install_hint: str
+    approved_bundle_digest: str | None
+    digest_required_on_install: bool = False
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    """Deterministic skill choice plus every policy-permitted alternative."""
+
+    phase: str
+    vulnerability_class: str
+    candidate_source: str
+    selected: str | None
+    allowed: tuple[str, ...]
+    mismatch_reasons: tuple[str, ...]
+
+
+# A remote dependency is deliberately not assigned an invented content hash.
+# Its bundle digest is captured only by the approved Hermes install/audit flow;
+# ``digest_required_on_install`` means a later delivery layer must reject an
+# unpinned installation.  Bundled skills receive their content digest when the
+# distributable snapshot is generated.
+CATALOG: tuple[SkillSpec, ...] = (
+    SkillSpec(
+        "pentest", "bundled:skills/pentest", "pentest", "bundled", "included with Violin", None
+    ),
+    SkillSpec(
+        "web-app",
+        "bundled:skills/web-app",
+        "web-app",
+        "bundled",
+        "included with Violin",
+        None,
+    ),
+    SkillSpec(
+        "identity-auth",
+        "bundled:skills/identity-auth",
+        "identity-auth",
+        "bundled",
+        "included with Violin",
+        None,
+    ),
+    SkillSpec(
+        "api-testing",
+        "bundled:skills/api-testing",
+        "api-testing",
+        "bundled",
+        "included with Violin",
+        None,
+    ),
+    SkillSpec(
+        "business-logic",
+        "bundled:skills/business-logic",
+        "business-logic",
+        "bundled",
+        "included with Violin",
+        None,
+    ),
+    SkillSpec(
+        "llm-security",
+        "bundled:skills/llm-security",
+        "llm-security",
+        "bundled",
+        "included with Violin",
+        None,
+    ),
+    SkillSpec(
+        "misconfig",
+        "bundled:skills/misconfig",
+        "misconfig",
+        "bundled",
+        "included with Violin",
+        None,
+    ),
+    SkillSpec(
+        "domain-intel",
+        "official/research/domain-intel",
+        "domain-intel",
+        "official",
+        "hermes skills install official/research/domain-intel",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "osint-investigation",
+        "official/research/osint-investigation",
+        "osint-investigation",
+        "official",
+        "hermes skills install official/research/osint-investigation",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "sherlock",
+        "official/security/sherlock",
+        "sherlock",
+        "official",
+        "hermes skills install official/security/sherlock",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "oss-forensics",
+        "official/security/oss-forensics",
+        "oss-forensics",
+        "official",
+        "hermes skills install official/security/oss-forensics",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "audit-context-building",
+        "trailofbits/skills/plugins/audit-context-building/skills/audit-context-building",
+        "audit-context-building",
+        "reviewed-third-party",
+        "hermes skills install trailofbits/skills/plugins/audit-context-building/skills/audit-context-building",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "semgrep",
+        "trailofbits/skills/plugins/static-analysis/skills/semgrep",
+        "semgrep",
+        "reviewed-third-party",
+        "hermes skills install trailofbits/skills/plugins/static-analysis/skills/semgrep",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "codeql",
+        "trailofbits/skills/plugins/static-analysis/skills/codeql",
+        "codeql",
+        "reviewed-third-party",
+        "hermes skills install trailofbits/skills/plugins/static-analysis/skills/codeql",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "sarif-parsing",
+        "trailofbits/skills/plugins/static-analysis/skills/sarif-parsing",
+        "sarif-parsing",
+        "reviewed-third-party",
+        "hermes skills install trailofbits/skills/plugins/static-analysis/skills/sarif-parsing",
+        None,
+        True,
+    ),
+    SkillSpec(
+        "fp-check",
+        "trailofbits/skills/plugins/fp-check/skills/fp-check",
+        "fp-check",
+        "reviewed-third-party",
+        "hermes skills install trailofbits/skills/plugins/fp-check/skills/fp-check",
+        None,
+        True,
+    ),
+)
+
+_CATALOG_BY_NAME = {spec.name: spec for spec in CATALOG}
+_EXCLUDED_SOURCES = frozenset(
+    {
+        "official/security/godmode",
+        "official/security/web-pentest",
+        "yayalingo/kali-pentest-agent/skills",
+        "yaklang/hack-skills",
+    }
+)
+
+_VULNERABILITY_ROUTES = {
+    "access-control": "identity-auth",
+    "auth-bypass": "identity-auth",
+    "authentication": "identity-auth",
+    "authorization": "identity-auth",
+    "broken-access-control": "identity-auth",
+    "broken-object-level-authorization": "identity-auth",
+    "csrf": "identity-auth",
+    "cryptographic-issues": "identity-auth",
+    "idor": "identity-auth",
+    "jwt": "identity-auth",
+    "open-redirect": "identity-auth",
+    "redirects-unvalidated": "identity-auth",
+    "command-injection": "web-app",
+    "cross-site-scripting": "web-app",
+    "deserialization": "web-app",
+    "input-validation": "web-app",
+    "ldap-injection": "web-app",
+    "nosql-injection": "web-app",
+    "path-traversal": "web-app",
+    "prototype-pollution": "web-app",
+    "sqli": "web-app",
+    "sql-injection": "web-app",
+    "ssrf": "web-app",
+    "server-side-request-forgery": "web-app",
+    "ssti": "web-app",
+    "xss": "web-app",
+    "xpath-injection": "web-app",
+    "xxe": "web-app",
+    "api-security": "api-testing",
+    "graphql": "api-testing",
+    "rest-api": "api-testing",
+    "websocket": "api-testing",
+    "business-logic": "business-logic",
+    "business-logic-flaw": "business-logic",
+    "logic-flaw": "business-logic",
+    "llm-prompt-injection": "llm-security",
+    "prompt-injection": "llm-security",
+    "json-rpc": "llm-security",
+    "mcp": "llm-security",
+    "mcp-api-testing": "llm-security",
+    "misconfiguration": "misconfig",
+    "observability-failures": "misconfig",
+    "security-misconfiguration": "misconfig",
+    "security-through-obscurity": "misconfig",
+    "source-analysis": "audit-context-building",
+    "static-analysis": "semgrep",
+    "sarif": "sarif-parsing",
+    "false-positive": "fp-check",
+}
+_SOURCE_ROUTES = {
+    "domain": "domain-intel",
+    "osint": "osint-investigation",
+    "public-records": "osint-investigation",
+    "username": "sherlock",
+    "identity": "sherlock",
+    "repository": "oss-forensics",
+    "supply-chain": "oss-forensics",
+    "codebase": "audit-context-building",
+    "source": "audit-context-building",
+    "semgrep": "semgrep",
+    "codeql": "codeql",
+    "sarif": "sarif-parsing",
+}
+_PHASE_DEFAULTS = {
+    Phase.SCOPING: "pentest",
+    Phase.RECON: "pentest",
+    Phase.VULN_RESEARCH: "pentest",
+    Phase.EXPLOITATION: "pentest",
+    Phase.POST_EXPLOITATION: "pentest",
+    Phase.PRIVESC: "pentest",
+    Phase.FLAGS: "pentest",
+    Phase.REPORTING: "pentest",
+    Phase.RETROSPECTIVE: "pentest",
+}
+
+
+def _candidate_source_guidance() -> str:
+    """Render the public, normalized candidate-source vocabulary and its routes."""
+
+    return ", ".join(f"{source} -> {skill}" for source, skill in sorted(_SOURCE_ROUTES.items()))
+
+
+def _route_basis(decision: RouteDecision) -> str:
+    """Explain the highest-priority input that selected one mandatory skill."""
+
+    if decision.vulnerability_class in _VULNERABILITY_ROUTES:
+        return (
+            f"vulnerability_class {decision.vulnerability_class!r} "
+            "(vulnerability routes take precedence over candidate_source)"
+        )
+    if decision.candidate_source in _SOURCE_ROUTES:
+        return f"candidate_source {decision.candidate_source!r}"
+    return f"phase {decision.phase!r} default"
+
+
+def _normalize(value: str | None) -> str:
+    return "-".join((value or "").strip().lower().replace("_", "-").split())
+
+
+def skill_spec(name: str) -> SkillSpec | None:
+    """Return catalog provenance and installation guidance for a skill."""
+    return _CATALOG_BY_NAME.get(_normalize(name))
+
+
+def validate_catalog(catalog: Iterable[SkillSpec] = CATALOG) -> tuple[str, ...]:
+    """Return integrity failures; callers must refuse policy on any failure."""
+
+    errors: list[str] = []
+    names: set[str] = set()
+    locals_: set[str] = set()
+    sources: set[str] = set()
+    for spec in catalog:
+        name = _normalize(spec.name)
+        if not name:
+            errors.append("skill catalog contains an empty name")
+        elif name in names:
+            errors.append(f"duplicate skill name: {spec.name}")
+        names.add(name)
+        local_name = _normalize(spec.local_name)
+        if not local_name:
+            errors.append(f"skill {spec.name} has no local name")
+        elif local_name in locals_:
+            errors.append(f"local-name collision: {spec.local_name}")
+        locals_.add(local_name)
+        if not spec.source.strip():
+            errors.append(f"skill {spec.name} has no source")
+        elif spec.source in _EXCLUDED_SOURCES:
+            errors.append(f"skill {spec.name} uses excluded source: {spec.source}")
+        elif spec.source in sources:
+            errors.append(f"duplicate skill source: {spec.source}")
+        sources.add(spec.source)
+        if spec.trust not in {"bundled", "official", "reviewed-third-party"}:
+            errors.append(f"skill {spec.name} has unknown trust level: {spec.trust}")
+        if not spec.install_hint.strip():
+            errors.append(f"skill {spec.name} has no install hint")
+        if spec.approved_bundle_digest and not spec.approved_bundle_digest.startswith("sha256:"):
+            errors.append(f"skill {spec.name} has invalid approved bundle digest")
+        if spec.trust == "bundled" and spec.digest_required_on_install:
+            errors.append(f"bundled skill {spec.name} cannot require a remote install digest")
+        if spec.trust != "bundled" and not spec.digest_required_on_install:
+            errors.append(f"external skill {spec.name} must require an approved install digest")
+    return tuple(errors)
+
+
+def resolve_skill_route(
+    phase: str,
+    vulnerability_class: str | None = None,
+    candidate_source: str | None = None,
+) -> RouteDecision:
+    """Resolve one policy route without consulting state or installed skills."""
+
+    catalog_errors = validate_catalog()
+    raw_vulnerability = _normalize(vulnerability_class)
+    raw_source = _normalize(candidate_source)
+    try:
+        canonical_phase = normalize_phase(phase)
+    except (AttributeError, ValueError):
+        return RouteDecision(
+            str(phase),
+            raw_vulnerability,
+            raw_source,
+            None,
+            (),
+            (f"unknown phase: {phase}", *catalog_errors),
+        )
+    selected = _VULNERABILITY_ROUTES.get(raw_vulnerability)
+    if selected is None:
+        selected = _SOURCE_ROUTES.get(raw_source)
+    if selected is None:
+        selected = _PHASE_DEFAULTS[canonical_phase]
+    mismatch: list[str] = list(catalog_errors)
+    if raw_vulnerability and raw_vulnerability not in _VULNERABILITY_ROUTES:
+        valid_classes = ", ".join(sorted(_VULNERABILITY_ROUTES.keys()))
+        if raw_vulnerability in _CATALOG_BY_NAME:
+            mismatch.append(
+                f"'{vulnerability_class}' is a skill name, not a vulnerability class. "
+                f"Set skill='{raw_vulnerability}'. Set vuln_class to an observed "
+                f"class (for example: sqli, ssrf, jwt, or idor); valid classes are: "
+                f"{valid_classes}"
+            )
+        else:
+            mismatch.append(
+                f"unknown vulnerability class: {vulnerability_class}; valid classes are: "
+                f"{valid_classes}"
+            )
+    if raw_source and raw_source not in _SOURCE_ROUTES:
+        mismatch.append(
+            f"unknown candidate source: {candidate_source!r}; accepted normalized values and routes: "
+            + _candidate_source_guidance()
+            + ". If this value names a vulnerability type (for example jwt, idor, xss, or ssrf), "
+            "pass it as vuln_class instead of candidate_source."
+        )
+    allowed = () if mismatch else (selected,)
+    return RouteDecision(
+        canonical_phase.value, raw_vulnerability, raw_source, selected, allowed, tuple(mismatch)
+    )
+
+
+def validate_skill_selection(
+    selected_skill: str,
+    phase: str,
+    vulnerability_class: str | None = None,
+    candidate_source: str | None = None,
+) -> RouteDecision:
+    """Resolve and add a fail-closed explanation for an LLM skill mismatch."""
+
+    decision = resolve_skill_route(phase, vulnerability_class, candidate_source)
+    selection = _normalize(selected_skill)
+    reasons = list(decision.mismatch_reasons)
+    if selection == "fp-check" and decision.phase == Phase.RETROSPECTIVE.value and not reasons:
+        return RouteDecision(
+            decision.phase,
+            decision.vulnerability_class,
+            decision.candidate_source,
+            selection,
+            (selection,),
+            (),
+        )
+    if selection not in _CATALOG_BY_NAME:
+        reasons.append(f"unknown or unapproved skill: {selected_skill}")
+    elif decision.allowed and selection not in decision.allowed:
+        reasons.append(
+            f"skill {selected_skill!r} is not permitted; expected {decision.selected!r} "
+            f"because {_route_basis(decision)}. Set skill={decision.selected!r}."
+        )
+    return RouteDecision(
+        decision.phase,
+        decision.vulnerability_class,
+        decision.candidate_source,
+        decision.selected,
+        decision.allowed if not reasons else (),
+        tuple(reasons),
+    )
+
+
+def catalog_snapshot(repo_root: Path) -> dict[str, object]:
+    """Build the Hermes-compatible dependency snapshot payload.
+
+    Hermes ignores the Violin-specific audit metadata, while the later receipt
+    layer uses it to ensure an installed external bundle has a recorded digest.
+    """
+
+    skills = []
+    for spec in CATALOG:
+        entry = {
+            "identifier": spec.source,
+            "category": "security",
+            "name": spec.name,
+            "local_name": spec.local_name,
+            "trust": spec.trust,
+            "install_hint": spec.install_hint,
+            "approved_bundle_digest": spec.approved_bundle_digest,
+            "digest_required_on_install": spec.digest_required_on_install,
+        }
+        if spec.trust == "bundled":
+            entry["path"] = str(repo_root / spec.source.removeprefix("bundled:"))
+        skills.append(entry)
+    return {"hermes_version": "0.18.0", "skills": skills, "taps": []}

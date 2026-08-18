@@ -25,7 +25,7 @@ This policy covers:
 - The required `plugins/violin_guard/` execution guard and registered tools
 - The `scripts/violin_guard.py` diagnostic/admin entrypoint and release smoke helpers
 - The `config.yaml` safety configuration
-- The routed methodology under `skills/pentest/`, `skills/web-attacks/`, and `skills/access-control/`
+- The routed methodology under `skills/pentest/`, `skills/web-app/`, `skills/identity-auth/`, `skills/api-testing/`, `skills/business-logic/`, `skills/llm-security/`, and `skills/misconfig/`
 - Distribution and installation mechanisms
 
 What this policy does NOT cover:

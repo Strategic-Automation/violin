@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import subprocess
 import sys
@@ -6,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from plugins.violin_guard.core.skill_receipts import SkillViewResult
 from tests.guard.receipt_fixture import bind_active_task
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -47,7 +50,8 @@ from plugins.violin_guard import (
 from plugins.violin_guard import (
     handlers as TOOLS,
 )
-from plugins.violin_guard.targets import extract_target_candidates
+from plugins.violin_guard.core.targets import extract_target_candidates
+from plugins.violin_guard.handlers import ptt_handlers
 
 
 def _cp(code, out="", err=""):
@@ -77,7 +81,7 @@ def _fake_target_executor(monkeypatch):
         history.append_history(engagement, command, phase, 0, "evidence/executions/test.json")
         remaining = state.spend_sync_credit(str(engagement), phase)
         # Mirror real execution: tick command counter, mark pending sync, set heartbeat if interval reached
-        from plugins.violin_guard.phases import normalize_phase, suppresses_heartbeat
+        from plugins.violin_guard.core.phases import normalize_phase, suppresses_heartbeat
 
         count = state.tick_command(str(engagement))
         active = ptt.find_active_task(ptt.parse_ptt(engagement / "state" / "ptt.md"))
@@ -147,13 +151,23 @@ def test_meta_loaded():
     # Current plugin surface: handle_* command entrypoints registered.
     for name in (
         "handle_exec",
-        "handle_check_command",
         "handle_review_batch",
         "handle_record_ptt",
         "handle_record_hypothesis",
+        "handle_exec_burst",
     ):
         assert hasattr(TOOLS, name), f"plugin must expose {name}"
-    for removed in ("handle_sync_done", "handle_review_and_release", "handle_finding"):
+    for removed in (
+        "handle_sync_done",
+        "handle_review_and_release",
+        "handle_finding",
+        "handle_check_command",
+        "handle_ffuf",
+        "handle_httpx",
+        "handle_nuclei",
+        "handle_listener",
+        "handle_search_exploit",
+    ):
         assert not hasattr(TOOLS, removed), f"plugin must not expose removed handler {removed}"
 
 
@@ -253,12 +267,12 @@ def test_recon_does_not_require_hypothesis(tmp_path):
     assert any("hypothesis guard:" in warning for warning in research3.warnings)
 
 
-def test_exploit_research_gate_scopes_to_named_hypothesis(tmp_path):
-    """Online-research gate: with hypothesis_id, only that hypothesis needs rows.
+def test_exploit_phase_does_not_gate_on_research(tmp_path):
+    """Online research is encouraged but never a hard gate on exploit execution.
 
-    A command that names H-001 must not be blocked because unrelated hypotheses
-    (H-002) lack CVE/Exploit Research — otherwise a single unresearched
-    candidate walls off the whole exploit phase.
+    Neither named nor unnamed exploit commands may be blocked for missing
+    CVE/Exploit Research rows — a per-hypothesis research requirement degrades
+    into a bookkeeping tax that walls off the whole exploit phase.
     """
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
@@ -283,21 +297,8 @@ def test_exploit_research_gate_scopes_to_named_hypothesis(tmp_path):
     )
     bind_active_task(eng, "ts")
 
-    # Named hypothesis has research rows -> passes even though H-002 is bare.
-    ok = command.check_command(
-        command.CheckCommandArgs(
-            command="curl -sk -i https://duck-store.escape.tech/api/v1/admin",
-            phase="exploitation",
-            eng_dir=str(eng),
-            scope=str(eng / "scope" / "scope.yaml"),
-            hypothesis_id="H-001",
-            session_id="ts",
-        )
-    )
-    assert not any("online research" in error.lower() for error in ok.errors)
-
-    # H-002 itself is still blocked (no research rows).
-    blocked = command.check_command(
+    # Named hypothesis without research rows: must NOT be blocked.
+    named = command.check_command(
         command.CheckCommandArgs(
             command="curl -sk -i https://duck-store.escape.tech/api/v1/admin",
             phase="exploitation",
@@ -307,10 +308,10 @@ def test_exploit_research_gate_scopes_to_named_hypothesis(tmp_path):
             session_id="ts",
         )
     )
-    assert any("online research must be attempted" in e.lower() for e in blocked.errors)
+    assert not any("online research" in error.lower() for error in named.errors)
 
-    # Without hypothesis_id, every candidate must carry research rows.
-    all_blocked = command.check_command(
+    # Unnamed command: research must not be a gate either.
+    unnamed = command.check_command(
         command.CheckCommandArgs(
             command="curl -sk -i https://duck-store.escape.tech/api/v1/admin",
             phase="exploitation",
@@ -319,8 +320,7 @@ def test_exploit_research_gate_scopes_to_named_hypothesis(tmp_path):
             session_id="ts",
         )
     )
-    assert any("H-002 missing" in e for e in all_blocked.errors)
-    assert not any("H-001 missing" in e for e in all_blocked.errors)
+    assert not any("online research" in error.lower() for error in unnamed.errors)
 
 
 def test_target_scanner_ignores_dotted_files_and_handles_dev_tcp_endpoint():
@@ -441,7 +441,7 @@ def test_exploitation_hypothesis_match_accepts_manual_field_order(tmp_path):
     assert not result.errors, result.errors
 
 
-def test_exploitation_requires_cve_and_exploit_research_attempts(tmp_path):
+def test_exploitation_hints_when_research_missing_but_does_not_block(tmp_path):
     (tmp_path / "hypotheses.md").write_text(
         """### H-001: Queue service validation
 - **Target:** 10.129.47.140:1515
@@ -452,10 +452,12 @@ def test_exploitation_requires_cve_and_exploit_research_attempts(tmp_path):
         encoding="utf-8",
     )
 
-    blocked = command.check_hypothesis_freshness(
+    result = command.check_hypothesis_freshness(
         tmp_path, command.Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
     )
-    assert any("Exploit Research" in error for error in blocked.errors)
+    # Missing Exploit Research yields a hint, never a block.
+    assert not result.errors, result.errors
+    assert any("hint:" in w.lower() and "exploit research" in w.lower() for w in result.warnings)
 
     (tmp_path / "hypotheses.md").write_text(
         (tmp_path / "hypotheses.md").read_text(encoding="utf-8")
@@ -465,7 +467,9 @@ def test_exploitation_requires_cve_and_exploit_research_attempts(tmp_path):
     allowed = command.check_hypothesis_freshness(
         tmp_path, command.Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
     )
-    assert not allowed.errors, allowed.errors
+    assert not any(
+        "hint:" in w.lower() and "exploit research" in w.lower() for w in allowed.warnings
+    )
 
 
 def test_hypothesis_enforces_scope_target_fallback(tmp_path):
@@ -565,8 +569,12 @@ def test_unphased_hypothesis_defaults_to_current_phase_when_linked(tmp_path):
     )
 
 
-def test_check_command_enforces_active_task_hypothesis_id(tmp_path):
-    """Verify check_command validates the specific hypothesis ID linked in active PTT task note."""
+def test_check_command_routes_research_hint_to_active_task_hypothesis(tmp_path):
+    """Verify check_command binds the active PTT task's hypothesis and hints, not blocks.
+
+    The active task note links H-002; the research hint must mention H-002
+    (not the researched H-001) and must never be a hard error.
+    """
     (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
     (tmp_path / "scope" / "scope.yaml").write_text(
         "targets:\n  ip_addresses:\n    - 10.129.47.140\n"
@@ -581,7 +589,7 @@ def test_check_command_enforces_active_task_hypothesis_id(tmp_path):
         "## Phase: EXPLOITATION\n\n| PT-001 | [~] | Exploit Task | testing H-002 |\n",
         encoding="utf-8",
     )
-    # H-001 has research, but active task links H-002 which has NO research
+    # H-001 has research; active task links H-002 which has NO research.
     (tmp_path / "hypotheses.md").write_text(
         "### H-001: First\n"
         "- **Target:** 10.129.47.140\n"
@@ -606,17 +614,21 @@ def test_check_command_enforces_active_task_hypothesis_id(tmp_path):
         session_id="test-session",
     )
     res = command.check_command(cmd_args)
-    assert res.errors
-    assert any("H-002 missing CVE Research and Exploit Research" in err for err in res.errors)
+    # Research must not block, but the hint must name the bound hypothesis.
+    assert not any("missing CVE Research" in err for err in res.errors)
+    assert any("hint:" in w.lower() and "H-002" in w for w in res.warnings)
+
+
+class _ReadySkillAdapter:
+    def view(self, *_args, **_kwargs) -> SkillViewResult:
+        return SkillViewResult(True, "skill")
 
 
 def test_record_ptt_can_start_pristine_task(tmp_path, monkeypatch):
-    from plugins.violin_guard.skill_receipts import SkillViewResult
-
     monkeypatch.setattr(
-        TOOLS,
+        ptt_handlers,
         "HermesSkillViewAdapter",
-        lambda: type("Ready", (), {"view": lambda *_a, **_k: SkillViewResult(True, "skill")})(),
+        _ReadySkillAdapter,
     )
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
@@ -717,6 +729,51 @@ def test_exec_blocked_without_receipt_binding(monkeypatch, tmp_path):
     )
     assert out["status"] in ("denied", "error")
     assert out["status"] in ("denied", "error")
+
+
+def test_exec_ok_response_carries_formalization_hint(tmp_path):
+    """A successful guarded execution must nudge hypothesis+FIND closure.
+
+    The 15-proof -> 13-validated gap comes from found evidence never being
+    formalized (Validated hypothesis + linked FIND citing the evidence).
+    The exec response reminds the agent to close the loop in one step.
+    """
+    skill_file = tmp_path / ".skill-loaded-ts"
+    eng = _init_e2e(tmp_path, skill_file)
+
+    # Advance PTT to VULN_RESEARCH and add a hypothesis (mirrors the phase
+    # handoff pattern in test_recon_does_not_require_hypothesis).
+    ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
+    (eng / "hypotheses.md").write_text(
+        (eng / "hypotheses.md").read_text(encoding="utf-8")
+        + (
+            f"\n### H-001: Test endpoint exposed\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
+            f"- **Target:** 10.10.10.10\n- **Updated:** {ts} UTC\n"
+        ),
+        encoding="utf-8",
+    )
+    ptt_path = eng / "state" / "ptt.md"
+    ptt_path.write_text(
+        ptt_path.read_text(encoding="utf-8")
+        .replace("| PT-010 | [~] |", "| PT-010 | [x] |")
+        .replace("| PT-030 | [ ] |", "| PT-030 | [~] |"),
+        encoding="utf-8",
+    )
+    bind_active_task(eng, "ts")
+
+    out = json.loads(
+        TOOLS.handle_exec(
+            {
+                "eng_dir": str(eng),
+                "phase": "vuln-research",
+                "command": "curl -sS -i http://10.10.10.10/test",
+                "label": "probe",
+            }
+        )
+    )
+    assert out["status"] == "ok", out
+    assert out.get("next_action"), "ok exec response must carry a next_action hint"
+    assert "violin_record_hypothesis" in out["next_action"]
 
 
 def test_init_engagement_creates_compliant_artifacts(tmp_path):
