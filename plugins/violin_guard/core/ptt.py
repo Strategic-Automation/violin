@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .phases import Phase, can_advance_phase, normalize_phase
+from .phases import Phase, normalize_phase
 from .state import atomic_text
 
 __all__ = [
@@ -22,8 +22,6 @@ __all__ = [
     "update_task",
     "update_tasks",
     "sync_ptt",
-    "advance_task_phase",
-    "can_advance_phase",
 ]
 
 
@@ -323,71 +321,3 @@ def sync_ptt(path: Path) -> list[PttTask]:
         )
         tasks = parse_ptt(path)
     return tasks
-
-
-def advance_task_phase(ptt_path: Path, task_id: str, new_phase: str) -> PttTask:
-    """Move a PTT task row to a new phase table (forward transitions only).
-
-    Used by the command gate to auto-advance PT-104 from REPORTING to EXPLOITATION
-    when the agent needs to execute exploitation commands. The phase headings are
-    derived from the task table position, so we cut the row from its current table
-    and insert it into the target phase's table.
-    """
-    content = ptt_path.read_text(encoding="utf-8")
-    lines = content.splitlines()
-
-    # Find the task row and its current phase table
-    task_row_idx = None
-    task_row = None
-    current_phase_idx = None
-    phase_headings = []
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("## Phase:"):
-            phase_match = re.match(r"##\s+Phase:\s*(?P<phase>.+?)\s*$", stripped, re.IGNORECASE)
-            if phase_match:
-                phase_headings.append((i, normalize_phase(phase_match.group("phase")).value))
-        if stripped.startswith("|") and "|" in stripped:
-            m = re.match(r"\|\s*(PT-\w+)\s*\|", stripped)
-            if m and m.group(1) == task_id:
-                task_row_idx = i
-                task_row = stripped
-                # Find which phase table this row belongs to
-                for j in range(len(phase_headings) - 1, -1, -1):
-                    if phase_headings[j][0] < i:
-                        current_phase_idx = j
-                        break
-
-    if task_row_idx is None:
-        raise ValueError(f"PTT task {task_id!r} not found")
-
-    new_phase_canonical = normalize_phase(new_phase).value
-    if (
-        current_phase_idx is not None
-        and phase_headings[current_phase_idx][1] == new_phase_canonical
-    ):
-        return next(task for task in parse_ptt(ptt_path) if task.id == task_id)
-
-    # Cut the task row from current position
-    lines.pop(task_row_idx)
-
-    # Find target phase table end
-    target_table_end = None
-    for _i, (heading_idx, heading_phase) in enumerate(phase_headings):
-        if heading_phase == new_phase_canonical:
-            # Find end of this phase's table
-            end = heading_idx + 1
-            while end < len(lines) and lines[end].strip().startswith("|"):
-                end += 1
-            target_table_end = end - 1
-            break
-
-    if target_table_end is None:
-        raise ValueError(f"Phase {new_phase_canonical} has no task table")
-
-    # Insert row at end of target phase table
-    lines.insert(target_table_end + 1, task_row)
-
-    atomic_text(ptt_path, "\n".join(lines) + "\n")
-    return next(task for task in parse_ptt(ptt_path) if task.id == task_id)

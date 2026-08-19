@@ -23,11 +23,12 @@ from benchmark.score import (
     scan_evidence,
     score_engagement,
 )
-from plugins.violin_guard import execution, receipt_integrity
+from plugins.violin_guard.core import receipt_integrity
 from plugins.violin_guard.core.receipt_integrity import (
     seal_execution_receipt,
     verified_evidence_paths,
 )
+from plugins.violin_guard.engine import execution
 
 CALIBRATION_DIR = (
     Path(__file__).resolve().parents[3] / "benchmark" / "targets" / "duck-store" / "calibration"

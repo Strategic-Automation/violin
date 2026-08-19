@@ -17,7 +17,6 @@ from ..core.skill_receipts import (
     get_binding,
     prepare_delivery,
 )
-from . import ptt_handlers
 from .base import (
     _eng_path,
     _json,
@@ -174,8 +173,7 @@ def _handle_review_batch_skill_reservation(
         phase="RETROSPECTIVE" if skill == "fp-check" else phase.value,
     )
     if reservation.owner:
-        adapter_cls = getattr(ptt_handlers, "HermesSkillViewAdapter", HermesSkillViewAdapter)
-        viewed = adapter_cls().view(skill, task_id=task_id)
+        viewed = HermesSkillViewAdapter().view(skill, task_id=task_id)
         completed = complete_delivery(engagement, reservation, viewed)
         spec = skill_spec(skill)
         return args, _json(

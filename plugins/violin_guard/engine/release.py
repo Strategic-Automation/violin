@@ -25,6 +25,7 @@ from pathlib import Path
 
 import yaml
 
+from ..core import schemas
 from ..core.results import GuardResult
 from ..core.skill_policy import catalog_snapshot, validate_catalog
 
@@ -183,7 +184,7 @@ def _check_isolated_import_and_tools(
             result.add_info("provides_tools matches registered tools")
         definitions = list(getattr(mod, "TOOL_DEFINITIONS", []) or [])
         for definition in definitions:
-            expected = mod.schemas.to_tool_schema(definition.model)["parameters"]
+            expected = schemas.to_tool_schema(definition.model)["parameters"]
             if definition.schema.get("parameters") != expected:
                 result.add_error(f"tool schema drift for {definition.name}")
         if len(definitions) == len(registered):

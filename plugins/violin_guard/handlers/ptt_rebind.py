@@ -96,30 +96,27 @@ def _validated_replacement_task(
 @_serialize_errors
 def handle_rebind_pending_batch(args: dict[str, Any], **kwargs: Any) -> str:
     """Explicitly move a completed pending batch to another active PTT task."""
-    try:
-        eng_dir, batch_id, current_task_id, replacement_task_id, note = _rebind_fields(args)
-        pending = state.get_pending_sync(eng_dir)
-        if not pending:
-            raise ValueError("no pending execution batch")
-        _validate_pending_identity(pending, batch_id, current_task_id)
-        _validate_pending_history(eng_dir, pending)
-        _validated_replacement_task(eng_dir, pending, current_task_id, replacement_task_id)
-        audit = state.rebind_pending_sync(
-            eng_dir,
-            expected_batch_id=batch_id,
-            current_task_id=current_task_id,
-            replacement_task_id=replacement_task_id,
-            note=note,
-        )
-        return _json(
-            "ok",
-            batch_id=batch_id,
-            ptt_task_id=replacement_task_id,
-            ptt_reviewed=False,
-            audit=audit,
-        )
-    except Exception as exc:
-        return _json("error", error=str(exc))
+    eng_dir, batch_id, current_task_id, replacement_task_id, note = _rebind_fields(args)
+    pending = state.get_pending_sync(eng_dir)
+    if not pending:
+        raise ValueError("no pending execution batch")
+    _validate_pending_identity(pending, batch_id, current_task_id)
+    _validate_pending_history(eng_dir, pending)
+    _validated_replacement_task(eng_dir, pending, current_task_id, replacement_task_id)
+    audit = state.rebind_pending_sync(
+        eng_dir,
+        expected_batch_id=batch_id,
+        current_task_id=current_task_id,
+        replacement_task_id=replacement_task_id,
+        note=note,
+    )
+    return _json(
+        "ok",
+        batch_id=batch_id,
+        ptt_task_id=replacement_task_id,
+        ptt_reviewed=False,
+        audit=audit,
+    )
 
 
 __all__ = [

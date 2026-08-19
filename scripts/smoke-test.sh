@@ -39,7 +39,7 @@ summary(){ echo ""; echo "──────────────────
 seed_history_fixture(){
   python3 - "$1" "$2" "$3" <<'PY'
 import sys
-from plugins.violin_guard import history
+from plugins.violin_guard.core import history
 history.append_history(sys.argv[1], sys.argv[2], sys.argv[3], 0)
 PY
 }
@@ -580,7 +580,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from plugins.violin_guard import history, service, state
+from plugins.violin_guard import handlers as service
+from plugins.violin_guard.core import history, state
 
 engagement = Path(sys.argv[1])
 command = "nmap -sV 10.129.45.113"

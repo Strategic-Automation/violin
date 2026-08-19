@@ -8,18 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import (
-    bootstrap,
-    history,
-    hypotheses,
-    ptt,
-    state,
-)
-from plugins.violin_guard import (
-    handlers as service,
-)
+from plugins.violin_guard import handlers as service
+from plugins.violin_guard.core import bootstrap, history, hypotheses, ptt, state
 from plugins.violin_guard.core.skill_receipts import SkillViewResult, get_binding
-from plugins.violin_guard.handlers import ptt_handlers
+from plugins.violin_guard.handlers import ptt_review
 from tests.guard.receipt_fixture import bind_active_task
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -152,7 +144,7 @@ def test_review_batch_does_not_replace_execution_skill_binding(tmp_path: Path, m
     _pending_batch(eng)
     original_binding = get_binding(eng, "PT-010")
     monkeypatch.setattr(
-        ptt_handlers,
+        ptt_review,
         "HermesSkillViewAdapter",
         _ReadySkillAdapter,
     )
@@ -191,7 +183,7 @@ def test_review_batch_conflicting_skill_binds_to_binding_skill_not_deadlock(
     original_binding = get_binding(eng, "PT-010")
     assert original_binding["skill"] == "pentest"
     monkeypatch.setattr(
-        ptt_handlers,
+        ptt_review,
         "HermesSkillViewAdapter",
         _ReadySkillAdapter,
     )

@@ -7,29 +7,20 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import (
-    TOOL_DEFINITIONS,
+from plugins.violin_guard import TOOL_DEFINITIONS, register
+from plugins.violin_guard import handlers as service
+from plugins.violin_guard.core import bootstrap, schemas, state
+from plugins.violin_guard.core import history as execution_history
+from plugins.violin_guard.core.skill_receipts import SkillViewResult
+from plugins.violin_guard.gates import command as guard_command
+from plugins.violin_guard.handlers import ptt_handlers
+from plugins.violin_guard.hooks import (
     _on_session_finalize_hook,
     _on_session_reset_hook,
     _post_tool_call_hook,
     _pre_llm_call_hook,
     _pre_tool_call_hook,
-    bootstrap,
-    register,
-    schemas,
-    state,
 )
-from plugins.violin_guard import (
-    command as guard_command,
-)
-from plugins.violin_guard import (
-    handlers as service,
-)
-from plugins.violin_guard import (
-    history as execution_history,
-)
-from plugins.violin_guard.core.skill_receipts import SkillViewResult
-from plugins.violin_guard.handlers import ptt_handlers
 from tests.guard.receipt_fixture import bind_active_task
 
 _SCOPE = """targets:
@@ -639,10 +630,8 @@ def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
     pending_command = pending["commands"][0]["command"]
     assert "duration_ms=" not in pending_command
     assert execution_history.history_contains(eng, pending_command)
-    from plugins.violin_guard.handlers.ptt_handlers import (
-        _validate_pending_history,
-        _validate_review_history,
-    )
+    from plugins.violin_guard.handlers.ptt_rebind import _validate_pending_history
+    from plugins.violin_guard.handlers.ptt_review import _validate_review_history
 
     _validate_review_history(str(eng), pending)
     _validate_pending_history(str(eng), pending)

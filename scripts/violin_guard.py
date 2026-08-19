@@ -13,7 +13,10 @@ _PROFILE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
 
-from plugins.violin_guard import bootstrap, command, findings, handlers, state
+from plugins.violin_guard import handlers
+from plugins.violin_guard.core import bootstrap, findings, state
+from plugins.violin_guard.engine import release
+from plugins.violin_guard.gates import command
 
 
 def _print_result(result) -> int:
@@ -162,24 +165,7 @@ def cmd_eng_root(args: argparse.Namespace) -> int:
 
 
 def cmd_check_release(args) -> int:
-    from plugins.violin_guard import release
-
     return release.main()
-
-
-def cmd_search_exploit(args: argparse.Namespace) -> int:
-    from plugins.violin_guard import adapters
-
-    result = adapters.search_exploit(
-        {
-            "product": args.product,
-            "version": args.version,
-            "service": args.service,
-            "cve": args.cve,
-        }
-    )
-    print(json.dumps(result, indent=2))
-    return 0 if result.get("available") else 1
 
 
 def cmd_target(args: argparse.Namespace) -> int:
@@ -333,14 +319,6 @@ def main() -> int:
     p.add_argument("--target", required=True)
     p.add_argument("--force", action="store_true", help="Overwrite existing artifacts")
     p.set_defaults(func=cmd_generate_closeout)
-
-    # search-exploit
-    p = sub.add_parser("search-exploit", help="Search local ExploitDB (read-only)")
-    p.add_argument("--product", default="")
-    p.add_argument("--version", default="")
-    p.add_argument("--service", default="")
-    p.add_argument("--cve", default="")
-    p.set_defaults(func=cmd_search_exploit)
 
     # target
     p = sub.add_parser("target", help="Resolve in-scope target from scope.yaml")

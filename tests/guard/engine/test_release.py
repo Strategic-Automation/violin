@@ -8,7 +8,8 @@ from pathlib import Path
 
 import yaml
 
-from plugins.violin_guard import release, schemas, state
+from plugins.violin_guard.core import schemas, state
+from plugins.violin_guard.engine import release
 from plugins.violin_guard.engine.release import ReleaseCheckResult, _pytest_basetemp
 
 ROOT = Path(__file__).resolve().parents[3]

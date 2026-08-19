@@ -1,6 +1,6 @@
 """Unit tests verifying framework feedback documentation clarifications in tool schemas."""
 
-from plugins.violin_guard import schemas
+from plugins.violin_guard.core import schemas
 
 
 def test_exec_schema_posix_shell_guidance():

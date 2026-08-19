@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from plugins.violin_guard import ptt
+from plugins.violin_guard.core import ptt
 
 
 def test_sync_ptt_top_checkboxes(tmp_path: Path):

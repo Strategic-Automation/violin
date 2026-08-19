@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from plugins.violin_guard import command
+from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import Phase
 
 _STALE_HYP = """### H-001: Queue service validation

@@ -47,7 +47,6 @@ def _commands_from_file(eng_dir: str, value: str) -> list[str]:
 
 
 @_serialize_errors
-@_serialize_errors
 def handle_heartbeat_done(args: dict, **kwargs):
     state.clear_heartbeat_pending(args["eng_dir"])
     return _json("ok")

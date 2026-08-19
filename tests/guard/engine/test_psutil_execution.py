@@ -7,7 +7,7 @@ import time
 
 import psutil
 
-from plugins.violin_guard import execution
+from plugins.violin_guard.engine import execution
 
 
 def test_terminate_process_tree_with_psutil():

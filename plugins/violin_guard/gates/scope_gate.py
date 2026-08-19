@@ -26,21 +26,26 @@ class ScopeResult(GuardResult):
             print(f"OK: {info}")
 
 
+def load_scope(scope_path: Path) -> dict[str, Any]:
+    """Read a scope mapping or raise a user-facing validation error."""
+    if not scope_path.exists():
+        raise ValueError(f"scope file not found: {scope_path}")
+    try:
+        data = yaml.safe_load(scope_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"scope.yaml parse error: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("scope.yaml root must be a mapping")
+    return data
+
+
 def validate_scope(scope_path: Path) -> ScopeResult:
     """Validate scope.yaml structure and required fields."""
     result = ScopeResult()
-    if not scope_path.exists():
-        result.add_error(f"scope file not found: {scope_path}")
-        return result
-
     try:
-        data = yaml.safe_load(scope_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        result.add_error(f"scope.yaml parse error: {exc}")
-        return result
-
-    if not isinstance(data, dict):
-        result.add_error("scope.yaml root must be a mapping")
+        data = load_scope(scope_path)
+    except ValueError as exc:
+        result.add_error(str(exc))
         return result
 
     # Required sections
@@ -226,6 +231,7 @@ __all__ = [
     "ScopeResult",
     "accepted_action_aliases",
     "check_scope_authorization",
+    "load_scope",
     "map_scope_actions",
     "validate_scope",
 ]

@@ -2,30 +2,27 @@
 
 from __future__ import annotations
 
-import yaml
-
 from ..core import hypotheses, state
 from ..core.targets import scope_hosts
+from ..gates.scope_gate import load_scope
 from .base import _eng_path, _json, _serialize_errors
 
 
-def _scope_hosts(eng_dir: str) -> set[str] | None:
-    """Return the in-scope host set from scope.yaml, or None if no scope file."""
+def _scope_hosts(eng_dir: str, target: str) -> set[str] | None:
+    """Return canonical scope hosts, requiring a valid scope for targeted records."""
     scope_path = _eng_path(eng_dir) / "scope" / "scope.yaml"
     if not scope_path.exists():
+        if target.strip():
+            raise ValueError("targeted hypotheses require a valid scope/scope.yaml")
         return None
-    try:
-        data = yaml.safe_load(scope_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return None
-    return scope_hosts(data) or None
+    return scope_hosts(load_scope(scope_path))
 
 
 @_serialize_errors
 def handle_record_hypothesis(args, **kwargs):
     eng_dir = args["eng_dir"]
     fields = {k: v for k, v in args.items() if k != "eng_dir"}
-    in_scope = _scope_hosts(eng_dir)
+    in_scope = _scope_hosts(eng_dir, str(fields.get("target") or ""))
     with state.workflow_lock(eng_dir):
         requested_id = str(fields.get("id") or "").strip()
         existing = {

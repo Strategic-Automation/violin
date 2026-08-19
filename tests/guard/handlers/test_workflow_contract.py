@@ -6,15 +6,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plugins.violin_guard import bootstrap, command, hypotheses, ptt, state
+from plugins.violin_guard.core import bootstrap, hypotheses, ptt, state
 from plugins.violin_guard.core.phases import Phase
+from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
-from plugins.violin_guard.handlers.ptt_handlers import (
+from plugins.violin_guard.handlers.ptt_gates import (
     _redact_sensitive_note,
-    _start_ptt_task,
     _validate_methodology_gates,
     _validate_phase_exit,
 )
+from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
 
 
 def _scope(tmp_path: Path, targets: str, allowed: str = "recon") -> Path:

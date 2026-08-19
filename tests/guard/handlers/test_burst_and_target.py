@@ -14,17 +14,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from plugins.violin_guard import (  # noqa: E402
-    bootstrap,
-    execution,
-    ptt,  # noqa: E402
-    state,
-)
-from plugins.violin_guard import (
-    handlers as service,
-)
+from plugins.violin_guard import handlers as service  # noqa: E402
 from plugins.violin_guard import handlers as tools  # noqa: E402
+from plugins.violin_guard.core import bootstrap, ptt, state  # noqa: E402
 from plugins.violin_guard.core.targets import resolve_target  # noqa: E402
+from plugins.violin_guard.engine import execution  # noqa: E402
 from plugins.violin_guard.gates.command import CheckResult  # noqa: E402
 from tests.guard.receipt_fixture import bind_active_task  # noqa: E402
 
