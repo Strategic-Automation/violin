@@ -21,7 +21,7 @@ from tests.guard.receipt_fixture import bind_active_task
 
 
 def test_plugin_root_exposes_only_registration_contract() -> None:
-    import plugins.violin_guard as plugin
+    from plugins import violin_guard as plugin
 
     assert plugin.__all__ == ["REGISTERED_TOOLS", "TOOL_DEFINITIONS", "ToolDefinition", "register"]
     assert not hasattr(plugin, "bootstrap")
