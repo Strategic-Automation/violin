@@ -60,8 +60,9 @@ Run an authorized penetration test against example.com.
 - Kali Linux or Parrot OS for the expected security-tool environment
 - Written authorization and an approved scope
 
-The profile declares `tencent/hy3:free` through the Nous provider as its
-default model. Operators can change the model through Hermes configuration.
+Violin does not select a model or provider. Configure those in Hermes. For a
+capable default, use **Qwen3.8 27B** locally or **DeepSeek V4 Flash** through a
+hosted provider.
 
 ## Engagement lifecycle
 

@@ -21,6 +21,12 @@ def test_profile_uses_an_engagement_sized_iteration_budget() -> None:
     assert config["agent"]["max_turns"] >= 350
 
 
+def test_profile_leaves_model_selection_to_hermes() -> None:
+    config = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+
+    assert "model" not in config
+
+
 def test_heartbeat_is_command_based_and_phase_aware() -> None:
     assert state.COMMAND_INTERVAL == 50
     description = schemas.HEARTBEAT_DONE_SCHEMA["description"]

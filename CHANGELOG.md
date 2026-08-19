@@ -11,6 +11,7 @@
 ### Changed
 
 - Removed stale facades, dead helpers, unused telemetry, and the obsolete `search-exploit` CLI path.
+- Removed the profile-level model and provider selection; Hermes now uses the operator's configuration.
 - Simplified guard imports and internal call paths without changing the registered Hermes tool surface.
 - Reworked the README and operator documentation around the current runtime, release gates, and benchmark limits.
 
