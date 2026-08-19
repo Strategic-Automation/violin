@@ -129,7 +129,7 @@ kid = "key:dbuser"
 | **curl** | Manual token manipulation and endpoint testing | Primary tool for sending forged tokens |
 | **python3 (PyJWT)** | `python3 -c "import jwt; jwt.decode(t, key, algorithms=['HS256'])"` | Decode and test via code_execution |
 
-> ⚠️ **jwt_tool flags to avoid:** `-I` (injection/exploit) without explicit authorisation. Stick to read-only analysis flags.
+> ⚠️ **jwt_tool flags to avoid:** `-I` (injection/exploit) without explicit authorization. Stick to read-only analysis flags.
 
 ---
 

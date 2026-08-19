@@ -17,7 +17,7 @@ Authentication Bypass occurs when an application's authentication mechanism can 
 | **Weak Passwords** | Common, guessable, or policy-violating passwords in use | `password123`, `companyname2024`, `123456` |
 | **Parameter Manipulation** | Auth decision is made based on client-supplied parameters | `admin=true`, `isAdmin=1`, `role=admin` |
 | **Session Fixation** | Attacker forces a known session ID on a victim and hijacks the session after they authenticate | Session ID in URL, no regeneration on login |
-| **Brute Force** | Repeated login attempts against authentication endpoints | (Only if explicitly authorised in scope) |
+| **Brute Force** | Repeated login attempts against authentication endpoints | (Only if explicitly authorized in scope) |
 | **Direct Access to Protected Pages** | No authentication check on internal/ admin routes | `GET /admin` returns 200 without login |
 
 ---
@@ -44,7 +44,7 @@ first), try the small default/weak set against that account on the login
 API — `admin:admin`, `admin:password`, `admin:123456`, plus the discovered
 admin email with `password`, `admin`, `123456`, `welcome1`. A handful of
 hand-testable weak pairs is NOT brute force and needs no extra
-authorisation. **Do NOT stop at the first session-establishing response** —
+authorization. **Do NOT stop at the first session-establishing response** —
 enumerate the whole small set and record *every* successful pair, because
 the strongest privilege evidence (an `admin` role grant) may come from a
 later pair even when an earlier pair also logs in. Record each successful
@@ -200,12 +200,12 @@ curl -s -X POST 'http://target.com/rest/2fa/verify' \
 | Tool | Usage | Notes |
 |---|---|---|
 | **curl** | Manual auth bypass testing | Primary tool for all manual testing |
-| **hydra** | `hydra -l admin -P passwords.txt target.com http-post-form "/login:username=^USER^&password=^PASS^:Invalid"` | ⚠️ ONLY if explicitly authorised — may trigger account lockout |
+| **hydra** | `hydra -l admin -P passwords.txt target.com http-post-form "/login:username=^USER^&password=^PASS^:Invalid"` | ⚠️ ONLY if explicitly authorized — may trigger account lockout |
 | **ffuf** | `ffuf -w params.txt -u 'https://target.com/admin?FUZZ=true' -mr '200 OK\|Welcome\|Dashboard'` | Fuzz auth parameters safely |
 | **Burp Suite** | Proxy + Repeater for auth parameter manipulation | Manual intercept and replay |
 | **ffuf (header fuzzing)** | `ffuf -w headers.txt -u 'https://target.com/admin' -H 'FUZZ: true'` | Fuzz auth-related headers |
 
-> ⚠️ **Brute force tools (hydra, medusa, patator) are BLOCKED unless explicitly authorised in writing.**
+> ⚠️ **Brute force tools (hydra, medusa, patator) are BLOCKED unless explicitly authorized in writing.**
 
 ---
 
@@ -245,7 +245,7 @@ curl -b "$ENG_DIR/evidence/exploitation/auth-bypass-session.txt" 'https://target
 ```
 
 **Safe PoC rules:**
-- Never test brute force on production accounts without explicit written authorisation.
+- Never test brute force on production accounts without explicit written authorization.
 - Never lock out accounts — stop after 3–5 failed attempts.
 - Never modify account credentials or create new accounts.
 - Use a test account you control where possible.
@@ -330,8 +330,8 @@ The following are **never** permitted during authorized testing unless explicitl
 
 | Action | Risk |
 |---|---|
-| **Brute force (hydra / medusa / patator) without explicit authorisation** | Account lockout, service disruption, potential legal liability |
-| **Password spraying without explicit authorisation** | Account lockout, cross-account detection |
+| **Brute force (hydra / medusa / patator) without explicit authorization** | Account lockout, service disruption, potential legal liability |
+| **Password spraying without explicit authorization** | Account lockout, cross-account detection |
 | **Creating new user accounts** | Data integrity violation, audit trail contamination |
 | **Modifying existing account credentials** | Legitimate user access disruption |
 | **Account lockout testing** | Denial of service for real users |

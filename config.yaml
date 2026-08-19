@@ -1,5 +1,4 @@
-# Model/provider intentionally omitted: Violin inherits the user's configured
-# Hermes default and does not require a profile-specific provider or API key.
+# Default model for this profile. Operators may override it in Hermes.
 
 model:
   default: tencent/hy3:free

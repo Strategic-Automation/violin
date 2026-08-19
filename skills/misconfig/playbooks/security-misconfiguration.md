@@ -35,7 +35,7 @@ Security misconfiguration covers a wide range of flaws arising from improper sys
 ### Security Headers Audit
 
 ```bash
-# Comprehensive security header check
+# Security header check
 curl -sI "https://target.com" | grep -iE "^(
   content-security-policy|
   strict-transport-security|

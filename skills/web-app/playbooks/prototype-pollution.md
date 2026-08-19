@@ -158,7 +158,7 @@ Object.create(null) / a merge lib that blocks __proto__; reject "__proto__",
 
 ## Stop Conditions
 
-- Pollution leads to a privilege change on a real account → stop, record, request separate authorisation for further proof.
+- Pollution leads to a privilege change on a real account → stop, record, request separate authorization for further proof.
 - A polluting payload appears to enable RCE (e.g. via template/expression eval) → halt immediately and reassess.
 
 ## Blocked Actions

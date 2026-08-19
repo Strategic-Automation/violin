@@ -2,6 +2,11 @@
 
 ## 3.2.0
 
+### Maintenance
+
+- Removed stale package facades, dead helper paths, and local skill-usage telemetry.
+- Aligned operator documentation with the registered tools, package layout, PTT phase behavior, and benchmark verification limits.
+
 ### Core Architecture & Tool Consolidation
 - **11 Core Tools**: Consolidated registered tool surface (17 -> 11 tools) by pruning 6 thin-proxy wrappers (`violin_httpx`, `violin_nuclei`, `violin_ffuf`, `violin_listener`, `violin_search_exploit`, `violin_check_command`) in favor of direct, unified `violin_exec`.
 - **Subpackage Architecture**: Modularized `plugins/violin_guard` into direct subpackages (`core`, `gates`, `engine`, `handlers`) with explicit `__all__` exports and clean dependency isolation.
@@ -132,7 +137,7 @@
 
 ## 1.3.1
 
-- Enforced scope authorisation, exclusions, phase-aligned PTT tasks, and relevant hypotheses at the execution boundary.
+- Enforced scope authorization, exclusions, phase-aligned PTT tasks, and relevant hypotheses at the execution boundary.
 - Made synchronization credits apply to all target-touching commands and bound reviewed batches to their captured PTT task.
 - Serialized guard state transitions, fixed isolated plugin imports, and made release and PowerShell smoke checks fail reliably.
 

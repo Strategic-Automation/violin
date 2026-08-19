@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .pytest-*/
+skills/.usage.json
 .pytest-review-*/
 *.lock
 

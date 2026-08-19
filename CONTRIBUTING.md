@@ -13,7 +13,7 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
 ### Requesting Features
 
 1. Open a feature request issue describing the playbook, vulnerability class, or workflow you'd like added
-2. Explain the use case and how it fits Violin's supervised, authorised testing paradigm
+2. Explain the use case and how it fits Violin's supervised, authorized testing model
 3. Include references to OWASP, PTES, or NIST methodology if applicable
 
 ### Submitting Changes
@@ -31,7 +31,14 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
    - Hermes guard implementation belongs in `plugins/violin_guard/`; `scripts/` contains CLI and smoke helpers
    - A new routed skill requires its own `skills/<name>/SKILL.md` and an update to the pentest orchestrator and README layout
 3. If adding a new playbook, ensure it has `## Evidence`, `## Stop Conditions`, and `## Blocked Actions` sections
-4. Run `python scripts/violin_guard.py check-release` before opening a PR
+4. Run the required verification commands before opening a PR:
+
+   ```bash
+   uv run pytest
+   uv run ruff check .
+   uv run ruff format --check .
+   uv run python scripts/violin_guard.py check-release
+   ```
 5. Open a pull request with a clear description of the change
 
 ### Playbook Standards
@@ -47,10 +54,14 @@ All vulnerability-class playbooks must:
 
 ### Code Style
 
-- Python: `ruff`-compatible, type hints where practical
+- Python: Ruff-formatted, Pydantic v2 models for public tool schemas, and type
+  hints where they clarify a contract
 - Shell: `bash` with `set -euo pipefail`, POSIX-compatible where possible
 - Markdown: standard GFM, 80-char soft wrap for prose
 - YAML: valid, safely parseable YAML; preserve the existing schema's key style (for example `rules_of_engagement` and `allowed_actions`)
+- Documentation: describe behavior enforced by the current code; avoid
+  marketing claims, repeated warnings, speculative features, and stale command
+  examples
 
 ## Code of Conduct
 

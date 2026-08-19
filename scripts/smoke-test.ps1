@@ -29,12 +29,10 @@ try {
     Set-Content -LiteralPath $scopePath -Value $scope -Encoding UTF8
     Invoke-Guard @("validate-scope", "--scope", $scopePath) | Out-Null
 
-    Invoke-Guard @(
-        "record-ptt", "--eng-dir", $engagement, "--id", "PT-001", "--status", "[~]",
-        "--note", "Windows workflow smoke", "--skill", "pentest", "--technique", "recon"
-    ) | Out-Null
+    Invoke-Guard @("check-bootstrap", "--eng-dir", $engagement) | Out-Null
+    Invoke-Guard @("target", "--eng-dir", $engagement, "--field", "host") | Out-Null
 
-    Write-Output "PASS: Windows workflow smoke completed through PTT preparation."
+    Write-Output "PASS: Windows administrative smoke completed bootstrap, scope, and target resolution checks."
 }
 finally {
     if (Test-Path -LiteralPath $smokeRoot) {
