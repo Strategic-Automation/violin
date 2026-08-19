@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.2.1
+
+### Fixed
+
+- Prevented phase validation failures from mutating PTT state.
+- Made targeted hypothesis validation fail closed when scope is missing or malformed.
+- Repaired Windows smoke coverage for bootstrap, scope, and target resolution.
+
+### Changed
+
+- Removed stale facades, dead helpers, unused telemetry, and the obsolete `search-exploit` CLI path.
+- Simplified guard imports and internal call paths without changing the registered Hermes tool surface.
+- Reworked the README and operator documentation around the current runtime, release gates, and benchmark limits.
+
 ## 3.2.0
 
 ### Maintenance
