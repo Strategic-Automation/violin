@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from plugins.violin_guard import schemas
+from plugins.violin_guard.core import schemas
 
 
 def test_exec_args_model_timeout_bounds():

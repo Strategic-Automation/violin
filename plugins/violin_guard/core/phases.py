@@ -28,32 +28,7 @@ __all__ = [
     "normalize_phase",
     "requires_hypothesis",
     "suppresses_heartbeat",
-    "can_advance_phase",
 ]
-
-# Ordered phase progression for auto-advance logic
-_PHASE_ORDER = [
-    Phase.SCOPING,
-    Phase.RECON,
-    Phase.VULN_RESEARCH,
-    Phase.EXPLOITATION,
-    Phase.POST_EXPLOITATION,
-    Phase.PRIVESC,
-    Phase.FLAGS,
-    Phase.REPORTING,
-    Phase.RETROSPECTIVE,
-]
-_PHASE_INDEX = {p: i for i, p in enumerate(_PHASE_ORDER)}
-
-
-def can_advance_phase(current_phase: str, requested_phase: str) -> bool:
-    """Whether the requested phase is a forward transition from the current phase."""
-    try:
-        current = normalize_phase(current_phase)
-        requested = normalize_phase(requested_phase)
-    except KeyError:
-        return False
-    return _PHASE_INDEX.get(requested, -1) > _PHASE_INDEX.get(current, -1)
 
 
 # Unified lookup: canonical enum names + aliases, all normalized to

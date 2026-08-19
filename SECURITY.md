@@ -4,11 +4,11 @@
 
 | Version | Supported |
 |---------|-----------|
-| 3.x     | ✅ Yes |
+| 3.x     | Yes |
 
 ## Reporting a Vulnerability
 
-Violin is a **defensive security assessment profile** — it helps authorised testers find and document vulnerabilities in systems they have permission to test.
+Violin is a defensive security assessment profile for authorized testing.
 
 If you discover a security issue in Violin itself (not a target being tested with Violin):
 
@@ -30,7 +30,7 @@ This policy covers:
 
 What this policy does NOT cover:
 
-- Vulnerabilities discovered **by Violin** during authorised testing (those go in the engagement report)
+- Vulnerabilities discovered by Violin during authorized testing (those belong in the engagement report)
 - Third-party tools (nmap, sqlmap, etc.) that Violin invokes — report those to their respective projects
 - The Hermes Agent platform itself — follow the [Hermes security policy](https://github.com/NousResearch/hermes-agent/security)
 

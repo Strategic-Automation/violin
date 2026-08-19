@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from plugins.violin_guard import bootstrap, execution, ptt, state
 from plugins.violin_guard import handlers as service
+from plugins.violin_guard.core import bootstrap, ptt, state
+from plugins.violin_guard.engine import execution
 from tests.guard.receipt_fixture import bind_active_task
 
 

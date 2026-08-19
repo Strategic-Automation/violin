@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plugins.violin_guard import state
+from plugins.violin_guard.core import state
 
 
 def _review(eng, **changes):

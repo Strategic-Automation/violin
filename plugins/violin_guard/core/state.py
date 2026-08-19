@@ -398,22 +398,6 @@ def rebind_pending_sync(
     return mutate_json(path, rebind)
 
 
-def mark_ptt_reviewed(eng_dir: str | Path, task_id: str, note: str) -> None:
-    path = _sync_path(eng_dir)
-
-    def mark(data: dict[str, Any]) -> None:
-        pending = data.get("pending")
-        if not pending:
-            raise ValueError("no pending execution batch")
-        pending["ptt_reviewed"] = True
-        pending["ptt_task_id"] = task_id
-        pending["ptt_note"] = note.strip()
-        pending["ptt_reviewed_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-        data["pending"] = pending
-
-    mutate_json(path, mark)
-
-
 def record_semantic_review(
     eng_dir: str | Path,
     *,

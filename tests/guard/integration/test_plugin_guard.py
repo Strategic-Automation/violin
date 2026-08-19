@@ -38,19 +38,11 @@ engagement:
 """
 
 
-from plugins.violin_guard import (
-    bootstrap,
-    command,
-    execution,
-    history,
-    hypotheses,
-    ptt,
-    state,
-)
-from plugins.violin_guard import (
-    handlers as TOOLS,
-)
+from plugins.violin_guard import handlers as TOOLS
+from plugins.violin_guard.core import bootstrap, history, hypotheses, ptt, state
 from plugins.violin_guard.core.targets import extract_target_candidates
+from plugins.violin_guard.engine import execution
+from plugins.violin_guard.gates import command
 from plugins.violin_guard.handlers import ptt_handlers
 
 
@@ -870,7 +862,7 @@ def test_exec_auto_records_history_but_requires_explicit_ptt_review(monkeypatch,
 
     # The guard captures the batch ID from pending state and appends its marker
     # to the PTT note; operators need not copy opaque internal IDs.
-    from plugins.violin_guard import state as _state
+    from plugins.violin_guard.core import state as _state
 
     pending = _state.get_pending_sync(str(eng))
     assert pending, "a batch must be pending before review"
@@ -991,7 +983,7 @@ def test_message_ticks_are_diagnostic_and_do_not_trigger_heartbeat(monkeypatch, 
     eng = _init_e2e(tmp_path, skill_file)
 
     # Build a session object via pre_llm_call (which increments message tick)
-    from plugins.violin_guard import _pre_llm_call_hook
+    from plugins.violin_guard.hooks import _pre_llm_call_hook
 
     for _ in range(100):
         _pre_llm_call_hook(session_id="ts", eng_dir=str(eng), phase="recon")

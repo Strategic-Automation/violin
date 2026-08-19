@@ -1,6 +1,7 @@
 """Unit tests for bashlex AST parsing and terminal policy classification."""
 
-from plugins.violin_guard import bash_ast, terminal_policy
+from plugins.violin_guard.core import bash_ast
+from plugins.violin_guard.gates import terminal_policy
 
 
 def test_parse_bash_segments_simple():

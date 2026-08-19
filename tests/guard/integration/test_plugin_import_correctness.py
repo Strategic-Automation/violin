@@ -13,16 +13,18 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import (
-    bootstrap,
-    command,
-    execution,
-    ptt,
-)
-from plugins.violin_guard import (
-    handlers as TOOLS,
-)
+from plugins.violin_guard import handlers as TOOLS
+from plugins.violin_guard.core import bootstrap, ptt
+from plugins.violin_guard.engine import execution
+from plugins.violin_guard.gates import command
 from tests.guard.receipt_fixture import bind_active_task
+
+
+def test_plugin_root_exposes_only_registration_contract() -> None:
+    import plugins.violin_guard as plugin
+
+    assert plugin.__all__ == ["REGISTERED_TOOLS", "TOOL_DEFINITIONS", "ToolDefinition", "register"]
+    assert not hasattr(plugin, "bootstrap")
 
 
 def _init_e2e(tmp_path, skill_file, allowed=("recon", "vuln-research", "exploitation")):

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import execution
+from plugins.violin_guard.engine import execution
 
 
 def _engagement(tmp_path: Path) -> Path:

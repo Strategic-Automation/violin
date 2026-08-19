@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from pathlib import Path
 from typing import Any
 
@@ -22,28 +21,14 @@ from .base import (
     _serialize_errors,
 )
 from .ptt_gates import (
-    _find_unlinked_validated_hypotheses,
     _redact_sensitive_note,
-    _validate_disposition_entry,
-    _validate_methodology_gates,
     _validate_phase_exit,
     _with_skill_token,
 )
 from .ptt_rebind import (
-    _rebind_fields,
-    _validate_pending_history,
-    _validate_pending_identity,
-    _validated_replacement_task,
     handle_rebind_pending_batch,
 )
 from .ptt_review import (
-    _execute_batch_review,
-    _handle_review_batch_skill_reservation,
-    _validate_review_batch,
-    _validate_review_finding,
-    _validate_review_history,
-    _validate_review_identity,
-    _validate_review_ptt_state,
     handle_review_batch,
 )
 
@@ -58,11 +43,8 @@ def _start_ptt_task(
 ) -> str:
     """Arm one untouched, phase-bound task before the first target command."""
     if status != "[~]":
-        raise ValueError(
-            f"invalid status {status!r}; starting a task via violin_record_ptt requires status='[~]' "
-            "(use bracket tokens '[~]', '[x]', '[-]', '[!]', not English status words like 'in_progress')"
-        )
-    note = _redact_sensitive_note(note)
+        raise ValueError(f"invalid status {status!r}; starting a task requires status='[~]'")
+
     selected = next((item for item in tasks if item.id == task_id), None)
     if selected is None:
         raise ValueError(f"PTT task {task_id!r} not found")
@@ -86,14 +68,6 @@ def _start_ptt_task(
     return _json("ok", task_id=task_id, phase=phase.value, task_started=True)
 
 
-def _task_row_contains(path: Path, task_id: str, marker: str) -> bool:
-    for line in path.read_text(encoding="utf-8").splitlines():
-        match = re.match(r"^\|\s*(PT-[\w-]+)\s*\|", line.strip())
-        if match and match.group(1) == task_id:
-            return marker in line
-    return False
-
-
 def _validate_record_ptt_inputs(
     args: dict[str, Any], doc: list[ptt.PttTask], pending: dict[str, Any] | None
 ):
@@ -104,15 +78,9 @@ def _validate_record_ptt_inputs(
     technique = str(args.get("technique") or "").strip()
 
     if not task or not note:
-        raise ValueError(
-            "task id and non-empty lifecycle note required; use id=PT-XXX, status='[~]', "
-            "skill=<routed skill>, technique=<concrete technique>, and note=<what changed>"
-        )
+        raise ValueError("task id and non-empty lifecycle note required")
     if not skill or not technique:
-        raise ValueError(
-            "skill and technique are required before a PTT update; provide the active routed "
-            "skill and a concrete technique (for example technique='route-enumeration')"
-        )
+        raise ValueError("skill and technique are required before a PTT update")
     if pending:
         raise ValueError(
             "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
@@ -133,12 +101,12 @@ def _validate_record_ptt_inputs(
     vulnerability_class = ""
     candidate_source = ""
     if hypothesis_id:
-        normalized = hypothesis_id.removeprefix("H-").lstrip("0") or "0"
+        normalized = hypothesis_id.removeprefix("H-").zfill(3)
         matched = next(
             (
                 hyp
                 for hyp in hypotheses.parse_hypotheses(_eng_path(args["eng_dir"]) / "hypotheses.md")
-                if hyp.id.lstrip("0") == normalized
+                if hyp.id == normalized
             ),
             None,
         )
@@ -207,7 +175,9 @@ def _apply_ptt_task_transition(
     """Apply PTT state mutations and return final JSON response."""
     note = _redact_sensitive_note(note)
     ptt_file = _eng_path(eng_dir) / "state" / "ptt.md"
-    if not any(item.id == task for item in doc):
+
+    existing = next((item for item in doc if item.id == task), None)
+    if not existing:
         created = ptt.create_task(
             ptt_file,
             task,
@@ -215,29 +185,25 @@ def _apply_ptt_task_transition(
             raw_phase or "RECON",
             note,
         )
-        doc = ptt.parse_ptt(ptt_file)
         if status == "[ ]":
             return _json("ok", task_id=created.id, task_created=True)
-    existing = next((item for item in doc if item.id == task), None)
-    if existing and existing.status == "[~]" and status == "[~]":
-        active = ptt.find_active_task(doc)
-        if active and active.id != task:
-            resolved_dir = _eng_path(eng_dir)
-            if state.has_pending_sync(resolved_dir):
-                raise ValueError(
-                    "an active PTT task already exists; review its pending batch first"
-                )
-            _validate_phase_exit(resolved_dir, active.id, "[x]")
-            superseded_note = f"{active.note} [superseded-by:{task}]".strip()
-            ptt.update_task(ptt_file, active.id, "[x]", superseded_note)
+        doc = ptt.parse_ptt(ptt_file)
+        existing = next((item for item in doc if item.id == task), None)
+
+    # Refreshing the active task
+    if existing.status == "[~]" and status == "[~]":
         ptt.update_task(ptt_file, task, "[~]", note)
         return _json("ok", task_id=task, task_refreshed=True, binding=binding)
-    if existing and status in {"[x]", "[-]"}:
+
+    # Closing an active task outside of a batch
+    if status in {"[x]", "[-]"}:
         if existing.status != "[~]":
             raise ValueError("only the active [~] task may be closed outside a batch")
         _validate_phase_exit(_eng_path(eng_dir), task, status)
         ptt.update_task(ptt_file, task, status, note)
         return _json("ok", task_id=task, task_closed=True)
+
+    # Starting a task
     return _start_ptt_task(ptt_file, doc, task, status, note, eng_dir=eng_dir)
 
 
@@ -290,28 +256,6 @@ def handle_record_ptt(args: dict[str, Any], **kwargs: Any) -> str:
 
 
 __all__ = [
-    "_apply_ptt_task_transition",
-    "_execute_batch_review",
-    "_find_unlinked_validated_hypotheses",
-    "_handle_review_batch_skill_reservation",
-    "_prepare_record_ptt_delivery",
-    "_rebind_fields",
-    "_redact_sensitive_note",
-    "_start_ptt_task",
-    "_task_row_contains",
-    "_validate_disposition_entry",
-    "_validate_methodology_gates",
-    "_validate_pending_history",
-    "_validate_pending_identity",
-    "_validate_phase_exit",
-    "_validate_record_ptt_inputs",
-    "_validate_review_batch",
-    "_validate_review_finding",
-    "_validate_review_history",
-    "_validate_review_identity",
-    "_validate_review_ptt_state",
-    "_validated_replacement_task",
-    "_with_skill_token",
     "handle_rebind_pending_batch",
     "handle_record_ptt",
     "handle_review_batch",

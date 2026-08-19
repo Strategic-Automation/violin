@@ -1,8 +1,8 @@
 import json
 from pathlib import Path
 
-from plugins.violin_guard import bootstrap, history, state
 from plugins.violin_guard import handlers as service
+from plugins.violin_guard.core import bootstrap, history, state
 from plugins.violin_guard.core.skill_receipts import (
     SkillViewResult,
     bind_task,

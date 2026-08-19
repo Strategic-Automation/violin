@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from plugins.violin_guard import bootstrap, history, state
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.handlers.ptt_handlers import _redact_sensitive_note
+from plugins.violin_guard.core import bootstrap, history, state
+from plugins.violin_guard.handlers.ptt_gates import _redact_sensitive_note
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -53,7 +53,10 @@ def test_record_ptt_refuses_to_reconcile_a_pending_batch(tmp_path: Path) -> None
 def test_appending_work_invalidates_an_earlier_review(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
     state.mark_pending_sync(eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010")
-    state.mark_ptt_reviewed(eng, "PT-010", "review")
+    sync_path = eng / "state" / "sync.json"
+    sync_data = state.read_json(sync_path)
+    sync_data["pending"]["ptt_reviewed"] = True
+    state.atomic_json(sync_path, sync_data)
     state.mark_pending_sync(eng, "nmap -p 443 10.10.10.10", "RECON", "PT-010")
     assert state.get_pending_sync(eng)["ptt_reviewed"] is False
 

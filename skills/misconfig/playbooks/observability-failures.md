@@ -97,7 +97,7 @@ curl -s "https://target.com/api/Products/invalid" 2>&1 | grep -oE "(Error:|at |S
 
 **Safe PoC rules:**
 - Do NOT download or exfiltrate entire log files — prove access with headers/partial content
-- Do NOT use stack trace information to escalate further without authorisation
+- Do NOT use stack trace information to escalate further without authorization
 - Report metrics exposure without abusing the data
 
 ---

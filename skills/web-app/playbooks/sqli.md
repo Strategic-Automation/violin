@@ -105,12 +105,12 @@ print(f"Extracted: {extracted}")
 
 ### Virtual hosts without `/etc/hosts`
 
-When an authorised vhost does not resolve locally, connect to the in-scope IP and
+When an authorized vhost does not resolve locally, connect to the in-scope IP and
 send the vhost in the request instead of editing host networking:
 
 ```bash
 sqlmap -u 'http://<in-scope-ip>/<path>?<parameter>=<value>' \
-  -H 'Host: <authorised-vhost>' --batch --risk=1 --level=1
+  -H 'Host: <authorized-vhost>' --batch --risk=1 --level=1
 ```
 
 Save the captured request or exact working invocation as exploitation evidence.

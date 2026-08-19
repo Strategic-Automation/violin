@@ -1,7 +1,9 @@
 """Unit tests verifying core guard bug fixes and state hardening."""
 
-from plugins.violin_guard import _on_session_reset_hook, command, state
+from plugins.violin_guard.core import state
 from plugins.violin_guard.core.phases import Phase
+from plugins.violin_guard.gates import command
+from plugins.violin_guard.hooks import _on_session_reset_hook
 
 
 def test_hypothesis_zero_parsing(tmp_path):

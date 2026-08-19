@@ -8,7 +8,8 @@ from pathlib import Path
 
 import yaml
 
-from plugins.violin_guard import release, schemas, state
+from plugins.violin_guard.core import schemas, state
+from plugins.violin_guard.engine import release
 from plugins.violin_guard.engine.release import ReleaseCheckResult, _pytest_basetemp
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -18,6 +19,12 @@ def test_profile_uses_an_engagement_sized_iteration_budget() -> None:
     config = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
 
     assert config["agent"]["max_turns"] >= 350
+
+
+def test_profile_leaves_model_selection_to_hermes() -> None:
+    config = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+
+    assert "model" not in config
 
 
 def test_heartbeat_is_command_based_and_phase_aware() -> None:
@@ -55,7 +62,7 @@ def test_all_release_version_surfaces_match_exact_semver() -> None:
         str(plugin["version"]),
         changelog.group(1) if changelog else "",
     }
-    assert versions == {"3.2.0"}
+    assert versions == {"3.2.1"}
     assert any(
         str(dependency).lower().startswith("pyyaml")
         for dependency in project["project"]["dependencies"]

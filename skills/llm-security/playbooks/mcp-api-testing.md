@@ -132,7 +132,7 @@ partial output events may leak more detail than the final JSON-RPC result.
 Proof-of-concept rules:
 - Confirm the endpoint is a legitimate MCP/JSON-RPC surface before probing blindly.
 - Never use an exposed credential/API key obtained via MCP to access external services.
-- Read-only evidence preferred; any write/execute requires separate explicit authorisation.
+- Read-only evidence preferred; any write/execute requires separate explicit authorization.
 
 ---
 
@@ -193,7 +193,7 @@ and gate destructive/admin tools behind per-call authorization.
 ## Stop Conditions
 
 - A tool returns live production secrets/credentials → record redacted proof, stop active use.
-- An exposed tool appears to allow RCE or lateral movement → halt, request separate authorisation.
+- An exposed tool appears to allow RCE or lateral movement → halt, request separate authorization.
 - Session id enumeration allows reading another client's state → stop, record.
 
 ## Blocked Actions

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +27,7 @@ class ToolDefinition:
     name: str
     model: type[BaseModel]
     schema: dict[str, Any]
-    handler: Any
+    handler: Callable[..., str]
     emoji: str
 
 
@@ -109,10 +110,10 @@ TOOL_DEFINITIONS = (
 REGISTERED_TOOLS = [definition.name for definition in TOOL_DEFINITIONS]
 
 
-def _validated_handler(definition: ToolDefinition) -> Any:
+def _validated_handler(definition: ToolDefinition) -> Callable[..., str]:
     """Validate the raw Hermes payload before entering a public handler."""
 
-    def invoke(raw_args: Any = None, **kwargs: Any) -> Any:
+    def invoke(raw_args: Any = None, **kwargs: Any) -> str:
         try:
             validated = schemas.validate_args(definition.model, raw_args, strict=True)
             values = validated.model_dump(

@@ -5,21 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from plugins.violin_guard import (
-    bootstrap,
-    command,
-    execution,
-    hypotheses,
-    ptt,
-    state,
-)
-from plugins.violin_guard import (
-    handlers as service,
-)
+from plugins.violin_guard import handlers as service
+from plugins.violin_guard.core import bootstrap, hypotheses, ptt, state
 from plugins.violin_guard.core.history import append_history, check_history_staleness
 from plugins.violin_guard.core.phases import Phase
 from plugins.violin_guard.core.skill_receipts import SkillViewResult
 from plugins.violin_guard.core.targets import check_scope_targets
+from plugins.violin_guard.engine import execution
+from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import (
     CheckCommandArgs,
     CheckResult,
@@ -55,6 +48,67 @@ def test_command_defaults_scope_and_single_skill_session_from_engagement(tmp_pat
     assert not any("session_id is required" in error for error in result.errors)
     assert not any("scope file not found" in error for error in result.errors)
     assert any("sync credit remaining" in info for info in result.infos)
+
+
+def test_phase_mismatch_never_rewrites_the_ptt(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    ptt_path = eng / "state" / "ptt.md"
+    before = ptt_path.read_bytes()
+
+    result = command.check_command(
+        CheckCommandArgs(
+            command="nmap -sV 10.10.10.10",
+            phase="EXPLOITATION",
+            eng_dir=str(eng),
+            target="10.10.10.10",
+        )
+    )
+
+    mismatch = next(error for error in result.errors if "use violin_record_ptt" in error)
+    assert "start a different task already under that phase" in mismatch
+    assert "new id, title, and phase" in mismatch
+    assert "transition the active task" not in mismatch
+    assert ptt_path.read_bytes() == before
+
+
+def test_targeted_hypothesis_requires_a_parseable_scope(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    scope_path = eng / "scope" / "scope.yaml"
+    board = eng / "hypotheses.md"
+    before = board.read_bytes()
+    scope_path.write_text("targets: [unterminated", encoding="utf-8")
+
+    result = json.loads(
+        service.handle_record_hypothesis(
+            {
+                "eng_dir": str(eng),
+                "id": "001",
+                "title": "Out-of-scope host",
+                "target": "10.10.10.99",
+            }
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "scope.yaml parse error" in result["error"]
+    assert board.read_bytes() == before
+
+
+def test_missing_scope_blocks_targeted_but_not_untargeted_hypotheses(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    (eng / "scope" / "scope.yaml").unlink()
+
+    blocked = json.loads(
+        service.handle_record_hypothesis(
+            {"eng_dir": str(eng), "id": "001", "title": "Targeted", "target": "10.10.10.99"}
+        )
+    )
+    allowed = json.loads(
+        service.handle_record_hypothesis({"eng_dir": str(eng), "id": "002", "title": "Untargeted"})
+    )
+
+    assert blocked["status"] == "error"
+    assert allowed["status"] == "ok"
 
 
 def test_wildcard_scope_allows_subdomains(tmp_path: Path) -> None:

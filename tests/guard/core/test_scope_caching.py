@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from plugins.violin_guard import targets
+from plugins.violin_guard.core import targets
 
 
 def _write_scope(path: Path, payload: str) -> None:

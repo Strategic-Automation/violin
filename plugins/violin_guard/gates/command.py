@@ -157,21 +157,11 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
         active_task = ptt.find_active_task(ptt_validation.tasks)
         if active_task and not ptt.task_matches_phase(active_task, phase):
             task_phase_display = active_task.phase or "RECON (unspecified '## Phase:' header)"
-            # Auto-advance the task to the requested phase if it's a forward transition.
-            # This prevents the common phase-drift block where PT-104 sits in REPORTING
-            # while the agent needs EXPLOITATION. The phase headings are derived from
-            # the task table position, so we move the task row to the new phase table.
-            if ptt.can_advance_phase(active_task.phase, phase.value):
-                ptt.advance_task_phase(eng_dir / "state" / "ptt.md", active_task.id, phase.value)
-                # Re-validate after the phase advance
-                ptt_validation = ptt.validate_ptt(ptt.parse_ptt(ptt_path))
-                active_task = ptt.find_active_task(ptt_validation.tasks)
-            else:
-                result.add_error(
-                    f"active PTT task {active_task.id} phase is '{task_phase_display}' (heading-derived from '## Phase:' section in state/ptt.md); "
-                    f"requested phase is '{phase.value}'. Next action: call violin_status, then update state/ptt.md so task {active_task.id} sits under a '## Phase: {phase.value}' header "
-                    f"or pass phase='{phase.value}' when updating task status via violin_record_ptt."
-                )
+            result.add_error(
+                f"active PTT task {active_task.id} phase is '{task_phase_display}' (heading-derived from '## Phase:' section in state/ptt.md); "
+                f"requested phase is '{phase.value}'. Next action: use violin_record_ptt to start a different task already under that phase, "
+                "or create one with a new id, title, and phase before executing this command."
+            )
         if active_task and active_task.note:
             hyp_match = re.search(r"\bH-\d+\b", active_task.note, re.IGNORECASE)
             if hyp_match:

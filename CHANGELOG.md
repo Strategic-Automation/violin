@@ -1,6 +1,26 @@
 # Changelog
 
+## 3.2.1
+
+### Fixed
+
+- Prevented phase validation failures from mutating PTT state.
+- Made targeted hypothesis validation fail closed when scope is missing or malformed.
+- Repaired Windows smoke coverage for bootstrap, scope, and target resolution.
+
+### Changed
+
+- Removed stale facades, dead helpers, unused telemetry, and the obsolete `search-exploit` CLI path.
+- Removed the profile-level model and provider selection; Hermes now uses the operator's configuration.
+- Simplified guard imports and internal call paths without changing the registered Hermes tool surface.
+- Reworked the README and operator documentation around the current runtime, release gates, and benchmark limits.
+
 ## 3.2.0
+
+### Maintenance
+
+- Removed stale package facades, dead helper paths, and local skill-usage telemetry.
+- Aligned operator documentation with the registered tools, package layout, PTT phase behavior, and benchmark verification limits.
 
 ### Core Architecture & Tool Consolidation
 - **11 Core Tools**: Consolidated registered tool surface (17 -> 11 tools) by pruning 6 thin-proxy wrappers (`violin_httpx`, `violin_nuclei`, `violin_ffuf`, `violin_listener`, `violin_search_exploit`, `violin_check_command`) in favor of direct, unified `violin_exec`.
@@ -132,7 +152,7 @@
 
 ## 1.3.1
 
-- Enforced scope authorisation, exclusions, phase-aligned PTT tasks, and relevant hypotheses at the execution boundary.
+- Enforced scope authorization, exclusions, phase-aligned PTT tasks, and relevant hypotheses at the execution boundary.
 - Made synchronization credits apply to all target-touching commands and bound reviewed batches to their captured PTT task.
 - Serialized guard state transitions, fixed isolated plugin imports, and made release and PowerShell smoke checks fail reliably.
 

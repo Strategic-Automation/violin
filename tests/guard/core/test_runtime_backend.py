@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard import execution, runtime_backend
+from plugins.violin_guard.core import runtime_backend
 from plugins.violin_guard.core.runtime_backend import resolve_backend
+from plugins.violin_guard.engine import execution
 
 
 def _reset_backend_cache() -> None:

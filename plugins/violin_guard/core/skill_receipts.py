@@ -1,9 +1,4 @@
-"""Locked, receipt-backed skill delivery state.
-
-The module is deliberately latent in v3-02: callers may prepare and bind
-deliveries, but existing execution guards do not consume the receipts until
-the command-gate migration branch.
-"""
+"""Locked, receipt-backed skill delivery state."""
 
 from __future__ import annotations
 
