@@ -32,7 +32,11 @@ uv run python scripts/violin_guard.py check-release # Release gate check
 
 ## 4. Git & Branching Strategy
 - **Branches:** `codex/<topic>` or `dev`
-- **Flow:** `codex/<topic>` ──► `dev` ──► PR to `master` (`master` protected by `GH013`).
+- **Flow:** `codex/<topic>` ──► `dev` ──► `master`.
+- **Feature PRs:** Squash-merge topic branches into `dev`, then delete the topic branch.
+- **Release PRs:** Merge `dev` into `master` with **Create a merge commit**. Never squash-merge or rebase-merge a release PR; `dev` must remain an ancestor of `master`.
+- **Post-Release Sync:** `.github/workflows/sync-dev-after-release.yml` fast-forwards `dev` to the new `master` commit after every release merge. It must fail instead of force-pushing when the branches have diverged.
+- **Recovery:** If post-release sync fails, inspect the graph and merge `master` back into `dev`; never rewrite a shared protected branch to hide divergence.
 - **Commit Conventions:** Follow Conventional Commits (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`). Use imperative mood, lowercase types, and no trailing periods. Ensure clean rebasing without duplicate dual-author cherry-picks.
 
 ## 5. Hard Boundaries
