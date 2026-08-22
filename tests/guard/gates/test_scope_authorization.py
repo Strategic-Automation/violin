@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from plugins.violin_guard.core.targets import (
     check_scope_targets,
     extract_target_candidates,
@@ -101,6 +103,107 @@ def test_explicit_target_keeps_unknown_bare_hostnames_reviewable(
 
     blocked = check_scope_targets(scope, "nmap 10.10.10.99", primary_target="10.10.10.10")
     assert blocked.errors
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl https://outside.example/status",
+        "curl --resolve outside.example:443:10.10.10.10 https://10.10.10.10/status",
+        "curl -H 'Host: outside.example' http://10.10.10.10/status",
+        "scanner --vhost outside.example http://10.10.10.10/status",
+    ],
+)
+def test_unknown_hostname_sources_receive_actionable_diagnostics(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    scope = tmp_path / "scope.yaml"
+    _write_scope(scope)
+
+    result = check_scope_targets(scope, command)
+
+    assert not result.errors
+    diagnostic = next(warning for warning in result.warnings if "outside.example" in warning)
+    canonical_scope = scope.resolve()
+    assert str(canonical_scope) in diagnostic
+    assert "targets.hostnames" in diagnostic
+    assert "targets.in_scope_urls" in diagnostic
+    assert (
+        f'uv run python scripts/violin_guard.py validate-scope --scope "{canonical_scope}"'
+    ) in diagnostic
+    assert "confirm authorization before editing scope.yaml" in diagnostic.lower()
+    assert "never edits scope.yaml automatically" in diagnostic
+
+
+def test_scoped_and_wildcard_hostnames_do_not_warn(tmp_path: Path) -> None:
+    scope = tmp_path / "scope.yaml"
+    scope.write_text(
+        """targets:
+  ip_addresses: [192.0.2.20]
+  hostnames: [scoped.example, '*.wild.example']
+  in_scope_urls: [https://url-scoped.example/app]
+exclusions:
+  hostnames: [excluded.example]
+""",
+        encoding="utf-8",
+    )
+
+    for command in (
+        "curl https://scoped.example/status",
+        "curl https://url-scoped.example/status",
+        "curl https://api.wild.example/status",
+        "curl --resolve scoped.example:443:192.0.2.20 https://scoped.example/status",
+        "curl -H 'Host: scoped.example' http://192.0.2.20/status",
+    ):
+        result = check_scope_targets(scope, command)
+        assert not result.errors, command
+        assert not result.warnings, command
+
+    wildcard_apex = check_scope_targets(scope, "curl https://wild.example/status")
+    assert any("wild.example" in warning for warning in wildcard_apex.warnings)
+
+
+def test_excluded_hostname_and_unauthorized_ip_remain_hard_blocks(tmp_path: Path) -> None:
+    scope = tmp_path / "scope.yaml"
+    _write_scope(scope)
+
+    excluded = check_scope_targets(scope, "curl https://excluded.example/status")
+    unauthorized_ip = check_scope_targets(scope, "curl http://10.10.10.98/status")
+    unauthorized_resolve_ip = check_scope_targets(
+        scope,
+        "curl --resolve allowed.example:443:10.10.10.98 https://allowed.example/status",
+    )
+
+    assert any("excluded target excluded.example" in error for error in excluded.errors)
+    assert any("out-of-scope target 10.10.10.98" in error for error in unauthorized_ip.errors)
+    assert any(
+        "out-of-scope target 10.10.10.98" in error for error in unauthorized_resolve_ip.errors
+    )
+
+
+@pytest.mark.parametrize(
+    "header_argument",
+    [
+        "-H 'Referer: https://outside.example/source'",
+        "-H @headers.txt",
+        "--header @headers.txt",
+    ],
+)
+def test_non_host_header_values_remain_non_targets(
+    tmp_path: Path,
+    header_argument: str,
+) -> None:
+    scope = tmp_path / "scope.yaml"
+    _write_scope(scope)
+
+    result = check_scope_targets(
+        scope,
+        f"curl {header_argument} http://10.10.10.10/status",
+    )
+
+    assert not result.errors
+    assert not result.warnings
 
 
 def test_legacy_descriptive_target_normalizes_to_host() -> None:

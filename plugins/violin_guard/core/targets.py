@@ -31,6 +31,13 @@ _PATH_VALUE_FLAGS = {
     "--output",
     "--output-dir",
 }
+_TARGET_VALUE_FLAGS = {
+    "--resolve": "resolve",
+    "-H": "header",
+    "--header": "header",
+    "--vhost": "hostname",
+    "--virtual-host": "hostname",
+}
 _REDIRECTION_OPERATORS = {">", ">>", "2>", "2>>", "&>"}
 _DEV_NETWORK_PREFIXES = ("/dev/tcp/", "/dev/udp/")
 _COMMON_FILE_SUFFIXES = {
@@ -85,8 +92,27 @@ class TargetCheckResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def _unknown_hostname_diagnostic(
+    hostname: str,
+    scope_path: Path,
+    *,
+    subject: str,
+) -> str:
+    return (
+        f"{subject} {hostname} is not present in scope.yaml; "
+        f"scope file used for validation: {scope_path}; "
+        "relevant keys: targets.hostnames and targets.in_scope_urls. "
+        "The operator must confirm authorization before editing scope.yaml; "
+        "Violin never edits scope.yaml automatically. "
+        "After an authorized scope update, validate it with: "
+        "uv run python scripts/violin_guard.py validate-scope "
+        f'--scope "{scope_path}"'
+    )
+
+
 @dataclass(frozen=True)
 class _TargetPolicy:
+    scope_path: Path
     allowed: set[str]
     excluded: set[str]
     allowed_ip_set: netaddr.IPSet
@@ -168,7 +194,11 @@ class _TargetPolicy:
             )
         else:
             result.warnings.append(
-                f"primary target {candidate} is not present in scope.yaml targets; verify authorization"
+                _unknown_hostname_diagnostic(
+                    candidate,
+                    self.scope_path,
+                    subject="primary target",
+                )
             )
 
     def check_secondary(self, candidate: str, result: TargetCheckResult) -> None:
@@ -180,7 +210,7 @@ class _TargetPolicy:
             result.errors.append(f"out-of-scope target {candidate} (not present in scope.yaml)")
         else:
             result.warnings.append(
-                f"host {candidate} is not present in scope.yaml; verify authorization"
+                _unknown_hostname_diagnostic(candidate, self.scope_path, subject="host")
             )
 
 
@@ -189,7 +219,12 @@ def extract_target_candidates(command: str) -> list[str]:
     candidates: list[str] = []
     skip_path_value = False
     skip_next_token = False
+    pending_target_value: str | None = None
     for token in _command_tokens(command):
+        if pending_target_value is not None:
+            candidates.extend(_parse_target_value(pending_target_value, token))
+            pending_target_value = None
+            continue
         if skip_path_value:
             skip_path_value = False
             continue
@@ -203,6 +238,14 @@ def extract_target_candidates(command: str) -> list[str]:
             if token == "-m":
                 skip_next_token = True
             continue
+        target_argument = _target_value_argument(token)
+        if target_argument is not None:
+            target_kind, target_value = target_argument
+            if target_value is None:
+                pending_target_value = target_kind
+            else:
+                candidates.extend(_parse_target_value(target_kind, target_value))
+            continue
         if token in _REDIRECTION_OPERATORS or any(
             token.startswith(f"{flag}=") for flag in _PATH_VALUE_FLAGS
         ):
@@ -210,19 +253,81 @@ def extract_target_candidates(command: str) -> list[str]:
 
         if token.rstrip(";, ").endswith("()"):
             continue
-        candidate = token.strip("'\"(),;")
-        if candidate.lower() in _NON_TARGET_DOTTED_TOKENS:
-            continue
-        if _looks_like_local_path(candidate) and not (
-            candidate.startswith(_DEV_NETWORK_PREFIXES)
-            or candidate.startswith("//")
-            or "://" in candidate
-        ):
-            continue
-        parsed = _parse_target_token(candidate)
+        parsed = _parse_command_target_token(token)
         if parsed:
             candidates.append(parsed)
     return list(dict.fromkeys(candidates))
+
+
+def _target_value_argument(token: str) -> tuple[str, str | None] | None:
+    for flag, target_kind in _TARGET_VALUE_FLAGS.items():
+        if token == flag:
+            return target_kind, None
+        prefix = f"{flag}="
+        if token.startswith(prefix):
+            return target_kind, token.removeprefix(prefix)
+    if token.startswith("-H") and len(token) > 2:
+        return "header", token[2:].removeprefix("=")
+    return None
+
+
+def _parse_target_value(target_kind: str, value: str) -> list[str]:
+    if target_kind == "resolve":
+        return _parse_curl_resolve_targets(value)
+    if target_kind == "header":
+        match = re.match(r"(?i)^\s*host\s*:\s*(\S+)", value)
+        candidate = (
+            _parse_target_token(match.group(1)) if match else _parse_command_target_token(value)
+        )
+        return [candidate] if candidate else []
+    candidate = _parse_target_token(value)
+    return [candidate] if candidate else []
+
+
+def _parse_curl_resolve_targets(value: str) -> list[str]:
+    raw_value = value.strip()
+    if raw_value.startswith("+"):
+        raw_value = raw_value[1:]
+    elif raw_value.startswith("-"):
+        return []
+
+    if raw_value.startswith("["):
+        closing_bracket = raw_value.find("]")
+        if closing_bracket < 0 or not raw_value[closing_bracket + 1 :].startswith(":"):
+            return []
+        hostname = raw_value[1:closing_bracket]
+        remainder = raw_value[closing_bracket + 2 :]
+    else:
+        hostname, separator, remainder = raw_value.partition(":")
+        if not separator:
+            return []
+
+    port, separator, addresses = remainder.partition(":")
+    if not port or not separator:
+        return []
+
+    candidates: list[str] = []
+    hostname_candidate = _parse_target_token(hostname)
+    if hostname_candidate:
+        candidates.append(hostname_candidate)
+    for address in addresses.split(","):
+        address_candidate = _parse_target_token(address.strip())
+        if address_candidate:
+            candidates.append(address_candidate)
+    return candidates
+
+
+def _parse_command_target_token(token: str) -> str | None:
+    candidate = token.strip("'\"(),;")
+    if not candidate or candidate.lower() in _NON_TARGET_DOTTED_TOKENS:
+        return None
+    if _looks_like_local_path(candidate) and not (
+        candidate.startswith(_DEV_NETWORK_PREFIXES)
+        or candidate.startswith("//")
+        or "://" in candidate
+    ):
+        return None
+    return _parse_target_token(candidate)
 
 
 def normalize_target(value: str) -> str:
@@ -240,6 +345,8 @@ def resolve_target(
     role: str | None,
     host_query: str | None,
     field: str = "ip",
+    *,
+    scope_path: Path | None = None,
 ) -> str | None:
     """Resolve a single target value from scope data."""
     targets_sec = scope_data.get("targets", {}) or {}
@@ -275,7 +382,16 @@ def resolve_target(
             raise ValueError(f"target role {role!r} is ambiguous; expected exactly one value")
         target_val = unique[0]
     elif host_query:
-        if normalize_target(host_query) not in scope_hosts(scope_data):
+        normalized_host = normalize_target(host_query)
+        if normalized_host not in scope_hosts(scope_data):
+            if scope_path is not None and not _is_ip_network(normalized_host):
+                raise ValueError(
+                    _unknown_hostname_diagnostic(
+                        normalized_host,
+                        scope_path.expanduser().resolve(),
+                        subject="target host",
+                    )
+                )
             raise ValueError(f"target host {host_query!r} is not present in scope.yaml")
         target_val = host_query
     else:
@@ -332,12 +448,14 @@ def check_scope_targets(
 ) -> TargetCheckResult:
     """Block excluded or out-of-scope IP/CIDR targets in ``command``."""
     result = TargetCheckResult()
-    scope = _read_scope(scope_path)
+    canonical_scope_path = scope_path.expanduser().resolve()
+    scope = _read_scope(canonical_scope_path)
     if scope is None:
         return result
 
     exclusions = scope.get("exclusions", {}) or {}
     policy = _TargetPolicy(
+        scope_path=canonical_scope_path,
         allowed=scope_hosts(scope, "targets"),
         excluded=scope_hosts(scope, "exclusions"),
         allowed_ip_set=_scope_ip_set(scope, "targets"),

@@ -41,6 +41,7 @@ def handle_target(args, **kwargs):
         role=args.get("role"),
         host_query=args.get("host"),
         field=args.get("field") or "ip",
+        scope_path=p,
     )
     if value is None:
         return _json("error", error="no targets in scope")

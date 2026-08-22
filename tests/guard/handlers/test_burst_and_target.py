@@ -165,10 +165,28 @@ def test_target_host_ip(eng):
     assert r.stdout.strip() == "10.10.10.10"
 
 
-def test_target_rejects_unknown_host(eng):
+def test_target_rejects_unauthorized_ip(eng):
     r = _run("target", "--eng-dir", str(eng), "--host", "10.99.99.99")
     assert r.returncode == 1
     assert "not present in scope.yaml" in r.stdout
+    assert "targets.hostnames" not in r.stdout
+
+
+def test_target_rejects_unknown_hostname_with_actionable_diagnostic(eng):
+    r = _run("target", "--eng-dir", str(eng), "--host", "outside.example")
+
+    assert r.returncode == 1
+    canonical_scope = (eng / "scope" / "scope.yaml").resolve()
+    assert "outside.example" in r.stdout
+    assert str(canonical_scope) in r.stdout
+    assert "targets.hostnames" in r.stdout
+    assert "targets.in_scope_urls" in r.stdout
+    assert (
+        f'uv run python scripts/violin_guard.py validate-scope --scope "{canonical_scope}"'
+        in r.stdout
+    )
+    assert "confirm authorization before editing scope.yaml" in r.stdout.lower()
+    assert "never edits scope.yaml automatically" in r.stdout
 
 
 def test_target_requires_eng_dir():
