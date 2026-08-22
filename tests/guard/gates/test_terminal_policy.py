@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -12,6 +15,7 @@ from plugins.violin_guard import handlers as service
 from plugins.violin_guard.core import bootstrap, schemas, state
 from plugins.violin_guard.core import history as execution_history
 from plugins.violin_guard.core.skill_receipts import SkillViewResult
+from plugins.violin_guard.gates import code_execution_audit
 from plugins.violin_guard.gates import command as guard_command
 from plugins.violin_guard.handlers import ptt_handlers
 from plugins.violin_guard.hooks import (
@@ -569,6 +573,42 @@ def _code(eng, target="10.10.10.10") -> str:
     )
 
 
+def _complete_execute_code_result(
+    eng: Path,
+    result: object,
+    *,
+    tool_call_id: str,
+    source_suffix: str = "",
+) -> tuple[Path, dict, dict, str]:
+    source = _code(eng) + source_suffix
+    manifests_before = set((eng / "evidence" / "executions").glob("*-execute-code.json"))
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id=tool_call_id,
+        )
+        is None
+    )
+    new_manifests = (
+        set((eng / "evidence" / "executions").glob("*-execute-code.json")) - manifests_before
+    )
+    assert len(new_manifests) == 1
+    manifest = new_manifests.pop()
+    intent = json.loads(manifest.read_text(encoding="utf-8"))
+    _post_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": source},
+        result=result,
+        duration_ms=3,
+        session_id="test",
+        tool_call_id=tool_call_id,
+    )
+    completed = json.loads(manifest.read_text(encoding="utf-8"))
+    return manifest, intent, completed, source
+
+
 def test_execute_code_requires_valid_metadata(tmp_path) -> None:
     blocked = _pre_tool_call_hook(
         tool_name="execute_code",
@@ -618,15 +658,29 @@ def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
     assert state.sync_credit_remaining(eng, "RECON") == 9
     assert state.has_pending_sync(eng)
 
+    raw_result = '{"result":"ok"}'
     _post_tool_call_hook(
         tool_name="execute_code",
         args={"code": source},
-        result='{"result":"ok"}',
+        result=raw_result,
         duration_ms=42,
         session_id="test",
         tool_call_id="recorded-call",
     )
 
+    completed = json.loads(intent_receipts[0].read_text(encoding="utf-8"))
+    assert completed["audit_id"] == intent["audit_id"]
+    assert completed["source_digest"] == intent["source_digest"]
+    assert completed["command"] == intent["command"]
+    assert completed["result"] == {
+        "parsed_as_json": True,
+        "representation_type": "json",
+        "original_size_bytes": len(raw_result.encode("utf-8")),
+        "stored_size_bytes": len(raw_result.encode("utf-8")),
+        "max_stored_size_bytes": code_execution_audit.MAX_STORED_RESULT_BYTES,
+        "truncated": False,
+        "value": raw_result,
+    }
     receipts = list((eng / "evidence" / "executions").glob("*-execute-code.py"))
     assert len(receipts) == 1
     assert receipts[0].read_text(encoding="utf-8") == source
@@ -634,6 +688,8 @@ def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
     assert "execute_code class=target_touching sha256=" in history
     assert "status=completed" in history
     assert "exit_code=0" in history
+    assert completed["evidence_paths"]["manifest"] in history
+    assert raw_result not in history
     pending = state.get_pending_sync(eng)
     assert pending is not None
     pending_command = pending["commands"][0]["command"]
@@ -763,17 +819,272 @@ def test_execute_code_records_tool_errors(tmp_path) -> None:
         )
         is None
     )
+    raw_result = '{"error":"sandbox failed"}'
     _post_tool_call_hook(
         tool_name="execute_code",
         args={"code": source},
-        result='{"error":"sandbox failed"}',
+        result=raw_result,
         duration_ms=7,
         session_id="test",
         tool_call_id="error-call",
     )
+    manifest = next((eng / "evidence" / "executions").glob("*-execute-code.json"))
+    completed = json.loads(manifest.read_text(encoding="utf-8"))
+    assert completed["status"] == "completed_with_error"
+    assert completed["result"]["parsed_as_json"] is True
+    assert completed["result"]["representation_type"] == "json"
+    assert completed["result"]["value"] == raw_result
     history = (eng / "state" / "history.md").read_text(encoding="utf-8")
     assert "status=completed_with_error" in history
     assert "exit_code=1" in history
+
+
+def test_execute_code_redacts_nested_secrets_without_mutating_input(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    private_key = (
+        "-----BEGIN PRIVATE KEY-----\nprivate-key-material-1234567890\n-----END PRIVATE KEY-----"
+    )
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue"
+    result = {
+        "safe": "visible",
+        "nested": [
+            {
+                "password": "password-value-123",
+                "passwd": "passwd-value-123",
+                "secret": "secret-value-123",
+                "token": "token-value-123",
+                "access_token": "access-value-123",
+                "refresh_token": "refresh-value-123",
+            },
+            {
+                "api_key": "api-key-value-123",
+                "apikey": "apikey-value-123",
+                "authorization": "Bearer structured-auth-value-123",
+                "cookie": "session=cookie-value-123",
+                "set-cookie": "sid=set-cookie-value-123",
+            },
+            {
+                "message": "Authorization: Bearer loose-bearer-value-123",
+                "jwt_value": jwt,
+                "provider_value": "sk-live-provider-token-value-1234567890",
+                "private_material": private_key,
+            },
+        ],
+    }
+    original = copy.deepcopy(result)
+
+    manifest, _intent, completed, _source = _complete_execute_code_result(
+        eng,
+        result,
+        tool_call_id="nested-redaction",
+    )
+
+    assert result == original
+    result_record = completed["result"]
+    assert result_record["parsed_as_json"] is True
+    assert result_record["representation_type"] == "json"
+    assert result_record["truncated"] is False
+    assert result_record["original_size_bytes"] == len(
+        json.dumps(
+            original,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    assert result_record["stored_size_bytes"] == len(result_record["value"].encode("utf-8"))
+    stored = json.loads(result_record["value"])
+    assert stored["safe"] == "visible"
+    for key in (
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+    ):
+        assert stored["nested"][0][key] == "[REDACTED]"
+    for key in ("api_key", "apikey", "authorization", "cookie", "set-cookie"):
+        assert stored["nested"][1][key] == "[REDACTED]"
+    assert "loose-bearer-value-123" not in stored["nested"][2]["message"]
+    assert stored["nested"][2]["jwt_value"] == "[REDACTED_JWT]"
+    assert stored["nested"][2]["provider_value"] == "[REDACTED_TOKEN]"
+    assert stored["nested"][2]["private_material"] == "[REDACTED_PRIVATE_KEY]"
+
+    persisted = manifest.read_text(encoding="utf-8")
+    history = (eng / "state" / "history.md").read_text(encoding="utf-8")
+    for secret in (
+        "password-value-123",
+        "passwd-value-123",
+        "secret-value-123",
+        "token-value-123",
+        "access-value-123",
+        "refresh-value-123",
+        "api-key-value-123",
+        "apikey-value-123",
+        "structured-auth-value-123",
+        "cookie-value-123",
+        "set-cookie-value-123",
+        "loose-bearer-value-123",
+        jwt,
+        "sk-live-provider-token-value-1234567890",
+        "private-key-material-1234567890",
+    ):
+        assert secret not in persisted
+        assert secret not in history
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "secret"),
+    [
+        ('prefix {"password":"dummy-password-123"}', "dummy-password-123"),
+        ('{"access_token":"dummy-access-token-123", invalid}', "dummy-access-token-123"),
+        (
+            '{"authorization":"Basic dummy-authorization-123", invalid}',
+            "dummy-authorization-123",
+        ),
+        ("cookie=dummy-cookie-123", "dummy-cookie-123"),
+        ('{"set-cookie":"sid=dummy-set-cookie-123", invalid}', "dummy-set-cookie-123"),
+        ('{"private_key":"dummy-private-key-123", invalid}', "dummy-private-key-123"),
+        (
+            "prefix -----BEGIN PRIVATE KEY-----\ndummy-partial-private-key-123",
+            "dummy-partial-private-key-123",
+        ),
+    ],
+    ids=[
+        "quoted-password",
+        "quoted-access-token",
+        "quoted-authorization",
+        "cookie-assignment",
+        "quoted-set-cookie",
+        "quoted-private-key",
+        "partial-private-key",
+    ],
+)
+def test_execute_code_redacts_named_secrets_in_non_json_text(
+    tmp_path,
+    raw_result,
+    secret,
+) -> None:
+    eng = _engagement(tmp_path)
+
+    manifest, _intent, completed, _source = _complete_execute_code_result(
+        eng,
+        raw_result,
+        tool_call_id="non-json-secret-redaction",
+    )
+
+    assert completed["status"] == "completed_with_error"
+    assert completed["result"]["parsed_as_json"] is False
+    assert secret not in completed["result"]["value"]
+    assert secret not in manifest.read_text(encoding="utf-8")
+
+
+def test_execute_code_normalizes_unpaired_json_surrogate(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    raw_result = r'"\ud800"'
+
+    manifest, _intent, completed, _source = _complete_execute_code_result(
+        eng,
+        raw_result,
+        tool_call_id="unpaired-json-surrogate",
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["result"]["parsed_as_json"] is True
+    assert completed["result"]["representation_type"] == "json"
+    assert completed["result"]["value"] == raw_result
+    assert json.loads(manifest.read_text(encoding="utf-8"))["result"] == completed["result"]
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "parsed_as_json", "representation_type", "expected_value", "status"),
+    [
+        ("plain non-JSON result", False, "text", "plain non-JSON result", "completed_with_error"),
+        ("", False, "text", "", "completed_with_error"),
+        (None, True, "json", "null", "completed"),
+    ],
+)
+def test_execute_code_persists_non_json_and_empty_results(
+    tmp_path,
+    raw_result,
+    parsed_as_json,
+    representation_type,
+    expected_value,
+    status,
+) -> None:
+    eng = _engagement(tmp_path)
+
+    _manifest, _intent, completed, _source = _complete_execute_code_result(
+        eng,
+        raw_result,
+        tool_call_id=f"result-shape-{representation_type}-{type(raw_result).__name__}",
+    )
+
+    result_record = completed["result"]
+    original_text = raw_result if isinstance(raw_result, str) else "null"
+    assert completed["status"] == status
+    assert result_record["parsed_as_json"] is parsed_as_json
+    assert result_record["representation_type"] == representation_type
+    assert result_record["original_size_bytes"] == len(original_text.encode("utf-8"))
+    assert result_record["stored_size_bytes"] == len(expected_value.encode("utf-8"))
+    assert result_record["truncated"] is False
+    assert result_record["value"] == expected_value
+
+
+@pytest.mark.parametrize(
+    ("raw_result", "parsed_as_json", "representation_type"),
+    [
+        (
+            json.dumps(
+                {
+                    "password": "oversized-secret-value",
+                    "payload": "é" * (33 * 1024),
+                },
+                ensure_ascii=False,
+            ),
+            True,
+            "json",
+        ),
+        ("plain:" + "é" * (33 * 1024), False, "text"),
+    ],
+    ids=["json", "text"],
+)
+def test_execute_code_truncates_oversized_results_deterministically(
+    tmp_path,
+    raw_result,
+    parsed_as_json,
+    representation_type,
+) -> None:
+    eng = _engagement(tmp_path)
+
+    first_manifest, _first_intent, first, _first_source = _complete_execute_code_result(
+        eng,
+        raw_result,
+        tool_call_id=f"oversized-{representation_type}-first",
+        source_suffix="print('first oversized result')\n",
+    )
+    second_manifest, _second_intent, second, _second_source = _complete_execute_code_result(
+        eng,
+        raw_result,
+        tool_call_id=f"oversized-{representation_type}-second",
+        source_suffix="print('second oversized result')\n",
+    )
+
+    first_record = first["result"]
+    second_record = second["result"]
+    assert first_record["parsed_as_json"] is parsed_as_json
+    assert first_record["representation_type"] == representation_type
+    assert first_record["original_size_bytes"] == len(raw_result.encode("utf-8"))
+    assert first_record["max_stored_size_bytes"] == code_execution_audit.MAX_STORED_RESULT_BYTES
+    assert first_record["truncated"] is True
+    assert first_record["stored_size_bytes"] == len(first_record["value"].encode("utf-8"))
+    assert first_record["stored_size_bytes"] <= code_execution_audit.MAX_STORED_RESULT_BYTES
+    assert second_record["value"] == first_record["value"]
+    assert second_record["stored_size_bytes"] == first_record["stored_size_bytes"]
+    assert second_record["truncated"] is True
+    assert "oversized-secret-value" not in first_manifest.read_text(encoding="utf-8")
+    assert "oversized-secret-value" not in second_manifest.read_text(encoding="utf-8")
 
 
 def test_execute_code_requires_tool_call_id_before_writing_intent(tmp_path) -> None:
@@ -785,6 +1096,46 @@ def test_execute_code_requires_tool_call_id_before_writing_intent(tmp_path) -> N
         "message": "execute_code requires Hermes tool_call_id for receipt correlation",
     }
     assert not list((eng / "evidence" / "executions").glob("*-execute-code.json"))
+
+
+def test_execute_code_mismatched_completion_abandons_without_result(tmp_path) -> None:
+    class ResultMustNotBeInspected:
+        marker = "must-not-be-persisted"
+
+        def __str__(self) -> str:
+            raise AssertionError("mismatched completion result was inspected")
+
+    eng = _engagement(tmp_path)
+    source = _code(eng)
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="mismatched-completion",
+        )
+        is None
+    )
+    manifest = next((eng / "evidence" / "executions").glob("*-execute-code.json"))
+    intent = json.loads(manifest.read_text(encoding="utf-8"))
+
+    with pytest.raises(ValueError, match="does not match its intent receipt"):
+        _post_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source + "# changed after dispatch\n"},
+            result=ResultMustNotBeInspected(),
+            duration_ms=9,
+            session_id="test",
+            tool_call_id="mismatched-completion",
+        )
+
+    abandoned = json.loads(manifest.read_text(encoding="utf-8"))
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["audit_id"] == intent["audit_id"]
+    assert abandoned["source_digest"] == intent["source_digest"]
+    assert abandoned["command"] == intent["command"]
+    assert "result" not in abandoned
+    assert "must-not-be-persisted" not in manifest.read_text(encoding="utf-8")
 
 
 def test_parallel_execute_code_calls_correlate_by_tool_call_id(tmp_path) -> None:
@@ -811,31 +1162,118 @@ def test_parallel_execute_code_calls_correlate_by_tool_call_id(tmp_path) -> None
         is None
     )
 
-    _post_tool_call_hook(
-        tool_name="execute_code",
-        args={"code": first},
-        result='{"result":"first"}',
-        duration_ms=11,
-        session_id="test",
-        tool_call_id="parallel-1",
-    )
-    _post_tool_call_hook(
-        tool_name="execute_code",
-        args={"code": second},
-        result='{"result":"second"}',
-        duration_ms=22,
-        session_id="test",
-        tool_call_id="parallel-2",
-    )
+    def complete(source: str, result: str, duration_ms: int, tool_call_id: str) -> None:
+        _post_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            result=result,
+            duration_ms=duration_ms,
+            session_id="test",
+            tool_call_id=tool_call_id,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(complete, first, '{"result":"first"}', 11, "parallel-1"),
+            pool.submit(complete, second, '{"result":"second"}', 22, "parallel-2"),
+        ]
+        for future in futures:
+            future.result()
 
     receipts = [
         json.loads(path.read_text(encoding="utf-8"))
         for path in (eng / "evidence" / "executions").glob("*-execute-code.json")
     ]
-    assert sorted((receipt["status"], receipt["duration_ms"]) for receipt in receipts) == [
-        ("completed", 11),
-        ("completed", 22),
-    ]
+    expected = {
+        code_execution_audit.source_digest(first): ("first", 11),
+        code_execution_audit.source_digest(second): ("second", 22),
+    }
+    assert len(receipts) == 2
+    for receipt in receipts:
+        expected_value, expected_duration = expected[receipt["source_digest"]]
+        assert receipt["status"] == "completed"
+        assert receipt["duration_ms"] == expected_duration
+        assert json.loads(receipt["result"]["value"])["result"] == expected_value
+
+
+def test_execute_code_concurrent_completions_preserve_first_terminal_result(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    source = _code(eng) + "print('completion race')\n"
+    _metadata, manifest = code_execution_audit.prepare_execution(source)
+    intent = json.loads(manifest.read_text(encoding="utf-8"))
+    start = threading.Barrier(2)
+
+    def complete(value: str) -> None:
+        start.wait()
+        code_execution_audit.record_completion(
+            source,
+            {"result": value},
+            5,
+            receipt_path=manifest,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(complete, "first"), pool.submit(complete, "second")]
+        errors = []
+        for future in futures:
+            try:
+                future.result()
+            except ValueError as exc:
+                errors.append(str(exc))
+
+    assert len(errors) == 1
+    assert "already finalized" in errors[0]
+    terminal = json.loads(manifest.read_text(encoding="utf-8"))
+    assert terminal["status"] == "completed"
+    assert terminal["audit_id"] == intent["audit_id"]
+    assert terminal["source_digest"] == intent["source_digest"]
+    assert terminal["command"] == intent["command"]
+    assert json.loads(terminal["result"]["value"])["result"] in {"first", "second"}
+    history = (eng / "state" / "history.md").read_text(encoding="utf-8")
+    assert history.count(manifest.relative_to(eng).as_posix()) == 1
+
+
+def test_execute_code_completion_and_abandonment_serialize_one_terminal_manifest(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    source = _code(eng) + "print('completion race')\n"
+    _metadata, manifest = code_execution_audit.prepare_execution(source)
+    intent = json.loads(manifest.read_text(encoding="utf-8"))
+    start = threading.Barrier(2)
+
+    def complete() -> None:
+        start.wait()
+        code_execution_audit.record_completion(
+            source,
+            {"result": "completed"},
+            5,
+            receipt_path=manifest,
+        )
+
+    def abandon() -> None:
+        start.wait()
+        code_execution_audit.abandon_execution(manifest, "concurrent abandonment")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(complete), pool.submit(abandon)]
+        errors = []
+        for future in futures:
+            try:
+                future.result()
+            except ValueError as exc:
+                errors.append(str(exc))
+
+    assert not errors or all("already finalized" in error for error in errors)
+    terminal = json.loads(manifest.read_text(encoding="utf-8"))
+    assert terminal["status"] in {"completed", "abandoned"}
+    assert terminal["audit_id"] == intent["audit_id"]
+    assert terminal["source_digest"] == intent["source_digest"]
+    assert terminal["command"] == intent["command"]
+    if terminal["status"] == "completed":
+        assert json.loads(terminal["result"]["value"])["result"] == "completed"
+    else:
+        assert "result" not in terminal
+    history = (eng / "state" / "history.md").read_text(encoding="utf-8")
+    assert history.count(manifest.relative_to(eng).as_posix()) == 1
 
 
 def test_session_finalize_abandons_unfinished_execute_code_receipt(tmp_path) -> None:
@@ -856,6 +1294,7 @@ def test_session_finalize_abandons_unfinished_execute_code_receipt(tmp_path) -> 
     manifest = next((eng / "evidence" / "executions").glob("*-execute-code.json"))
     receipt = json.loads(manifest.read_text(encoding="utf-8"))
     assert receipt["status"] == "abandoned"
+    assert "result" not in receipt
     with pytest.raises(ValueError, match="intent receipt is missing for tool_call_id"):
         _post_tool_call_hook(
             tool_name="execute_code",

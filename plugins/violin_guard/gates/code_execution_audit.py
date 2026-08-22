@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import re
 import uuid
 from datetime import UTC, datetime
@@ -19,11 +20,62 @@ from typing import Any
 from ..core import history, state
 from ..core.ptt import find_active_task, parse_ptt
 from ..core.targets import extract_target_candidates, normalize_target
-from ..engine.execution import _commit_guard_state
+from ..engine.execution import PREVIEW_BYTES, _commit_guard_state
 from . import command
 
 _HEADER = re.compile(r"^\s*#\s*violin:\s*(\{.*\})\s*$")
 _REQUIRED_FIELDS = frozenset({"eng_dir", "phase", "target", "session_id"})
+
+# Match the executor's 32 KiB preview budget so result manifests remain useful
+# without becoming an unbounded second copy of tool output.
+MAX_STORED_RESULT_BYTES = PREVIEW_BYTES
+_REDACTED = "[REDACTED]"
+_REDACTED_JWT = "[REDACTED_JWT]"
+_REDACTED_PRIVATE_KEY = "[REDACTED_PRIVATE_KEY]"
+_REDACTED_TOKEN = "[REDACTED_TOKEN]"
+_SENSITIVE_RESULT_KEYS = frozenset(
+    {
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "access_token",
+        "refresh_token",
+        "api_key",
+        "apikey",
+        "authorization",
+        "cookie",
+        "private_key",
+        "set_cookie",
+    }
+)
+_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN (?P<label>(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----.*?"
+    r"(?:-----END (?P=label)-----|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)([\"']?\bauthorization\b[\"']?\s*[:=]\s*)"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,;}]+)"
+)
+_COOKIE_RE = re.compile(
+    r"(?im)([\"']?\b(?:set[-_]?cookie|cookie)\b[\"']?\s*[:=]\s*)"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,}]+)"
+)
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)([\"']?\b(?:password|passwd|secret|token|access[_-]?token|refresh[_-]?token|"
+    r"api[_-]?key|apikey|private[_-]?key)\b[\"']?\s*[:=]\s*)"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)"
+)
+_BEARER_TOKEN_RE = re.compile(r"(?i)\bbearer[ \t]+[A-Za-z0-9._~+/=-]{8,}")
+_JWT_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\."
+    r"[A-Za-z0-9_-]{5,}(?![A-Za-z0-9_-])"
+)
+_PROVIDER_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{10,})(?![A-Za-z0-9_-])"
+)
 
 _LOCAL_PATH_EXTENSIONS = frozenset(
     {
@@ -338,79 +390,172 @@ def record_completion(
     eng_dir = state.resolve_eng_dir(metadata["eng_dir"])
     digest = source_digest(source)
     receipt_file = Path(receipt_path)
-    receipt = state.read_json(receipt_file)
-    if receipt.get("source_digest") != digest:
-        raise ValueError("execute_code completion does not match its intent receipt")
+    with state.lock_file(receipt_file):
+        receipt = state.read_json(receipt_file)
+        if receipt.get("source_digest") != digest:
+            raise ValueError("execute_code completion does not match its intent receipt")
+        if receipt.get("status") != "starting":
+            raise ValueError(
+                f"execute_code intent receipt is already finalized as {receipt.get('status')}"
+            )
 
-    summary = _result_summary(result, duration_ms)
-    # Command identity is created before dispatch and is also stored in the
-    # pending sync batch.  Keep it byte-for-byte stable so review/rebind can
-    # reconcile the completed execution against that batch.  Outcome metadata
-    # belongs in the receipt and dedicated history fields, not in command=.
-    command_text = str(receipt.get("command") or "").strip()
-    if not command_text:
-        raise ValueError("execute_code intent receipt has no command identity")
-    completed_receipt = {
-        **receipt,
-        "status": "completed" if summary["status"] == "ok" else "completed_with_error",
-        "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "duration_ms": summary["duration_ms"],
-        "exit_code": summary["exit_code"],
-    }
-    if not history.history_contains(eng_dir, command_text):
-        history.append_history(
-            eng_dir,
-            command_text,
-            metadata["phase"],
-            summary["exit_code"],
-            receipt_file.relative_to(eng_dir).as_posix(),
-            status=str(completed_receipt["status"]),
-        )
-    state.atomic_json(receipt_file, completed_receipt)
+        # Command identity is created before dispatch and is also stored in the
+        # pending sync batch.  Keep it byte-for-byte stable so review/rebind can
+        # reconcile the completed execution against that batch.  Outcome metadata
+        # belongs in the receipt and dedicated history fields, not in command=.
+        command_text = str(receipt.get("command") or "").strip()
+        if not command_text:
+            raise ValueError("execute_code intent receipt has no command identity")
+        summary = _result_summary(result, duration_ms)
+        completed_receipt = {
+            **receipt,
+            "status": "completed" if summary["status"] == "ok" else "completed_with_error",
+            "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "duration_ms": summary["duration_ms"],
+            "exit_code": summary["exit_code"],
+            "result": summary["result"],
+        }
+        if not history.history_contains(eng_dir, command_text):
+            history.append_history(
+                eng_dir,
+                command_text,
+                metadata["phase"],
+                summary["exit_code"],
+                receipt_file.relative_to(eng_dir).as_posix(),
+                status=str(completed_receipt["status"]),
+            )
+        state.atomic_json(receipt_file, completed_receipt)
     return receipt_file
 
 
 def abandon_execution(receipt_path: str | Path, reason: str) -> None:
     """Close a prepared intent that cannot receive a post-tool completion."""
     receipt_file = Path(receipt_path)
-    receipt = state.read_json(receipt_file)
-    if receipt.get("status") != "starting":
-        return
-    eng_dir = receipt_file.resolve().parents[2]
-    command_text = str(receipt.get("command") or "").strip()
-    abandoned = {
-        **receipt,
-        "status": "abandoned",
-        "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "exit_code": -1,
-        "error": reason,
-    }
-    if command_text and not history.history_contains(eng_dir, command_text):
-        history.append_history(
-            eng_dir,
-            command_text,
-            str(receipt.get("phase") or "RECON"),
-            -1,
-            receipt_file.relative_to(eng_dir).as_posix(),
-            status="abandoned",
-        )
-    state.atomic_json(receipt_file, abandoned)
+    with state.lock_file(receipt_file):
+        receipt = state.read_json(receipt_file)
+        if receipt.get("status") != "starting":
+            return
+        eng_dir = receipt_file.resolve().parents[2]
+        command_text = str(receipt.get("command") or "").strip()
+        abandoned = {
+            **receipt,
+            "status": "abandoned",
+            "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "exit_code": -1,
+            "error": reason,
+        }
+        if command_text and not history.history_contains(eng_dir, command_text):
+            history.append_history(
+                eng_dir,
+                command_text,
+                str(receipt.get("phase") or "RECON"),
+                -1,
+                receipt_file.relative_to(eng_dir).as_posix(),
+                status="abandoned",
+            )
+        state.atomic_json(receipt_file, abandoned)
 
 
-def _result_summary(result: object, duration_ms: object) -> dict[str, int | str]:
-    try:
-        parsed: Any = json.loads(result) if isinstance(result, str) else result
-    except json.JSONDecodeError:
-        parsed = {"error": "non-JSON tool result"}
+def _normalized_result_key(key: object) -> str:
+    return re.sub(r"[-\s]+", "_", str(key).strip().casefold())
+
+
+def _redact_result_text(value: str) -> str:
+    redacted = _PRIVATE_KEY_RE.sub(_REDACTED_PRIVATE_KEY, value)
+    redacted = _COOKIE_RE.sub(lambda match: f"{match.group(1)}{_REDACTED}", redacted)
+    redacted = _AUTHORIZATION_RE.sub(lambda match: f"{match.group(1)}{_REDACTED}", redacted)
+    redacted = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}{_REDACTED}", redacted)
+    redacted = _BEARER_TOKEN_RE.sub(f"Bearer {_REDACTED_TOKEN}", redacted)
+    redacted = _JWT_RE.sub(_REDACTED_JWT, redacted)
+    return _PROVIDER_TOKEN_RE.sub(_REDACTED_TOKEN, redacted)
+
+
+def _normalize_result_value(value: object, *, redact: bool) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key)
+            if redact and _normalized_result_key(key) in _SENSITIVE_RESULT_KEYS:
+                normalized[normalized_key] = _REDACTED
+            else:
+                normalized[normalized_key] = _normalize_result_value(item, redact=redact)
+        return normalized
+    if isinstance(value, list | tuple):
+        return [_normalize_result_value(item, redact=redact) for item in value]
+    if isinstance(value, str):
+        return _redact_result_text(value) if redact else value
+    if value is None or isinstance(value, bool | int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    rendered = str(value)
+    return _redact_result_text(rendered) if redact else rendered
+
+
+def _canonical_result_json(value: object) -> str:
+    # ASCII escapes make every normalized JSON value UTF-8 encodable, including
+    # JSON strings containing unpaired surrogate escapes from arbitrary tools.
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _bounded_result(result: object) -> tuple[dict[str, Any], object]:
+    if isinstance(result, str):
+        original_text = result
+        try:
+            parsed = json.loads(result)
+        except json.JSONDecodeError:
+            parsed = {"error": "non-JSON tool result"}
+            stored_text = _redact_result_text(result)
+            parsed_as_json = False
+            representation_type = "text"
+        else:
+            stored_text = _canonical_result_json(_normalize_result_value(parsed, redact=True))
+            parsed_as_json = True
+            representation_type = "json"
+    else:
+        parsed = result
+        original_text = _canonical_result_json(_normalize_result_value(result, redact=False))
+        stored_text = _canonical_result_json(_normalize_result_value(result, redact=True))
+        parsed_as_json = True
+        representation_type = "json"
+
+    original_size = len(original_text.encode("utf-8"))
+    stored_bytes = stored_text.encode("utf-8")
+    truncated = len(stored_bytes) > MAX_STORED_RESULT_BYTES
+    if truncated:
+        stored_text = stored_bytes[:MAX_STORED_RESULT_BYTES].decode("utf-8", errors="ignore")
+        stored_bytes = stored_text.encode("utf-8")
+    return (
+        {
+            "parsed_as_json": parsed_as_json,
+            "representation_type": representation_type,
+            "original_size_bytes": original_size,
+            "stored_size_bytes": len(stored_bytes),
+            "max_stored_size_bytes": MAX_STORED_RESULT_BYTES,
+            "truncated": truncated,
+            "value": stored_text,
+        },
+        parsed,
+    )
+
+
+def _result_summary(result: object, duration_ms: object) -> dict[str, Any]:
+    bounded_result, parsed = _bounded_result(result)
     failed = isinstance(parsed, dict) and bool(parsed.get("error"))
     try:
         elapsed = max(0, int(duration_ms))
     except (TypeError, ValueError):
         elapsed = 0
-    return {"status": "error" if failed else "ok", "exit_code": int(failed), "duration_ms": elapsed}
+    return {
+        "status": "error" if failed else "ok",
+        "exit_code": int(failed),
+        "duration_ms": elapsed,
+        "result": bounded_result,
+    }
 
 
 __all__ = [
+    "MAX_STORED_RESULT_BYTES",
     "abandon_execution",
     "execution_class",
     "parse_metadata",
