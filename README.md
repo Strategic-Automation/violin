@@ -273,6 +273,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules and
 Violin is for authorized security assessment. Operators are responsible for
 scope, approvals, target ownership, data handling, and local law.
 
+## Support Violin
+
+Violin is an open-source project maintained by Strategic Automation Ltd.
+Sponsorship supports continued development, testing, documentation,
+compatibility work, and releases.
+
+Violin remains available under the MIT licence. Sponsorship does not include
+guaranteed support, feature priority, or influence over security policy.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
