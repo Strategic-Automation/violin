@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/Strategic-Automation/violin"><img src="https://img.shields.io/badge/Status-Release%20Ready-2ea44f?style=for-the-badge" alt="Release Ready"></a>
   <a href="https://github.com/Strategic-Automation/violin/blob/master/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.18.0-FFD700?style=for-the-badge" alt="Hermes >= 0.18.0"></a>
+  <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.18.0-FFD700?style=for-the-badge" alt="Hermes >=0.18.0"></a>
   <a href="https://www.kali.org/"><img src="https://img.shields.io/badge/Kali%20Linux-557C94?style=for-the-badge&logo=kali-linux&logoColor=white" alt="Kali Linux"></a>
   <a href="https://www.parrotsec.org/"><img src="https://img.shields.io/badge/Parrot%20OS-2E8B57?style=for-the-badge" alt="Parrot OS"></a>
 </p>
@@ -276,6 +276,9 @@ scope, approvals, target ownership, data handling, and local law.
 ## Support Violin
 
 Violin is an open-source project maintained by Strategic Automation Ltd.
+If Violin is useful to you or your organisation, you can
+[sponsor its continued development](https://github.com/sponsors/Strategic-Automation).
+
 Sponsorship supports continued development, testing, documentation,
 compatibility work, and releases.
 
