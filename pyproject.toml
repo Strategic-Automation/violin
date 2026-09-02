@@ -5,6 +5,7 @@ description = "Supervised agentic Hermes penetration-testing profile"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "bashlex>=0.18,<1",
+    "cryptography>=45,<51",
     "duckduckgo-search>=6.0.0",
     "filelock>=3.13,<4",
     "pydantic>=2.0,<3",

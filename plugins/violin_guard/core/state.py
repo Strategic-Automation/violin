@@ -58,10 +58,15 @@ def _eng_root() -> Path:
 
 def resolve_eng_dir(eng_dir: str | Path) -> Path:
     """Resolve an engagement directory path (absolute or relative to profile root)."""
+    env_root = (
+        Path(os.environ.get("ENG_DIR", "").strip()).expanduser().resolve()
+        if os.environ.get("ENG_DIR", "").strip()
+        else None
+    )
+
     if not str(eng_dir).strip() or str(eng_dir).strip() == ".":
-        env_eng = os.environ.get("ENG_DIR", "").strip()
-        if env_eng:
-            return Path(env_eng).expanduser().resolve()
+        if env_root is not None:
+            return env_root
         cwd = Path.cwd().resolve()
         if (cwd / "scope" / "scope.yaml").exists() or (cwd / "hypotheses.md").exists():
             return cwd
@@ -73,8 +78,16 @@ def resolve_eng_dir(eng_dir: str | Path) -> Path:
         cwd_candidate = (Path.cwd() / path).resolve()
         if not profile_candidate.exists() and cwd_candidate.exists():
             return cwd_candidate
-        return profile_candidate
-    return path.resolve()
+        resolved = profile_candidate
+    else:
+        resolved = path.resolve()
+
+    # A mistyped path (e.g. timestamp transposition 20260123 vs 20260823)
+    # would otherwise be silently materialized by ensure_dir(); fall back to
+    # the runner-provided active engagement when the resolved path is bogus.
+    if not resolved.exists() and env_root is not None and env_root.exists():
+        return env_root
+    return resolved
 
 
 def resolve_session_id(eng_dir: str | Path, session_id: str | None = None) -> str:

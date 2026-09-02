@@ -325,6 +325,15 @@ def test_init_engagement_accepts_direct_scope_host(raw_command: str) -> None:
     assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None
 
 
+def test_generate_closeout_accepts_target_as_local_report_metadata() -> None:
+    command = (
+        "python3 scripts/violin_guard.py generate-closeout --eng-dir engagement "
+        "--target https://target.example"
+    )
+
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
+
+
 @pytest.mark.parametrize(
     "raw_command",
     [
@@ -710,10 +719,10 @@ def test_execute_code_rejects_foreign_literal_target(tmp_path) -> None:
 
 
 def test_execute_code_local_find_paths_are_not_foreign_targets(tmp_path) -> None:
-    """FIND-*.md / evidence path strings in code must not be flagged as foreign targets."""
+    """Local evidence path strings in code must not be flagged as foreign targets."""
     eng = _engagement(tmp_path)
     source = _code(eng) + (
-        "local_files = ['evidence/findings/FIND-007.md', 'state/hypotheses.md']\n"
+        "local_files = ['evidence/findings.jsonl', 'state/hypotheses.md']\n"
         "for f in local_files: print('author', f)\n"
     )
     blocked = _pre_tool_call_hook(
@@ -894,3 +903,46 @@ def test_expanded_local_file_tools_are_allowed(raw_command: str) -> None:
 )
 def test_local_package_import_checks_are_allowed(raw_command: str) -> None:
     assert _pre_tool_call_hook(tool_name="terminal", args={"command": raw_command}) is None
+
+
+def test_heredoc_payload_url_is_not_target_execution() -> None:
+    # bashlex cannot parse here-documents; the naive fallback used to read the
+    # URL inside the heredoc *body* as a connection target and block local
+    # bookkeeping (state-file validation) as RAW TERMINAL TARGET EXECUTION.
+    command = (
+        "python3 - <<'PYEOF'\n"
+        "import json\n"
+        "from pathlib import Path\n"
+        "p = Path('state/coverage-matrix.yaml')\n"
+        "print('target ref:', 'https://duck-store.escape.tech')\n"
+        "PYEOF"
+    )
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
+
+
+def test_heredoc_payload_ip_is_not_target_execution() -> None:
+    command = "python3 - <<'EOF'\nprint('probe notes 10.10.10.11 in payload text')\nEOF"
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
+
+
+def test_shell_heredoc_body_is_scanned_as_executed_code() -> None:
+    # bash -s reads the heredoc as *executed* shell code: a curl to the
+    # target inside the body must still be blocked.
+    command = "bash -s <<'EOF'\ncurl -s https://duck-store.escape.tech/admin\nEOF"
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": command})
+    assert result and result["action"] == "block"
+
+
+def test_shell_heredoc_local_body_remains_available() -> None:
+    command = "bash -s <<'EOF'\nls -la\ngrep -r foo /tmp\ncat results.txt | head\nEOF"
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
+
+
+def test_command_after_heredoc_close_is_still_scanned() -> None:
+    # The heredoc head is stripped, but subsequent commands must remain
+    # subject to the classifier.
+    command = (
+        "python3 - <<'EOF'\nprint('x')\nEOF\ncurl -s https://duck-store.escape.tech/api/v1/users/"
+    )
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": command})
+    assert result and result["action"] == "block"

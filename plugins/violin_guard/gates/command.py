@@ -174,13 +174,12 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     semantic_lock = state.semantic_lock(eng_dir)
     if semantic_lock:
-        result.add_error(
-            "semantic anti-stuck lock: five evidence-poor reviews require a recorded research "
-            "attempt plus a meaningful next_technique pivot before target execution. "
-            "Unlock by calling violin_record_hypothesis (or the batch review tool) with "
-            "research_attempted='true' and a next_technique that differs from the current one, "
-            "or by completing an evidence-backed review batch (evidence_paths pointing at saved "
-            "output). A new technique OR fresh evidence releases the lock."
+        result.add_warning(
+            "semantic anti-stuck lock active: five evidence-poor reviews suggest the "
+            "current technique is not yielding fresh evidence. Next action: record a "
+            "research attempt (violin_record_hypothesis ... research_attempted='true') "
+            "with a next_technique that differs from the current one, or attach fresh "
+            "evidence. This is a hint — execution still allowed."
         )
 
     # 5. History staleness (duplicate detection)

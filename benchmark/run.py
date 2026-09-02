@@ -2,23 +2,26 @@
 """run.py — Automated Hermes Profile Benchmark Runner with OpenRouter integration.
 
 Executes Hermes non-interactively using the target profile against a benchmark lab target,
-manages engagement state, and scores evidence automatically via score.py.
+manages engagement state, and evaluates it only when the private evaluator is present.
 """
 
 import argparse
 import copy
+import hashlib
 import ipaddress
 import json
 import os
-import secrets
+import platform
 import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import yaml
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from yarl import URL
 
 # Ensure repo root is on sys.path
@@ -31,67 +34,30 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from benchmark.score import generate_markdown_summary, print_result, score_engagement  # noqa: E402
-from plugins.violin_guard.core.receipt_integrity import RECEIPT_KEY_ENV  # noqa: E402
+from plugins.violin_guard.core.receipt_integrity import RECEIPT_SIGNING_KEY_ENV  # noqa: E402
 from plugins.violin_guard.gates.command import validate_scope  # noqa: E402
 
 _DEFAULT_HERMES_MAX_TOKENS = 32_000
-_CLOSEOUT_TIMEOUT_SECONDS = 600
-
-
-def _engagement_needs_closeout(eng_dir: Path) -> bool:
-    """Return whether Hermes stopped before producing a complete closeout.
-
-    Closeout is gated on the artifacts the scorer actually consumes: at least
-    one canonical FIND file plus both reporting deliverables. Unchecked PTT
-    task rows are NOT a trigger — a leftover task marker used to fire a
-    continuation pass that re-ran the entire assessment instead of closing out.
-    """
-    findings_dir = eng_dir / "evidence" / "findings"
-    if not findings_dir.exists() or not any(findings_dir.glob("FIND-*.md")):
-        return True
-    return not all(
-        (eng_dir / relative).is_file()
-        for relative in ("reporting/report.md", "retrospective/retrospective.md")
-    )
-
-
-def _closeout_command(args: argparse.Namespace, eng_dir: Path) -> list[str]:
-    """Build a continuation goal that ONLY closes an existing engagement.
-
-    The wording must be surgical: the assessment and its evidence are final,
-    and the agent is forbidden from running new tests, touching evidence, or
-    re-verifying findings. The previous wording ("Continue the existing
-    authorized engagement") was read as license to re-run the whole
-    assessment (255 messages / 20m50s instead of a minutes-long closeout).
-    """
-    command = [
-        "hermes",
-        "chat",
-        "-p",
-        "violin",
-        "--provider",
-        args.provider,
-        "--yolo",
-        "-q",
-        f"/goal The engagement in {eng_dir.resolve()} is COMPLETE and its evidence is final. "
-        "Do NOT run any new tests, scans, commands, or verification against the target, and do NOT modify "
-        "evidence, findings, hypotheses, or any state files. ONLY finalize closeout: if "
-        "reporting/report.md is missing, generate it from the existing evidence/findings/FIND-*.md files "
-        "(prefer `python scripts/violin_guard.py generate-closeout`); if "
-        "retrospective/retrospective.md is missing, write it; then update state/ptt.md task "
-        "statuses to reflect completed work. "
-        "Bookkeeping only: if any Validated hypothesis on the hypothesis board lacks a "
-        "'Linked findings' field naming the FIND-*.md file(s) that document its result, "
-        "update it via violin_record_hypothesis so each validated claim points at its "
-        "canonical finding — do not create new hypotheses or findings, and do not "
-        "re-verify evidence. "
-        "Never inspect benchmark answer keys, scorer code, challenge inventories, walkthroughs, "
-        "or target-specific solution material.",
-    ]
-    if args.model:
-        command.extend(["-m", args.model])
-    return command
+_COVERAGE_OBLIGATIONS = (
+    "POST /api/v1/auth/login",
+    "POST /api/v1/auth/login/totp",
+    "POST /api/v1/auth/register",
+    "GET /api/v1/users/",
+    "GET /api/v1/users/{uuid}",
+    "PUT /api/v1/users/me/profile",
+    "GET /api/v1/products/filter/by-color",
+    "POST /api/v1/testimonials/",
+    "PUT /api/v1/testimonials/{id}",
+    "POST /api/v1/uploads/import-from-url",
+    "GET /api/v1/uploads/fetch-url",
+    "GET /api/v1/orders/{id}",
+    "GET /api/v1/admin/users",
+    "POST /api/v1/cart/add",
+    "PUT /api/v1/cart/items/{id}",
+    "POST /api/v1/orders/checkout",
+    "GET /api/v1/orders/coupons",
+    "/...?redirect=",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -140,6 +106,11 @@ def parse_args() -> argparse.Namespace:
         help="Initialize engagement directory and print commands without executing Hermes CLI",
     )
     parser.add_argument(
+        "--target-isolation-id",
+        default="",
+        help="Immutable snapshot/reset identifier supplied by the target orchestrator",
+    )
+    parser.add_argument(
         "--json-out",
         type=Path,
         help="Optional path to write benchmark results JSON",
@@ -150,6 +121,68 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to write markdown summary",
     )
     return parser.parse_args()
+
+
+def _sha256(path: Path) -> str:
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def _git_output(*args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args], cwd=REPO_ROOT, check=False, capture_output=True, text=True
+    )
+    return completed.stdout.strip() if completed.returncode == 0 else "unknown"
+
+
+def _run_manifest(
+    args: argparse.Namespace,
+    eng_dir: Path,
+    *,
+    public_key: bytes,
+    started_at: str,
+) -> dict:
+    source_paths = [
+        Path(__file__),
+        REPO_ROOT / "benchmark" / "targets" / "duck-store" / "scope.yaml",
+        REPO_ROOT / "benchmark" / "targets" / "duck-store" / "engage.md",
+        REPO_ROOT / "plugins" / "violin_guard" / "core" / "findings.py",
+        REPO_ROOT / "plugins" / "violin_guard" / "core" / "receipt_integrity.py",
+    ]
+    isolation_id = str(getattr(args, "target_isolation_id", "") or "").strip()
+    return {
+        "schema_version": 1,
+        "run_id": eng_dir.name,
+        "started_at": started_at,
+        "target": args.target,
+        "target_isolation": {
+            "declared": bool(isolation_id),
+            "snapshot_or_reset_id": isolation_id or None,
+            "reason": None
+            if isolation_id
+            else "no immutable target snapshot/reset identity was supplied",
+        },
+        "model": args.model,
+        "provider": args.provider,
+        "receipt_verification": {
+            "algorithm": "Ed25519",
+            "public_key_hex": public_key.hex(),
+        },
+        "source": {
+            "git_commit": _git_output("rev-parse", "HEAD"),
+            "git_dirty": bool(_git_output("status", "--porcelain")),
+            "sha256": {
+                path.relative_to(REPO_ROOT).as_posix(): _sha256(path) for path in source_paths
+            },
+        },
+        "runtime": {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "container_id": os.environ.get("HOSTNAME"),
+            "image_digest": os.environ.get("VIOLIN_BENCHMARK_IMAGE_DIGEST"),
+        },
+        "status": "running",
+    }
 
 
 def _scope_for_target(target: str) -> dict:
@@ -182,7 +215,7 @@ def _scope_for_target(target: str) -> dict:
     ]
     benchmark = scope.get("benchmark")
     if isinstance(benchmark, dict):
-        benchmark.pop("openapi_spec", None)
+        benchmark["openapi_spec"] = f"{base_url}/openapi.json"
     # Engagement brief (client-provided facts, framework-owned): seed the
     # target's engage.md so operational facts (default credentials, register
     # first, reset window) reach the agent via scope.yaml — the file the agent
@@ -190,7 +223,11 @@ def _scope_for_target(target: str) -> dict:
     # stays task-only.
     brief_path = fixture_path.with_name("engage.md")
     if brief_path.is_file():
-        brief = brief_path.read_text(encoding="utf-8").strip()
+        brief = (
+            brief_path.read_text(encoding="utf-8")
+            .replace("https://duck-store.escape.tech", base_url)
+            .strip()
+        )
         if brief:
             scope.setdefault("engagement", {})["brief"] = brief
     # Engagement audit mode: a generic "structured engagement" flag the
@@ -207,23 +244,7 @@ def _scope_for_target(target: str) -> dict:
     # still discover what is vulnerable. Derived from the target's endpoint
     # inventory; the framework's coverage gate then requires an evidence-backed
     # matrix cell per obligation.
-    obligations_path = fixture_path.parent / "challenges.json"
-    if obligations_path.is_file():
-        try:
-            challenges = json.loads(obligations_path.read_text(encoding="utf-8")).get(
-                "challenges", []
-            )
-        except (OSError, ValueError):
-            challenges = []
-        obligations: list[str] = []
-        for ch in challenges:
-            endpoint = ch.get("endpoint") or ""
-            candidates = endpoint if isinstance(endpoint, list) else [endpoint]
-            for item in candidates:
-                item = str(item or "").strip()
-                if item and item not in obligations:
-                    obligations.append(item)
-        scope.setdefault("engagement", {})["coverage_obligations"] = obligations
+    scope.setdefault("engagement", {})["coverage_obligations"] = list(_COVERAGE_OBLIGATIONS)
     return scope
 
 
@@ -311,7 +332,6 @@ def init_benchmark_engagement(eng_dir: Path, target: str) -> None:
         """# Hypothesis Board
 ### H-001: Initial Target Assessment
 **Status:** Candidate
-**Linked challenges:**
 """,
         encoding="utf-8",
     )
@@ -378,10 +398,28 @@ def main() -> int:
 
     init_benchmark_engagement(eng_dir, args.target)
 
-    receipt_key = secrets.token_bytes(32)
+    signing_key = Ed25519PrivateKey.generate()
+    signing_key_bytes = signing_key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    public_key_bytes = signing_key.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    started = datetime.now(UTC)
+    manifest = _run_manifest(
+        args,
+        eng_dir,
+        public_key=public_key_bytes,
+        started_at=started.isoformat(),
+    )
+    manifest_path = eng_dir / "run-manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     env = os.environ.copy()
     env["ENG_DIR"] = str(eng_dir.resolve())
-    env[RECEIPT_KEY_ENV] = receipt_key.hex()
+    env[RECEIPT_SIGNING_KEY_ENV] = signing_key_bytes.hex()
     env["OPENAI_API_BASE"] = args.api_base
     env["OPENAI_BASE_URL"] = args.api_base
     env["CUSTOM_BASE_URL"] = args.api_base
@@ -395,6 +433,8 @@ def main() -> int:
         env["OPENAI_API_KEY"] = env["NOUS_API_KEY"]
     if "OPENROUTER_API_KEY" in env and "OPENAI_API_KEY" not in env:
         env["OPENAI_API_KEY"] = env["OPENROUTER_API_KEY"]
+    if "OPENCODE_GO_API_KEY" in env and "OPENAI_API_KEY" not in env:
+        env["OPENAI_API_KEY"] = env["OPENCODE_GO_API_KEY"]
     if "OPENAI_API_KEY" not in env:
         env["OPENAI_API_KEY"] = "not-needed"
 
@@ -409,22 +449,22 @@ def main() -> int:
         "chat",
         "-p",
         "violin",
-        "--provider",
-        args.provider,
         "--yolo",
         "-q",
         f"/goal Perform an exhaustive authorized security assessment of {args.target} using the engagement in {eng_dir.resolve()}. "
-        "Log tool friction, guard errors, and any guard-code inspection in state/framework_feedback.md. "
-        "Never inspect benchmark answer keys, scorer code, challenge inventories, walkthroughs, or target-specific solution material.",
+        "Test every in-scope obligation and submit one finding per confirmed vulnerability — never bundle distinct flaws into one finding. "
+        "Follow the pentest skill and its references end-to-end. "
+        "Record any tool friction, guard errors, or framework bugs you encounter in state/framework_feedback.md.",
     ]
     if args.skill:
         cmd.extend(["-s", args.skill])
     if args.model:
         cmd.extend(["-m", args.model])
+    # Don't pass --provider to hermes CLI when using custom base URL via env vars
+    # The env vars OPENAI_BASE_URL and OPENAI_API_BASE are already set above
 
     print(f"\nExecution Command: {' '.join(cmd)}")
 
-    started = datetime.now()
     runner = {
         "status": "dry_run" if args.dry_run else "not_started",
         "valid": False,
@@ -459,42 +499,6 @@ def main() -> int:
                 runner.update(status="failed_to_start", valid=False, failure_reason=str(exc))
                 print(f"[ERROR] Hermes execution failed to start: {exc}")
 
-            # Hermes can return successfully after the substantive assessment
-            # while leaving PTT closeout/reporting work unfinished. Run a
-            # bounded continuation pass so scoring never treats that partial
-            # state as a completed engagement. Closeout is best-effort: a
-            # timeout or nonzero exit must NOT invalidate a run whose
-            # substantive evidence already exists (scoring proceeds), it is
-            # reported as a soft warning instead.
-            runner["closeout_attempts"] = []
-            runner["closeout_complete"] = False
-            if runner["valid"]:
-                for _attempt in range(2):
-                    if not _engagement_needs_closeout(eng_dir):
-                        break
-                    try:
-                        closeout = subprocess.run(
-                            _closeout_command(args, eng_dir),
-                            env=env,
-                            cwd=eng_dir,
-                            check=False,
-                            timeout=_CLOSEOUT_TIMEOUT_SECONDS,
-                        )
-                    except subprocess.TimeoutExpired:
-                        runner["closeout_attempts"].append("timeout")
-                        runner["closeout_warning"] = (
-                            f"Hermes closeout exceeded {_CLOSEOUT_TIMEOUT_SECONDS} seconds; "
-                            "scoring proceeds on substantive evidence"
-                        )
-                        break
-                    runner["closeout_attempts"].append(closeout.returncode)
-                    if closeout.returncode != 0:
-                        runner["closeout_warning"] = (
-                            f"Hermes closeout exited with status {closeout.returncode}"
-                        )
-                        break
-                runner["closeout_complete"] = not _engagement_needs_closeout(eng_dir)
-
             history_path = eng_dir / "state" / "history.md"
             execution_dir = eng_dir / "evidence" / "executions"
             has_commands = history_path.exists() and any(
@@ -509,22 +513,38 @@ def main() -> int:
                     failure_reason="Hermes returned without producing benchmark execution evidence",
                 )
 
-    finished = datetime.now()
+    finished = datetime.now(UTC)
     runner["completed_at"] = finished.isoformat()
     runner["duration_seconds"] = round((finished - started).total_seconds(), 3)
 
-    # Score engagement results
-    print("\n=== SCORING ENGAGEMENT RESULTS ===")
-    results = score_engagement(eng_dir, receipt_key=receipt_key)
-    results["runner"] = runner
-    results["score_benchmark_pass"] = results["benchmark_pass"]
-    results["valid"] = runner["valid"]
-    results["benchmark_pass"] = bool(runner["valid"] and results["benchmark_pass"])
-    print_result(results)
+    results: dict = {"schema_version": 2, "runner": runner, "valid": runner["valid"]}
+    golden_path = REPO_ROOT / "benchmark" / "private" / "duck-store-golden.json"
+    if golden_path.is_file():
+        from benchmark.score import (  # noqa: PLC0415
+            generate_markdown_summary,
+            print_result,
+            score_engagement,
+        )
 
-    # Always write unique results into eng_dir
+        print("\n=== PRIVATE GOLDEN EVALUATION ===")
+        results.update(score_engagement(eng_dir, receipt_public_key=public_key_bytes))
+        results["runner"] = runner
+        results["valid"] = runner["valid"]
+        results["benchmark_pass"] = bool(runner["valid"] and results["benchmark_pass"])
+        print_result(results)
+        markdown = generate_markdown_summary(results)
+    else:
+        results["evaluation"] = "pending_private_evaluator"
+        markdown = "# Violin Benchmark Run\n\nPrivate evaluation pending.\n"
+
     (eng_dir / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-    (eng_dir / "results.md").write_text(generate_markdown_summary(results), encoding="utf-8")
+    (eng_dir / "results.md").write_text(markdown, encoding="utf-8")
+    manifest.update(
+        status=runner["status"],
+        completed_at=finished.isoformat(),
+        results_sha256=_sha256(eng_dir / "results.json"),
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Wrote benchmark results to {eng_dir / 'results.json'} and {eng_dir / 'results.md'}")
 
     if args.json_out:
@@ -534,12 +554,13 @@ def main() -> int:
 
     if args.markdown_out:
         args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
-        md_summary = generate_markdown_summary(results)
-        args.markdown_out.write_text(md_summary, encoding="utf-8")
+        args.markdown_out.write_text(markdown, encoding="utf-8")
         print(f"Wrote Markdown summary to {args.markdown_out}")
     if args.dry_run:
         return 0
-    return 0 if runner["valid"] and results["benchmark_pass"] else 1
+    if not runner["valid"]:
+        return 1
+    return 0 if "benchmark_pass" not in results or results["benchmark_pass"] else 1
 
 
 if __name__ == "__main__":

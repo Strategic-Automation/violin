@@ -258,53 +258,6 @@ def test_update_hypothesis_merge_existing_fields(ctf_eng):
     assert h2.status == "Validated"
 
 
-def test_findings_lowercase_hypothesis_id(ctf_eng):
-    """Verify _validate_from_pending_batch accepts lowercase 'h-001' hypothesis_id."""
-    from plugins.violin_guard.core import findings, hypotheses
-
-    h_file = ctf_eng / "hypotheses.md"
-    evidence = ctf_eng / "evidence" / "executions" / "1.json"
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text('{"status":"completed"}', encoding="utf-8")
-    hypotheses.update_hypothesis(
-        h_file,
-        id="H-001",
-        title="SQLi",
-        status="Validated",
-        runtime_evidence="evidence/executions/1.json",
-        in_scope_hosts={"10.129.2.5"},
-        target="10.129.2.5",
-    )
-
-    pending = {
-        "batch_id": "b1",
-        "commands": [{"command": "echo test"}],
-        "ptt_task_id": "PT-001",
-        "phase": "RECON",
-    }
-
-    # Write a dummy execution receipt matched by pending command
-    exec_dir = ctf_eng / "evidence" / "executions"
-    exec_record = {
-        "command": "echo test",
-        "evidence_paths": {"manifest": "evidence/executions/e1.json"},
-    }
-    (exec_dir / "e1.json").write_text(json.dumps(exec_record), encoding="utf-8")
-
-    draft = findings._validate_from_pending_batch(
-        ctf_eng,
-        pending,
-        title="SQLi Finding",
-        severity="High",
-        description="Desc",
-        impact="Impact",
-        remediation="Remediation",
-        finding_id="FIND-001",
-        hypothesis_id="h-001",
-    )
-    assert draft["hypothesis_id"] == "H-001"
-
-
 def test_terminal_policy_ipv6_target_blocked():
     """Verify raw terminal guard blocks IPv6 host literals."""
     from plugins.violin_guard.gates import terminal_policy

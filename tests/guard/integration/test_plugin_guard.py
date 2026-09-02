@@ -146,6 +146,7 @@ def test_meta_loaded():
         "handle_review_batch",
         "handle_record_ptt",
         "handle_record_hypothesis",
+        "handle_submit_finding",
         "handle_exec_burst",
     ):
         assert hasattr(TOOLS, name), f"plugin must expose {name}"
@@ -723,13 +724,8 @@ def test_exec_blocked_without_receipt_binding(monkeypatch, tmp_path):
     assert out["status"] in ("denied", "error")
 
 
-def test_exec_ok_response_carries_formalization_hint(tmp_path):
-    """A successful guarded execution must nudge hypothesis+FIND closure.
-
-    The 15-proof -> 13-validated gap comes from found evidence never being
-    formalized (Validated hypothesis + linked FIND citing the evidence).
-    The exec response reminds the agent to close the loop in one step.
-    """
+def test_exec_ok_response_carries_hypothesis_review_hint(tmp_path):
+    """A successful guarded execution nudges the immediate evidence review."""
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
 

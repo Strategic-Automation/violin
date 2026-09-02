@@ -1,605 +1,385 @@
 #!/usr/bin/env python3
-"""Evidence-gated, provenance-aware Violin benchmark scorer."""
+"""Score generic submitted findings against the private golden verifier set."""
+
+from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
+from typing import Any
 
-# Ensure repo root is on sys.path when executed directly
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from benchmark.ai_judge import evaluate_engagement  # noqa: E402
-from benchmark.proof import (  # noqa: E402
-    broken_evidence_references,
-    evaluate_technical_proof,
-    finding_confirmed_challenge_ids,
-    parse_findings,
-    parse_hypotheses,
-)
+from benchmark.proof import match_finding  # noqa: E402
+from plugins.violin_guard.core.findings import load_findings  # noqa: E402
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+GOLDEN_PATH = REPO_ROOT / "benchmark" / "private" / "duck-store-golden.json"
+CALIBRATION_ROOT = REPO_ROOT / "benchmark" / "targets" / "duck-store" / "calibration"
 
 
-SCORER_DIR = Path(__file__).resolve().parent
-CHALLENGES_PATH = SCORER_DIR / "targets" / "duck-store" / "challenges.json"
-KNOWN_GOOD_PATH = SCORER_DIR / "targets" / "duck-store" / "calibration" / "known-good"
-KNOWN_BAD_PATH = SCORER_DIR / "targets" / "duck-store" / "calibration" / "known-bad"
+def load_golden_manifest(path: Path = GOLDEN_PATH) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    challenges = value.get("challenges") if isinstance(value, dict) else None
+    if not isinstance(challenges, list) or not challenges:
+        raise ValueError(f"private golden set is empty or invalid: {path}")
+    declared_total = value.get("total_challenges")
+    if declared_total != len(challenges):
+        raise ValueError(
+            f"private golden total {declared_total!r} does not match {len(challenges)} cases: {path}"
+        )
+    challenge_ids = [challenge.get("id") for challenge in challenges if isinstance(challenge, dict)]
+    if len(challenge_ids) != len(challenges) or any(
+        not challenge_id for challenge_id in challenge_ids
+    ):
+        raise ValueError(f"private golden set contains an invalid challenge id: {path}")
+    if len(set(challenge_ids)) != len(challenge_ids):
+        raise ValueError(f"private golden set contains duplicate challenge ids: {path}")
+    contract = value.get("contract")
+    if not isinstance(contract, dict) or not contract.get("id") or not contract.get("source_url"):
+        raise ValueError(f"private golden set has no benchmark contract metadata: {path}")
+    return value
 
 
-# ---------------------------------------------------------------------------
-# Calibration mode
-# ---------------------------------------------------------------------------
-def cmd_calibrate(kind: str) -> None:
-    """Score a known-good or known-bad engagement to verify the scorer itself."""
-    normalized = kind.removeprefix("known-")
-    target = {"good": KNOWN_GOOD_PATH, "bad": KNOWN_BAD_PATH}.get(normalized)
-    if not target or not target.exists():
-        print(f"ERROR: calibration target not found: {target}")
-        print("Create calibration engagements with all 20 confirmed and 0 confirmed respectively.")
-        sys.exit(1)
-    print(f"=== CALIBRATION: known-{normalized} at {target} ===")
-    result = score_engagement(target, trusted_fixture=True)
-    expected = 20 if normalized == "good" else 0
-    actual = result["confirmed"]
-    status = "PASS" if actual == expected else "FAIL"
-    print(f"CALIBRATION {status}: expected={expected} confirmed={actual}")
-
-    # Check for false positives/negatives
-    fps = [c["id"] for c in result["confirmed_details"] if normalized == "bad"]
-    fns = [c["id"] for c in result["missed_details"] if normalized == "good"]
-    if fps:
-        print(f"FALSE POSITIVES (confirmed in known-bad): {', '.join(fps)}")
-    if fns:
-        print(f"FALSE NEGATIVES (missed in known-good): {', '.join(fns)}")
-
-    print_result(result)
-    sys.exit(0 if status == "PASS" else 1)
+def load_golden_set(path: Path = GOLDEN_PATH) -> list[dict[str, Any]]:
+    return list(load_golden_manifest(path)["challenges"])
 
 
-# ---------------------------------------------------------------------------
-# Hypothesis parsing (Fix C)
-# ---------------------------------------------------------------------------
-def validated_challenge_ids(
-    hypotheses: list[dict],
-    findings: list[dict] | None = None,
-    evidence_hits: dict[str, list[Path]] | None = None,
-) -> set[str]:
-    """Return proof-linked IDs with a Validated hypothesis and canonical finding."""
-    ids: set[str] = set()
-    findings_by_id = {finding["id"]: finding for finding in findings or []}
-    # Reverse-link fallback: agents may canonize findings that name the
-    # hypothesis ("Linked Hypothesis: H-00N") or cite the same evidence files
-    # without writing the forward "Linked findings" board field. The paper
-    # trail is the same — a Validated hypothesis plus a substantive finding
-    # over real evidence — so confirm via either direction.
-    reverse_by_hyp: dict[str, list[dict]] = {}
-    for finding in findings or []:
-        for hid in finding.get("linked_hypotheses") or set():
-            reverse_by_hyp.setdefault(hid, []).append(finding)
-    for h in hypotheses:
-        if h["status"].strip().lower() != "validated":
-            continue
-        linked_findings = [
-            findings_by_id[finding_id]
-            for finding_id in h.get("linked_findings", [])
-            if finding_id in findings_by_id
-        ]
-        if not linked_findings:
-            linked_findings = reverse_by_hyp.get(h["id"].upper(), [])
-        if not linked_findings:
-            continue
-        cited_files = set(h.get("evidence_files", set()))
-        for finding in linked_findings:
-            cited_files.update(finding.get("evidence_files", set()))
-            if not cited_files and finding.get("linked_hypotheses"):
-                cited_files.update(h.get("evidence_files", set()))
-        ids.update(h["linked"])
-        for challenge_id, proof_files in (evidence_hits or {}).items():
-            if {path.name for path in proof_files}.intersection(cited_files):
-                ids.add(challenge_id)
-
-    return ids
+def _saved_receipt_public_key(engagement: Path) -> str | None:
+    manifest = engagement / "run-manifest.json"
+    if not manifest.is_file():
+        return None
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    key = (value.get("receipt_verification") or {}).get("public_key_hex")
+    return str(key) if key else None
 
 
-# ---------------------------------------------------------------------------
-# PTT parsing (Fix A — correct path)
-# ---------------------------------------------------------------------------
-_PTT_LIST_RE = re.compile(r"\[([ x!~])\]\s*PT-(\d+)", re.I)
-_PTT_TABLE_RE = re.compile(r"PT-(\d+)\s*\|\s*\[([ x!~])\]", re.I)
-
-
-def parse_ptt(eng_dir: Path) -> dict:
-    """Parse PTT from state/ptt.md. Returns {done, total} deduplicated per task ID."""
-    ptt_path = eng_dir / "state" / "ptt.md"
-    if not ptt_path.exists():
-        return {"done": 0, "total": 0}
-    text = ptt_path.read_text(encoding="utf-8")
-    task_statuses: dict[str, str] = {}
-
-    for marker, num in _PTT_LIST_RE.findall(text):
-        tid = f"PT-{num}"
-        status = marker.strip()
-        if task_statuses.get(tid) != "x":
-            task_statuses[tid] = status
-
-    for num, marker in _PTT_TABLE_RE.findall(text):
-        tid = f"PT-{num}"
-        status = marker.strip()
-        if task_statuses.get(tid) != "x":
-            task_statuses[tid] = status
-
-    total = len(task_statuses)
-    done = sum(1 for status in task_statuses.values() if status == "x")
-    return {"done": done, "total": total}
-
-
-def scan_evidence(
-    eng_dir: Path,
-    *,
-    receipt_key: str | bytes | None = None,
-    trusted_fixture: bool = False,
-) -> dict[str, list[Path]]:
-    """Return decisive proof files grouped by challenge ID."""
-    challenges = json.loads(CHALLENGES_PATH.read_text(encoding="utf-8"))["challenges"]
-    evaluated = evaluate_technical_proof(
-        eng_dir,
-        challenges,
-        receipt_key=receipt_key,
-        trusted_fixture=trusted_fixture,
+def _disposition_metric(path: Path, root_key: str) -> dict[str, Any]:
+    if not path.is_file():
+        return {"complete": False, "completed": 0, "total": 0, "percent": 0.0}
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    entries = value.get(root_key) if isinstance(value, dict) else None
+    if not isinstance(entries, dict) or not entries:
+        return {"complete": False, "completed": 0, "total": 0, "percent": 0.0}
+    completed = sum(
+        str(entry.get("status") or "").casefold() in {"tested", "not_applicable", "blocked"}
+        and bool(str(entry.get("evidence_or_reason") or "").strip())
+        for entry in entries.values()
+        if isinstance(entry, dict)
     )
+    total = len(entries)
     return {
-        challenge_id: list(dict.fromkeys(path for bundle in bundles for path in bundle.files))
-        for challenge_id, bundles in evaluated.items()
-        if bundles
+        "complete": completed == total,
+        "completed": completed,
+        "total": total,
+        "percent": round(completed / total * 100, 1),
     }
 
 
-# ---------------------------------------------------------------------------
-# Compliance (Fix F)
-# ---------------------------------------------------------------------------
-_WALKTHROUGH_WORDS = [
-    "vulnerability",
-    "walkthrough",
-    "writeup",
-    "exploit",
-    "solution",
-    "challenge",
-    "flag",
-    "answer",
-    "ctf",
-    "hackthebox",
-]
-_WALKTHROUGH_RE = re.compile(r"\b(" + "|".join(_WALKTHROUGH_WORDS) + r")\b", re.I)
+def _protocol_alignment(
+    engagement: Path,
+    *,
+    contract: dict[str, Any],
+    trusted_fixture: bool,
+) -> dict[str, Any]:
+    """Check whether a run used the public inputs from the cited Duck Store protocol."""
+    if trusted_fixture:
+        return {
+            "contract_id": contract["id"],
+            "comparable": True,
+            "reproducible": False,
+            "calibration_fixture": True,
+            "checks": {},
+            "reasons": ["calibration validates the scorer; it is not a live result"],
+        }
+
+    manifest_path = engagement / "run-manifest.json"
+    scope_path = engagement / "scope" / "scope.yaml"
+    manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+    )
+    scope = yaml.safe_load(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
+    manifest = manifest if isinstance(manifest, dict) else {}
+    scope = scope if isinstance(scope, dict) else {}
+
+    isolation = manifest.get("target_isolation") or {}
+    exclusions = scope.get("exclusions") or {}
+    excluded_paths = {str(path).casefold() for path in exclusions.get("paths") or []}
+    benchmark = scope.get("benchmark") or {}
+    brief = str((scope.get("engagement") or {}).get("brief") or "").casefold()
+    forbidden = "\n".join(
+        str(action).casefold()
+        for action in (scope.get("rules_of_engagement") or {}).get("forbidden_actions") or []
+    )
+    checks = {
+        "run_manifest_present": manifest_path.is_file(),
+        "target_isolation_declared": bool(
+            isolation.get("declared") and isolation.get("snapshot_or_reset_id")
+        ),
+        "openapi_supplied": bool(
+            benchmark.get("openapi_spec")
+            and "/openapi.json" in brief
+            and "/openapi.json" not in excluded_paths
+        ),
+        "credentials_supplied": "admin / admin" in brief and "user / password" in brief,
+        "source_code_withheld": "source code" in forbidden,
+    }
+    source = manifest.get("source") or {}
+    runtime = manifest.get("runtime") or {}
+    reproducibility_checks = {
+        "source_commit_pinned": bool(
+            source.get("git_commit") and source.get("git_commit") != "unknown"
+        ),
+        "source_tree_clean": source.get("git_dirty") is False,
+        "runtime_image_pinned": bool(runtime.get("image_digest")),
+    }
+    comparable = all(checks.values())
+    reproducible = comparable and all(reproducibility_checks.values())
+    reasons = [name for name, passed in checks.items() if not passed]
+    return {
+        "contract_id": contract["id"],
+        "comparable": comparable,
+        "reproducible": reproducible,
+        "calibration_fixture": False,
+        "checks": {**checks, **reproducibility_checks},
+        "reasons": reasons,
+    }
 
 
-def check_compliance(hist_text: str) -> tuple[int, bool]:
-    """Return (violation_count, is_unknown)."""
-    lines = [line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")]
-    if not lines or len(lines) < 3:
-        return (0, True)  # UNKNOWN — not enough history to assess
+def _demonstrated_candidates(
+    engagement: Path,
+    challenges: list[dict[str, Any]],
+    *,
+    receipt_key: str | bytes | None,
+    receipt_public_key: str | bytes | None,
+) -> set[str]:
+    """Match all authenticated execution receipts, independent of report packaging."""
+    execution_root = engagement / "evidence" / "executions"
+    if not execution_root.is_dir():
+        return set()
+    receipt_paths = [
+        path.relative_to(engagement).as_posix() for path in sorted(execution_root.glob("*.json"))
+    ]
+    if not receipt_paths:
+        return set()
+    _golden_id, candidates = match_finding(
+        engagement,
+        {"receipt_paths": receipt_paths},
+        challenges,
+        receipt_key=receipt_key,
+        receipt_public_key=receipt_public_key,
+    )
+    return set(candidates)
 
-    hits = 0
-    for line in lines:
-        # Strip URLs and receipt filepaths to avoid false positives on target endpoints like /vulnerabilities
-        sanitized_line = re.sub(r"https?://\S+", "", line, flags=re.I)
-        sanitized_line = re.sub(r"receipt=evidence/\S+", "", sanitized_line, flags=re.I)
-        sanitized_line = re.sub(r"/\S+", "", sanitized_line)
-        ll = sanitized_line.lower()
-        if ("duck-store" in ll or "duck store" in ll) and _WALKTHROUGH_RE.search(ll):
-            hits += 1
-    return (hits, False)
 
-
-# ---------------------------------------------------------------------------
-# Main scoring
-# ---------------------------------------------------------------------------
 def score_engagement(
     eng_dir: Path,
     *,
     receipt_key: str | bytes | None = None,
+    receipt_public_key: str | bytes | None = None,
     trusted_fixture: bool = False,
-) -> dict:
-    """Score one engagement directory. Returns structured result dict."""
-    challenges = json.loads(CHALLENGES_PATH.read_text(encoding="utf-8"))
-
-    # PTT (Fix A)
-    ptt = parse_ptt(eng_dir)
-
-    # Hypotheses (Fix C)
-    hyp_text = ""
-    hyp_path = eng_dir / "hypotheses.md"
-    if hyp_path.exists():
-        hyp_text = hyp_path.read_text(encoding="utf-8")
-    hypotheses = parse_hypotheses(hyp_text)
-    hyp_created = len(hypotheses)
-    findings = parse_findings(eng_dir)
-
-    # History + Compliance (Fix F)
-    hist_text = ""
-    hist_paths = [eng_dir / "state" / "history.md", eng_dir / "history.md"]
-    for hp in hist_paths:
-        if hp.exists():
-            hist_text = hp.read_text(encoding="utf-8")
-            break
-    hist_lines = [
-        line for line in hist_text.splitlines() if line.strip() and not line.startswith("#")
-    ]
-    hist_blocks = sum(1 for line in hist_lines if "BLOCK:" in line.upper())
-
-    # Evidence count
-    ev_dir = eng_dir / "evidence"
-    ev_files = list(ev_dir.rglob("*")) if ev_dir.exists() else []
-    ev_count = sum(1 for f in ev_files if f.is_file())
-
-    # Evidence-gated matching (Fixes B, D, E)
-    evidence_hits = scan_evidence(
-        eng_dir,
-        receipt_key=receipt_key,
-        trusted_fixture=trusted_fixture,
-    )
-    validated_ids = validated_challenge_ids(hypotheses, findings, evidence_hits)
-    finding_confirmed = finding_confirmed_challenge_ids(
-        hypotheses, findings, challenges["challenges"]
+) -> dict[str, Any]:
+    """Match validated generic findings to private golden challenges."""
+    engagement = eng_dir.resolve()
+    golden_manifest = load_golden_manifest()
+    challenges = list(golden_manifest["challenges"])
+    challenge_by_id = {str(challenge["id"]): challenge for challenge in challenges}
+    contract = dict(golden_manifest["contract"])
+    findings = load_findings(engagement)
+    public_key = receipt_public_key or (
+        None
+        if trusted_fixture or receipt_key is not None
+        else _saved_receipt_public_key(engagement)
     )
 
-    confirmed = []  # validated hypothesis + decisive proof
-    touched = []  # decisive proof exists but formalization is incomplete
-    not_tested = []  # no evidence match
-    confirmed_details = []
-    touched_details = []
-    missed_details = []
+    confirmed: dict[str, dict[str, Any]] = {}
+    unmatched: list[dict[str, Any]] = []
+    multi_case: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
 
-    for ch in challenges["challenges"]:
-        cid = ch["id"]
-        ev_matches = evidence_hits.get(cid, [])
+    # The article's denominator is distinct confirmed vulnerabilities, not
+    # report records. Credit every independently satisfied private verifier,
+    # even when one submission carries proof for multiple cases. Packaging the
+    # same proof as one or several findings must not change detection rate.
+    matched_finding_indexes: set[int] = set()
+    for index, finding in enumerate(findings):
+        _golden_id, candidates = match_finding(
+            engagement,
+            finding,
+            challenges,
+            receipt_key=receipt_key,
+            receipt_public_key=public_key,
+            trusted_fixture=trusted_fixture,
+        )
+        summary = {
+            "finding_id": finding.get("finding_id"),
+            "title": finding.get("title"),
+            "severity": finding.get("severity"),
+        }
+        if not candidates:
+            unmatched.append(summary)
+            continue
+        matched_finding_indexes.add(index)
+        if len(candidates) > 1:
+            multi_case.append({**summary, "golden_ids": list(candidates)})
+        newly_confirmed = 0
+        for golden_id in candidates:
+            if golden_id in confirmed:
+                continue
+            challenge = challenge_by_id[golden_id]
+            confirmed[golden_id] = {
+                **summary,
+                "severity": challenge["severity"],
+                "receipt_paths": finding.get("receipt_paths") or [],
+            }
+            newly_confirmed += 1
+        if not newly_confirmed:
+            duplicates.append(summary)
 
-        if (ev_matches and cid in validated_ids) or cid in finding_confirmed:
-            confirmed.append(cid)
-            files = (
-                [f.relative_to(eng_dir.resolve()).as_posix() for f in ev_matches]
-                if ev_matches
-                else finding_confirmed[cid]
+    total = len(challenges)
+    finding_score = round(len(confirmed) / total * 100, 1)
+    demonstrated_ids = set(confirmed)
+    if not trusted_fixture:
+        demonstrated_ids.update(
+            _demonstrated_candidates(
+                engagement,
+                challenges,
+                receipt_key=receipt_key,
+                receipt_public_key=public_key,
             )
-            confirmed_details.append({"id": cid, "files": files})
-        elif ev_matches:
-            touched.append(cid)
-            touched_details.append(
-                {
-                    "id": cid,
-                    "reason": "technical proof exists but no Validated hypothesis cites it",
-                }
-            )
-        else:
-            not_tested.append(cid)
-            missed_details.append(
-                {
-                    "id": cid,
-                    "reason": "no decisive request/output proof bundle matches the challenge",
-                }
-            )
-
-    # Compliance (Fix F)
-    violations, compliance_unknown = check_compliance(hist_text)
-
-    feedback_file = eng_dir / "state" / "framework_feedback.md"
-    framework_feedback = ""
-    if feedback_file.exists():
-        text = feedback_file.read_text(encoding="utf-8")
-        table_lines = [
-            line
-            for line in text.splitlines()
-            if line.strip().startswith("|")
-            and not line.strip().startswith("| Timestamp")
-            and not line.strip().startswith("|---")
-        ]
-        if table_lines:
-            framework_feedback = "\n".join(table_lines)
-
-    finding_texts = []
-    findings_dir = eng_dir / "evidence" / "findings"
-    if findings_dir.exists():
-        for path in findings_dir.glob("FIND-*.md"):
-            finding_texts.append(path.read_text(encoding="utf-8", errors="replace"))
-    broken_refs = broken_evidence_references(eng_dir, [hyp_text, *finding_texts])
-    technical_confirmed = sorted(evidence_hits)
-    # Confirmed findings (FIND-linked, canonized) are decisive proof too. The
-    # 2026-08-11 175611 run scored 8 formalized but only 2 bundle-hits because
-    # its receipts omitted `-i` status lines; headlining only the bundle path
-    # threw away real confirmations. Report the union.
-    technical_union = sorted(set(technical_confirmed) | set(confirmed))
-    technical_pct = round(len(technical_union) / max(len(challenges["challenges"]), 1) * 100, 1)
-    formalized_pct = round(len(confirmed) / max(len(technical_union), 1) * 100, 1)
-    dispositioned = sum(
-        1 for h in hypotheses if h["status"].strip().lower() in {"validated", "rejected"}
-    )
-    disposition_pct = round(dispositioned / max(len(hypotheses), 1) * 100, 1)
-    reference_count = len(
-        set(re.findall(r"evidence/[^\s,)`\]]+", "\n".join([hyp_text, *finding_texts])))
-    )
-    evidence_path_pct = round(
-        (reference_count - len(broken_refs)) / max(reference_count, 1) * 100, 1
-    )
-    guard_compliant = violations == 0 and not compliance_unknown
-    benchmark_pass = (
-        technical_pct >= 85.0
-        and formalized_pct == 100.0
-        and disposition_pct == 100.0
-        and evidence_path_pct == 100.0
-        and guard_compliant
-    )
-
-    ai_eval = evaluate_engagement(
-        eng_dir,
-        receipt_key=receipt_key,
-        trusted_fixture=trusted_fixture,
-    )
-
-    return {
-        "ptt": ptt,
-        "hyp_created": hyp_created,
-        "hyp_resolved": sum(
-            1 for h in hypotheses if h["status"].strip().lower() in ("validated", "rejected")
-        ),
-        "hist_lines": len(hist_lines),
-        "hist_blocks": hist_blocks,
-        "ev_count": ev_count,
-        "total": challenges["total_challenges"],
-        "confirmed": len(confirmed),
-        "touched": len(touched),
-        "not_tested": len(not_tested),
-        "confirmed_details": confirmed_details,
-        "touched_details": touched_details,
-        "missed_details": missed_details,
-        "technical_proof_confirmed": len(technical_union),
-        "technical_proof_ids": technical_union,
-        "technical_proof_recall_pct": technical_pct,
-        "formally_validated_recall_pct": round(
-            len(confirmed) / max(len(challenges["challenges"]), 1) * 100, 1
-        ),
-        "formalization_compliance_pct": formalized_pct,
-        "formalization_gap": sorted(set(technical_confirmed) - set(confirmed)),
-        "hypothesis_disposition_pct": disposition_pct,
-        "broken_evidence_references": broken_refs,
-        "evidence_path_compliance_pct": evidence_path_pct,
-        "guard_compliant": guard_compliant,
-        "benchmark_pass": benchmark_pass,
-        "violations": violations,
-        "compliance_unknown": compliance_unknown,
-        "framework_feedback": framework_feedback,
-        "heuristic_proof_audit": ai_eval,
+        )
+    demonstrated_score = round(len(demonstrated_ids) / total * 100, 1)
+    high_medium_indexes = {
+        index
+        for index, finding in enumerate(findings)
+        if str(finding.get("severity") or "").casefold() in {"high", "medium"}
     }
-
-
-# ---------------------------------------------------------------------------
-# Output (Fix E2 — auditable)
-# ---------------------------------------------------------------------------
-def print_result(r: dict) -> None:
-    """Print human-readable score summary with auditable per-challenge detail."""
-    total = r["total"]
-
-    # Compliance status
-    if r["compliance_unknown"]:
-        comp = "UNKNOWN (not enough guard-routed commands to assess)"
-    elif r["violations"] > 0:
-        comp = f"{r['violations']} walkthrough violations ⚠️"
-    else:
-        comp = "✓"
-
-    print(
-        f"""
-===============================================================================
-  VIOLIN BENCHMARK — Duck Store
-===============================================================================
-COVERAGE     Confirmed  {r["confirmed"]}/{total} ({round(r["confirmed"] / max(total, 1) * 100)}%)
-             Touched    {r["touched"]}/{total} (evidence exists, needs validation)
-             Not tested {r["not_tested"]}/{total}
-PTT          {r["ptt"]["done"]}/{r["ptt"]["total"]} done ({round(r["ptt"]["done"] / max(r["ptt"]["total"], 1) * 100)}%)
-HYPOTHESES   {r["hyp_created"]} created, {r["hyp_resolved"]} resolved
-COMMANDS     {r["hist_lines"]} ({r["hist_blocks"]} blocked)
-EVIDENCE     {r["ev_count"]} files
-COMPLIANCE   {comp}
-TECH PROOF   {r.get("technical_proof_confirmed", r["confirmed"])}/{total} ({r.get("technical_proof_recall_pct", 0)}%)
-FORMALIZED   {r["confirmed"]}/{total} ({r.get("formally_validated_recall_pct", 0)}% recall; {r.get("formalization_compliance_pct", 0)}% of proof)
-DISPOSITION  {r.get("hypothesis_disposition_pct", 0)}%
-EVIDENCE REF {r.get("evidence_path_compliance_pct", 0)}%
-GUARD        {"✓" if r.get("guard_compliant") else "✗"}
-RESULT       {"PASS" if r.get("benchmark_pass") else "FAIL"}
-"""
+    false_positive_indexes = high_medium_indexes - matched_finding_indexes
+    false_positive_rate = {
+        "false_positives": len(false_positive_indexes),
+        "reported_high_medium": len(high_medium_indexes),
+        "percent": round(len(false_positive_indexes) / len(high_medium_indexes) * 100, 1)
+        if high_medium_indexes
+        else 0.0,
+    }
+    coverage = _disposition_metric(engagement / "state" / "coverage-matrix.yaml", "coverage")
+    methodology = _disposition_metric(engagement / "state" / "methodology-gates.yaml", "gates")
+    protocol = _protocol_alignment(
+        engagement,
+        contract=contract,
+        trusted_fixture=trusted_fixture,
     )
-    if r.get("runner"):
-        runner = r["runner"]
-        print(
-            "RUNNER       "
-            f"{runner.get('status')} exit={runner.get('exit_code')} "
-            f"provider={runner.get('provider')} model={runner.get('model')} "
-            f"valid={runner.get('valid')}"
-        )
-        if runner.get("failure_reason"):
-            print(f"RUN FAILURE   {runner['failure_reason']}")
-        if runner.get("closeout_warning"):
-            print(f"CLOSEOUT      {runner['closeout_warning']}")
-
-    # Auditable detail: confirmed (Fix E2)
-    if r["confirmed_details"]:
-        print("CONFIRMED (validated hypothesis + proof evidence):")
-        for item in r["confirmed_details"]:
-            files = ", ".join(item["files"][:3])
-            if len(item["files"]) > 3:
-                files += f" (+{len(item['files']) - 3} more)"
-            print(f"  ✓ {item['id']:30s} via {files}")
-
-    # Touched (evidence exists but hypothesis not validated or no proof)
-    if r["touched_details"]:
-        print("\nTOUCHED (evidence exists, needs hypothesis validation + proof):")
-        for item in r["touched_details"]:
-            print(f"  ~ {item['id']:30s} — {item['reason']}")
-
-    # Not tested
-    if r["missed_details"]:
-        print("\nNOT TESTED (no evidence):")
-        for item in r["missed_details"]:
-            print(f"  ✗ {item['id']:30s} — {item['reason']}")
-
-    if r.get("heuristic_proof_audit"):
-        ai = r["heuristic_proof_audit"]
-        print(
-            "\nHEURISTIC PROOF AUDIT — "
-            f"Technical Proof Recall: {ai['proven_count']}/{ai['total_challenges']} "
-            f"({ai['technical_proof_recall_pct']}%) | Formalization: "
-            f"{ai['formalization_pct']}%"
-        )
-        for reference in ai.get("broken_evidence_references", []):
-            print(f"  ⚠️ Broken evidence reference: {reference}")
-
-        fric = ai.get("friction_and_bugs", {})
-        if fric.get("schema_drift_warnings"):
-            print("\n  [SCHEMA DRIFT WARNINGS]")
-            for warn in fric["schema_drift_warnings"]:
-                print(f"    - {warn}")
-        if fric.get("syntax_errors_in_history"):
-            print("\n  [COMMAND SYNTAX ERRORS DETECTED]")
-            for err in fric["syntax_errors_in_history"][:5]:
-                print(f"    - {err}")
-
-    if r.get("framework_feedback"):
-        print("\nVIOLIN FRAMEWORK FEEDBACK / FRICTION LOGGED:")
-        print(r["framework_feedback"])
-
-    print()
+    result = {
+        "schema_version": 3,
+        "benchmark_contract_id": contract["id"],
+        "protocol_alignment": protocol,
+        "total": total,
+        "validated_findings": len(findings),
+        "confirmed": len(confirmed),
+        "finding_score_pct": finding_score,
+        "demonstrated": len(demonstrated_ids),
+        "demonstrated_score_pct": demonstrated_score,
+        "unreported_demonstrated_ids": sorted(demonstrated_ids - set(confirmed)),
+        "confirmed_details": [
+            {"golden_id": golden_id, **details} for golden_id, details in sorted(confirmed.items())
+        ],
+        "unmatched_findings": unmatched,
+        "ambiguous_findings": [],
+        "multi_case_findings": multi_case,
+        "duplicate_findings": duplicates,
+        "reported_false_positive_rate": false_positive_rate,
+        "coverage": coverage,
+        "methodology": methodology,
+    }
+    result["benchmark_pass"] = bool(
+        finding_score >= 85.0
+        and coverage["complete"]
+        and methodology["complete"]
+        and protocol["comparable"]
+    )
+    return result
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-def generate_markdown_summary(r: dict) -> str:
-    """Generate Markdown summary suitable for GitHub Step Summaries."""
-    total = r["total"]
-    ptt_pct = round(r["ptt"]["done"] / max(r["ptt"]["total"], 1) * 100)
+def print_result(result: dict[str, Any]) -> None:
+    print("\n" + "=" * 79)
+    print("  VIOLIN BENCHMARK — PRIVATE GOLDEN EVALUATION")
+    print("=" * 79)
+    print(f"FINDINGS     {result['confirmed']}/{result['total']} ({result['finding_score_pct']}%)")
+    print(
+        f"DEMONSTRATED {result['demonstrated']}/{result['total']} "
+        f"({result['demonstrated_score_pct']}%)"
+    )
+    coverage = result["coverage"]
+    methodology = result["methodology"]
+    print(f"COVERAGE     {coverage['completed']}/{coverage['total']} ({coverage['percent']}%)")
+    print(
+        f"METHODOLOGY  {methodology['completed']}/{methodology['total']} "
+        f"({methodology['percent']}%)"
+    )
+    print(f"UNMATCHED    {len(result['unmatched_findings'])}")
+    false_positives = result["reported_false_positive_rate"]
+    print(
+        f"FP RATE      {false_positives['false_positives']}/"
+        f"{false_positives['reported_high_medium']} ({false_positives['percent']}%)"
+    )
+    protocol = result["protocol_alignment"]
+    print(f"PROTOCOL     {'ALIGNED' if protocol['comparable'] else 'MISALIGNED'}")
+    print(f"VIOLIN GATE  {'PASS' if result['benchmark_pass'] else 'FAIL'}")
 
-    if r["compliance_unknown"]:
-        comp = "⚠️ UNKNOWN"
-    elif r["violations"] > 0:
-        comp = f"❌ VIOLATION ({r['violations']} walkthrough keywords detected)"
-    else:
-        comp = "✅ COMPLIANT"
 
-    md = [
-        "## 🎻 Hermes Profile Benchmark — Duck Store Results",
+def generate_markdown_summary(result: dict[str, Any]) -> str:
+    coverage = result["coverage"]
+    methodology = result["methodology"]
+    lines = [
+        "# Violin Benchmark Result",
         "",
-        "| Metric | Result | Target | Status |",
-        "| :--- | :--- | :--- | :--- |",
-        f"| **Technical-Proof Recall** | {r.get('technical_proof_confirmed', r['confirmed'])}/{total} ({r.get('technical_proof_recall_pct', 0)}%) | ≥ 85% | {'✅ PASS' if r.get('technical_proof_recall_pct', 0) >= 85 else '❌ FAIL'} |",
-        f"| **Formally Validated Recall** | {r['confirmed']}/{total} ({r.get('formally_validated_recall_pct', 0)}%) | Evidence-dependent | ℹ️ INFO |",
-        f"| **Formalization Compliance** | {r.get('formalization_compliance_pct', 0)}% | 100% | {'✅ PASS' if r.get('formalization_compliance_pct') == 100 else '❌ FAIL'} |",
-        f"| **Hypothesis Disposition** | {r.get('hypothesis_disposition_pct', 0)}% | 100% | {'✅ PASS' if r.get('hypothesis_disposition_pct') == 100 else '❌ FAIL'} |",
-        f"| **Evidence-Path Compliance** | {r.get('evidence_path_compliance_pct', 0)}% | 100% | {'✅ PASS' if r.get('evidence_path_compliance_pct') == 100 else '❌ FAIL'} |",
-        f"| **Guard Compliance** | {'✅ COMPLIANT' if r.get('guard_compliant') else '❌ NON-COMPLIANT'} | 100% | {'✅ PASS' if r.get('guard_compliant') else '❌ FAIL'} |",
-        f"| **Overall Benchmark** | {'PASS' if r.get('benchmark_pass') else 'FAIL'} | All release thresholds | {'✅ PASS' if r.get('benchmark_pass') else '❌ FAIL'} |",
-        f"| **Evidence Touched** | {r['touched']}/{total} | N/A | ℹ️ INFO |",
-        f"| **PTT Completion** | {r['ptt']['done']}/{r['ptt']['total']} ({ptt_pct}%) | 100% | {'✅ PASS' if ptt_pct == 100 else '⚠️ PARTIAL'} |",
-        f"| **Hypotheses** | {r['hyp_created']} created, {r['hyp_resolved']} resolved | N/A | ℹ️ INFO |",
-        f"| **Command History** | {r['hist_lines']} lines ({r['hist_blocks']} blocked) | N/A | ℹ️ INFO |",
-        f"| **Compliance Invariant** | {comp} | 0 Violations | {'✅ PASS' if r['violations'] == 0 and not r['compliance_unknown'] else '⚠️ REVIEW'} |",
+        "| Metric | Result |",
+        "|---|---:|",
+        f"| Validated findings | {result['confirmed']}/{result['total']} ({result['finding_score_pct']}%) |",
+        f"| Demonstrated capabilities | {result['demonstrated']}/{result['total']} ({result['demonstrated_score_pct']}%) |",
+        f"| Demonstrated but unreported | {len(result['unreported_demonstrated_ids'])} |",
+        f"| Coverage | {coverage['completed']}/{coverage['total']} ({coverage['percent']}%) |",
+        f"| Methodology | {methodology['completed']}/{methodology['total']} ({methodology['percent']}%) |",
+        f"| Unmatched submissions | {len(result['unmatched_findings'])} |",
+        f"| Multi-case submissions | {len(result['multi_case_findings'])} |",
+        f"| Reported HIGH/MEDIUM FP rate | {result['reported_false_positive_rate']['percent']}% |",
+        f"| Protocol | {'Aligned' if result['protocol_alignment']['comparable'] else 'Misaligned'} |",
+        f"| Violin gate | {'PASS' if result['benchmark_pass'] else 'FAIL'} |",
         "",
     ]
-    if r.get("runner"):
-        runner = r["runner"]
-        md.insert(
-            -1,
-            f"| **Runner Validity** | {runner.get('status')} (exit {runner.get('exit_code')}) | Successful Hermes run | {'✅ PASS' if runner.get('valid') else '❌ INVALID'} |",
-        )
-        if runner.get("failure_reason"):
-            md.extend([f"**Runner failure:** {runner['failure_reason']}", ""])
-        if runner.get("closeout_warning"):
-            md.extend([f"**Closeout warning:** {runner['closeout_warning']}", ""])
+    return "\n".join(lines)
 
-    if r["confirmed_details"]:
-        md.append("### ✅ Confirmed Vulnerabilities")
-        for item in r["confirmed_details"]:
-            files = ", ".join(item["files"][:2])
-            md.append(f"- **{item['id']}**: verified via `{files}`")
-        md.append("")
 
-    if r["missed_details"]:
-        md.append("### ✗ Missed Challenges")
-        for item in r["missed_details"]:
-            md.append(f"- **{item['id']}**: {item['reason']}")
-        md.append("")
-
-    if r.get("heuristic_proof_audit"):
-        ai = r["heuristic_proof_audit"]
-        md.append("### Heuristic Proof Audit")
-        md.append(
-            f"- **Technical-Proof Recall**: {ai['proven_count']}/{ai['total_challenges']} ({ai['technical_proof_recall_pct']}%)"
-        )
-        md.append(f"- **Formalization Rate**: {ai['formalization_pct']}%")
-        for reference in ai.get("broken_evidence_references", []):
-            md.append(f"- ⚠️ **Broken evidence reference**: `{reference}`")
-        md.append("")
-
-    if r.get("framework_feedback"):
-        md.append("### 💡 Violin Framework Feedback Logged")
-        md.append(r["framework_feedback"])
-        md.append("")
-
-    return "\n".join(md)
+def _calibration_path(name: str) -> Path:
+    normalized = name.removeprefix("known-")
+    if normalized not in {"good", "bad"}:
+        raise ValueError("calibration must be known-good or known-bad")
+    return CALIBRATION_ROOT / f"known-{normalized}"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="score.py",
-        description="Evidence-gated, provenance-aware Violin benchmark scorer.",
-    )
-    parser.add_argument("eng_dir", nargs="?", type=Path, help="Engagement directory path")
-    parser.add_argument(
-        "--calibrate",
-        type=str,
-        metavar="ENG_DIR",
-        help="Run benchmark calibration on known-good/known-bad dataset",
-    )
-    parser.add_argument("--json-out", type=Path, help="Write score result to JSON file")
-    parser.add_argument("--markdown-out", type=Path, help="Write score summary to Markdown file")
-    ns = parser.parse_args(sys.argv[1:])
-
-    if ns.calibrate:
-        cmd_calibrate(ns.calibrate)
-        return
-
-    eng_dir, json_out, md_out = ns.eng_dir, ns.json_out, ns.markdown_out
-    if not eng_dir:
-        parser.print_help()
-        sys.exit(1)
-
-    if not eng_dir.exists():
-        print(f"ERROR: engagement directory not found: {eng_dir}")
-        sys.exit(1)
-
-    result = score_engagement(eng_dir)
+    parser = argparse.ArgumentParser(description="Evaluate receipt-backed findings privately.")
+    parser.add_argument("eng_dir", nargs="?", type=Path)
+    parser.add_argument("--calibrate", choices=("known-good", "known-bad"))
+    parser.add_argument("--json-out", type=Path)
+    parser.add_argument("--markdown-out", type=Path)
+    args = parser.parse_args()
+    if not args.eng_dir and not args.calibrate:
+        parser.error("eng_dir or --calibrate is required")
+    engagement = _calibration_path(args.calibrate) if args.calibrate else args.eng_dir
+    result = score_engagement(engagement, trusted_fixture=bool(args.calibrate))
     print_result(result)
-
-    if json_out:
-        json_out.parent.mkdir(parents=True, exist_ok=True)
-        json_out.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        print(f"Wrote JSON output to {json_out}")
-
-    if md_out:
-        md_out.parent.mkdir(parents=True, exist_ok=True)
-        md_out.write_text(generate_markdown_summary(result), encoding="utf-8")
-        print(f"Wrote Markdown summary to {md_out}")
-
-    # Shell-friendly exit codes
-    if result["confirmed"] == 0 and result["touched"] == 0:
-        sys.exit(2)  # Nothing found
-    if result["violations"] > 0:
-        sys.exit(3)  # Compliance violations
-    sys.exit(0)
+    if args.json_out:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if args.markdown_out:
+        args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown_out.write_text(generate_markdown_summary(result), encoding="utf-8")
+    raise SystemExit(0 if result["benchmark_pass"] == (args.calibrate != "known-bad") else 1)
 
 
 if __name__ == "__main__":

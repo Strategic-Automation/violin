@@ -1,4 +1,4 @@
-"""Batch review handlers, validation, and finding integration."""
+"""Batch review handlers and validation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..core import findings, hypotheses, ptt, state
+from ..core import ptt, state
 from ..core.history import history_contains
 from ..core.phases import requires_hypothesis
 from ..core.skill_policy import skill_spec
@@ -109,25 +109,6 @@ def _validate_review_history(eng_dir: str, pending: dict[str, Any]) -> None:
             )
 
 
-def _validate_review_finding(eng_dir: str, pending: dict[str, Any], finding: Any) -> None:
-    """Validate an optional finding payload against the pending batch."""
-    if finding is None:
-        return
-    if not isinstance(finding, dict):
-        raise ValueError("finding must be an object when supplied")
-    findings._validate_from_pending_batch(
-        eng_dir,
-        pending,
-        title=str(finding.get("title") or ""),
-        severity=str(finding.get("severity") or ""),
-        description=str(finding.get("description") or ""),
-        impact=str(finding.get("impact") or ""),
-        remediation=str(finding.get("remediation") or ""),
-        finding_id=str(finding.get("finding_id") or ""),
-        hypothesis_id=str(finding.get("hypothesis_id") or ""),
-    )
-
-
 def _validate_review_batch(args: dict[str, Any], pending: dict[str, Any]) -> dict[str, Any]:
     """Validate all preconditions for a batch review."""
     eng_dir, task_id, note, status, batch_id, _ = _validate_review_identity(args, pending)
@@ -135,7 +116,6 @@ def _validate_review_batch(args: dict[str, Any], pending: dict[str, Any]) -> dic
         eng_dir, task_id, status, batch_id, pending
     )
     _validate_review_history(eng_dir, pending)
-    _validate_review_finding(eng_dir, pending, args.get("finding"))
     return {
         "batch_id": batch_id,
         "task_id": task_id,
@@ -144,7 +124,6 @@ def _validate_review_batch(args: dict[str, Any], pending: dict[str, Any]) -> dic
         "marker": marker,
         "already_recorded": already_recorded,
         "ptt_path": ptt_path,
-        "finding": args.get("finding"),
     }
 
 
@@ -206,46 +185,11 @@ def _execute_batch_review(
     """Validate and execute the core batch review transition."""
     context = _validate_review_batch(args, pending)
     _validate_phase_exit(engagement, context["task_id"], context["status"])
-    finding_result = None
-    finding = context["finding"]
-    if finding is not None:
-        finding_result = findings._create_from_pending_batch(
-            engagement,
-            pending=pending,
-            title=str(finding.get("title") or ""),
-            severity=str(finding.get("severity") or ""),
-            description=str(finding.get("description") or ""),
-            impact=str(finding.get("impact") or ""),
-            remediation=str(finding.get("remediation") or ""),
-            finding_id=str(finding.get("finding_id") or ""),
-            hypothesis_id=str(finding.get("hypothesis_id") or ""),
-        )
-        hypothesis_id = str(finding.get("hypothesis_id") or "").upper().removeprefix("H-")
-        existing = next(
-            (
-                item
-                for item in hypotheses.parse_hypotheses(engagement / "hypotheses.md")
-                if item.id.lstrip("0") == (hypothesis_id.lstrip("0") or "0")
-            ),
-            None,
-        )
-        if existing is not None:
-            linked = [
-                value.strip() for value in existing.linked_findings.split(",") if value.strip()
-            ]
-            if finding_result["finding_id"] not in linked:
-                linked.append(finding_result["finding_id"])
-            hypotheses.update_hypothesis(
-                engagement / "hypotheses.md",
-                id=existing.id,
-                linked_findings=", ".join(linked),
-            )
     if not context["already_recorded"]:
         review_note = f"{context['note']} {context['marker']}"
         ptt.update_task(context["ptt_path"], context["task_id"], context["status"], review_note)
-    batch_evidence = findings._batch_evidence(engagement, pending)
     supplied_evidence = [str(item) for item in (args.get("evidence_paths") or [])]
-    evidence_paths = sorted(set(supplied_evidence) | set(batch_evidence))
+    evidence_paths = sorted(set(supplied_evidence))
     semantic = state.record_semantic_review(
         engagement,
         task_id=context["task_id"],
@@ -265,8 +209,6 @@ def _execute_batch_review(
         task_id=context["task_id"],
         task_status=context["status"],
         released=True,
-        finding=finding_result,
-        finding_path=finding_result.get("path") if finding_result else None,
         binding_task_id=None,
         semantic_progress=semantic,
     )
@@ -274,7 +216,7 @@ def _execute_batch_review(
 
 @_serialize_errors
 def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
-    """Review one completed batch, optionally record a finding, and release its lock."""
+    """Review one completed batch and release its lock."""
     eng_dir = str(args.get("eng_dir") or "").strip()
     if not eng_dir:
         raise ValueError("eng_dir is required")
@@ -290,8 +232,6 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
                     task_id=None,
                     task_status=None,
                     released=True,
-                    finding=None,
-                    finding_path=None,
                     message="nothing pending",
                 )
             task_id = str(pending.get("ptt_task_id") or "").strip()
@@ -332,7 +272,7 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
             "blocked",
             released=False,
             error=str(exc),
-            next_action="Resolve the reported batch, PTT, history, or finding issue and retry violin_review_batch",
+            next_action="Resolve the reported batch, PTT, or history issue and retry violin_review_batch",
         )
 
 
@@ -340,7 +280,6 @@ __all__ = [
     "_execute_batch_review",
     "_handle_review_batch_skill_reservation",
     "_validate_review_batch",
-    "_validate_review_finding",
     "_validate_review_history",
     "_validate_review_identity",
     "_validate_review_ptt_state",

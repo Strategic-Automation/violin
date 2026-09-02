@@ -21,6 +21,7 @@ import psutil
 
 from ..core import state
 from ..core.history import append_history
+from ..core.http_proof import normalize_http_proof_flags
 from ..core.phases import normalize_phase, suppresses_heartbeat
 from ..core.receipt_integrity import seal_execution_receipt
 from ..core.runtime_backend import resolve_backend
@@ -66,6 +67,28 @@ def _resolve_cwd(eng_dir: Path, cwd: str) -> Path:
     if not candidate.is_dir():
         raise ValueError(f"execution cwd not found: {candidate}")
     return candidate
+
+
+def _validate_evidence_outputs(engagement: Path, values: list[str] | None) -> list[str]:
+    """Normalize explicit receipt-bound outputs without inspecting command text."""
+    evidence_root = (engagement / "evidence").resolve()
+    normalized: list[str] = []
+    for value in values or []:
+        relative = Path(value)
+        if relative.is_absolute():
+            raise ValueError("evidence_outputs paths must be engagement-relative")
+        candidate = (engagement / relative).resolve()
+        if not candidate.is_relative_to(evidence_root):
+            raise ValueError("evidence_outputs paths must stay beneath evidence/")
+        current = engagement / relative
+        while current != engagement:
+            if current.is_symlink():
+                raise ValueError("evidence_outputs paths must not traverse symlinks")
+            current = current.parent
+        canonical = candidate.relative_to(engagement).as_posix()
+        if canonical not in normalized:
+            normalized.append(canonical)
+    return normalized
 
 
 def _label(value: str) -> str:
@@ -245,6 +268,11 @@ def _finalize_background(
             "output_limited": status_name == "output_limited",
             "history_recorded": False,
         }
+        declared_outputs = receipt.get("declared_evidence_outputs") or []
+        receipt["missing_evidence_outputs"] = [
+            value for value in declared_outputs if not (engagement / value).is_file()
+        ]
+        receipt["evidence_complete"] = not receipt["missing_evidence_outputs"]
         append_history(
             engagement,
             command,
@@ -387,11 +415,18 @@ def execute(
     docker_container: str = "kali-pentest",
     ptt_task_id: str = "",
     argv: list[str] | None = None,
+    evidence_outputs: list[str] | None = None,
     background: bool = False,
     sync_reservation: str | None = None,
 ) -> dict[str, Any]:
     """Execute one already-authorized command and persist its complete receipt."""
+    # Rewrite curl/wget HTTP probes to capture the response status line (add -i)
+    # so saved evidence always carries a literal HTTP/1.x status line. Lives in
+    # core.http_proof; applied before the receipt is sealed and before the
+    # process runs so both the manifest and the executed argv record the fix.
+    command = normalize_http_proof_flags(command)
     engagement = _resolve_engagement(eng_dir)
+    declared_outputs = _validate_evidence_outputs(engagement, evidence_outputs)
     workdir = _resolve_cwd(engagement, cwd)
     timeout = _timeout(timeout_seconds)
     resolution = resolve_backend(backend, engagement, container=docker_container)
@@ -426,6 +461,7 @@ def execute(
             "stdout": rel_stdout,
             "stderr": rel_stderr,
         },
+        "declared_evidence_outputs": declared_outputs,
     }
     state.atomic_json(manifest_path, record)
 
@@ -550,7 +586,11 @@ def execute(
         "timed_out": timed_out,
         "cancelled": cancelled,
         "output_limited": output_limited,
+        "missing_evidence_outputs": [
+            value for value in declared_outputs if not (engagement / value).is_file()
+        ],
     }
+    receipt["evidence_complete"] = not receipt["missing_evidence_outputs"]
     receipt = seal_execution_receipt(receipt, engagement)
     state.atomic_json(manifest_path, receipt)
 

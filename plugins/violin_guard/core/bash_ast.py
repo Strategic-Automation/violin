@@ -36,6 +36,43 @@ class CommandSegment:
     redirects: list[str] = field(default_factory=list)
 
 
+# A here-document redirect (<<[-]TAG ... TAG). bashlex cannot parse heredoc
+# bodies (it raises "here-document ... delimited by end-of-file"), so callers
+# fall back to naive whitespace splitting — where URLs and host literals in
+# the *payload text* are misread as connection targets. Match the redirect
+# operator + tag on a logical first line; the body follows on later lines.
+_HEREDOC_RE = re.compile(r"<<-?\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)")
+
+
+def split_heredoc_body(command: str) -> tuple[str, str | None]:
+    """Split a command into (executable text, heredoc body) when it carries one.
+
+    The returned executable text keeps the redirect operator and tag but drops
+    the body, so downstream tokenizers never see payload text as executed
+    tokens. Returns (command, None) when no heredoc is present or the body is
+    unterminated (caller keeps the original so nothing silently whitelists).
+    """
+    match = _HEREDOC_RE.search(command)
+    if not match:
+        return command, None
+    # Only a redirect on the first logical line opens a heredoc body.
+    if "\n" in command[: match.start()]:
+        return command, None
+    tag = match.group("tag")
+    body_start = command.find("\n", match.end())
+    if body_start == -1:
+        return command, None
+    body = command[body_start + 1 :]
+    end_re = re.compile(rf"^[ \t]*{re.escape(tag)}[ \t]*$", re.MULTILINE)
+    end = end_re.search(body)
+    if not end:
+        return command, None
+    body_text = body[: end.start()]
+    remainder = body[end.end() :]
+    head = command[: match.end()] + "\n" + remainder.lstrip("\n")
+    return head.strip("\n"), body_text
+
+
 class _CommandVisitor:
     """Traverse bashlex AST nodes to extract command segments and word tokens."""
 
@@ -142,9 +179,17 @@ class _CommandVisitor:
 
 
 def parse_bash_segments(command: str) -> list[CommandSegment]:
-    """Parse shell command into AST segments using bashlex."""
+    """Parse shell command into AST segments using bashlex.
+
+    Heredoc bodies are stripped before parsing: bashlex cannot parse
+    here-documents (it raises "here-document ... delimited by end-of-file"),
+    which would otherwise drop the caller into the naive whitespace-split
+    fallback where payload URLs are misread as connection targets.
+    """
     if not command or not command.strip():
         return []
+    if _HEREDOC_RE.search(command):
+        command, _body = split_heredoc_body(command)
     try:
         nodes = bashlex.parse(command)
         visitor = _CommandVisitor(command)
@@ -164,6 +209,8 @@ def extract_all_command_words(command: str) -> list[str]:
     """Extract all word tokens across subcommands, pipelines, and subshells via bashlex AST."""
     if not command or not command.strip():
         return []
+    if _HEREDOC_RE.search(command):
+        command, _body = split_heredoc_body(command)
     try:
         nodes = bashlex.parse(command)
         visitor = _CommandVisitor(command)

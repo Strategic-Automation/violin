@@ -12,6 +12,13 @@ HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
 {"detail":"invalid credentials","attempt":250,"rate_limit":null}
+HTTP/1.1 401 Unauthorized
+HTTP/1.1 401 Unauthorized
+HTTP/1.1 401 Unauthorized
+HTTP/1.1 401 Unauthorized
+HTTP/1.1 401 Unauthorized
+HTTP/1.1 401 Unauthorized
+HTTP/1.1 401 Unauthorized
 
 ### Analysis
 Repeated brute-force login attempts never received HTTP 429 and no throttle or rate limit was applied.

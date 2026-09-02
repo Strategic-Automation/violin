@@ -32,14 +32,23 @@ def test_curl_with_status_capture_is_clean() -> None:
         assert result.exit_code() == 0, command
 
 
-def test_status_probe_and_offline_capture_exempt() -> None:
+def test_status_capture_is_clean() -> None:
     for command in (
         "curl -s -o /dev/null -w '%{http_code}' https://duck-store.escape.tech/api/v1/auth/login",
-        "curl -sO https://duck-store.escape.tech/bundle.js",
-        "curl -s https://duck-store.escape.tech/api/v1/products > evidence/recon/products.json",
+        "wget -qS https://duck-store.escape.tech/bundle.js",
     ):
         result = check_http_proof_flags(command)
         assert result.errors == [] and result.warnings == [], command
+
+
+def test_body_output_without_status_capture_warns() -> None:
+    for command in (
+        "curl -sO https://duck-store.escape.tech/bundle.js",
+        "curl -s https://duck-store.escape.tech/api/v1/products > evidence/recon/products.json",
+        "wget -q -O evidence/recon/products.json https://duck-store.escape.tech/api/v1/products",
+    ):
+        result = check_http_proof_flags(command)
+        assert len(result.warnings) == 1, command
 
 
 def test_non_http_or_non_curl_commands_untouched() -> None:

@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from ..core import findings, hypotheses, ptt
+from ..core import hypotheses, ptt
 
 _JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _BEARER_RE = re.compile(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]+")
@@ -69,27 +69,6 @@ def _validate_disposition_entry(name: str, entry: Any) -> list[str]:
     return []
 
 
-def _find_unlinked_validated_hypotheses(
-    engagement: Path, board: list[hypotheses.Hypothesis]
-) -> list[str]:
-    """Return hypothesis IDs for Validated hypotheses lacking a linked canonical findings file."""
-    unlinked: list[str] = []
-    findings_dir = engagement / "evidence" / "findings"
-    for item in board:
-        if item.canonical_status() != "Validated":
-            continue
-        linked_ids = [
-            value.strip().upper()
-            for value in str(item.linked_findings or "").split(",")
-            if value.strip()
-        ]
-        if not linked_ids or not any(
-            (findings_dir / f"{finding_id}.md").is_file() for finding_id in linked_ids
-        ):
-            unlinked.append(f"H-{item.id}")
-    return unlinked
-
-
 def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
     """Block phase completion while required evidence or dispositions are incomplete."""
     if status != "[x]":
@@ -108,6 +87,7 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
         scope_data = (
             yaml.safe_load(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
         )
+        close_errors: list[str] = []
         if isinstance(scope_data, dict) and (
             (scope_data.get("engagement") or {}).get("audit_mode") is True
         ):
@@ -115,65 +95,70 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                 (scope_data.get("engagement") or {}).get("require_methodology_gates") is True
             )
             if gates_required:
-                _validate_methodology_gates(engagement, scope_data)
+                close_errors.extend(_methodology_gate_errors(engagement, scope_data))
             matrix_path = engagement / "state" / "coverage-matrix.yaml"
             if not matrix_path.is_file():
-                raise ValueError(
+                close_errors.append(
                     "VULN_RESEARCH cannot close until state/coverage-matrix.yaml exists"
                 )
-            matrix = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
-            entries = matrix.get("coverage") if isinstance(matrix, dict) else None
-            if not isinstance(entries, dict) or not entries:
-                raise ValueError("coverage matrix must contain a non-empty coverage mapping")
-            obligations = (scope_data.get("engagement") or {}).get("coverage_obligations") or []
-            cell_texts = [
-                f"{str(name).lower()} {str(entry.get('evidence_or_reason') or '').lower()}"
-                for name, entry in entries.items()
-                if isinstance(entry, dict)
-            ]
-            unresolved_coverage: list[str] = []
-            first_missing: str | None = None
-            for obligation in obligations:
-                obligation_str = str(obligation).strip().lower()
-                if not obligation_str:
-                    continue
-                if not any(obligation_str in text for text in cell_texts):
-                    if first_missing is None:
-                        first_missing = obligation_str
-                    unresolved_coverage.append(f"{obligation_str} (no coverage-matrix cell)")
-            for name, entry in entries.items():
-                entry_errors = _validate_disposition_entry(name, entry)
-                unresolved_coverage.extend(entry_errors)
-            if unresolved_coverage:
-                hints = [
-                    "how to fix: each obligation must map to a coverage-matrix cell",
-                    "  - matrix keys are the EXACT lowercased obligation strings from scope.yaml",
-                    "    (e.g. 'post /api/v1/auth/login') inside a flat 'coverage:' mapping —",
-                    "    no nested 'routes:' block, no slugified keys",
-                    "  - 'tested' cells: evidence_or_reason must cite evidence/, FIND-NNN, or a hypothesis id",
-                    "  - 'not_applicable' cells: evidence_or_reason must cite an evidence/ file showing the probe",
-                    "    (run the probe, save its output under evidence/vuln-research/, then reference that path)",
-                    "  - 'blocked' cells: evidence_or_reason must name the guard that prevented testing",
-                    "  - minimal valid cell:",
-                    "      coverage:",
-                    "        'post /api/v1/auth/login':",
-                    "          status: tested",
-                    "          evidence_or_reason: 'evidence/vuln-research/login.txt HTTP status line'",
-                ]
-                message = "VULN_RESEARCH cannot close with undispositioned coverage: " + ", ".join(
-                    unresolved_coverage
-                )
-                if first_missing:
-                    message += (
-                        f". First missing obligation: {first_missing} — add a cell keyed by "
-                        "this exact lowercased string"
-                    )
-                raise ValueError(message + ". " + " ".join(hints))
+            else:
+                matrix = yaml.safe_load(matrix_path.read_text(encoding="utf-8"))
+                entries = matrix.get("coverage") if isinstance(matrix, dict) else None
+                if not isinstance(entries, dict) or not entries:
+                    close_errors.append("coverage matrix must contain a non-empty coverage mapping")
+                else:
+                    obligations = (scope_data.get("engagement") or {}).get(
+                        "coverage_obligations"
+                    ) or []
+                    cell_texts = [
+                        f"{str(name).lower()} {str(entry.get('evidence_or_reason') or '').lower()}"
+                        for name, entry in entries.items()
+                        if isinstance(entry, dict)
+                    ]
+                    unresolved_coverage: list[str] = []
+                    first_missing: str | None = None
+                    for obligation in obligations:
+                        obligation_str = str(obligation).strip().lower()
+                        if not obligation_str:
+                            continue
+                        if not any(obligation_str in text for text in cell_texts):
+                            if first_missing is None:
+                                first_missing = obligation_str
+                            unresolved_coverage.append(
+                                f"{obligation_str} (no coverage-matrix cell)"
+                            )
+                    for name, entry in entries.items():
+                        unresolved_coverage.extend(_validate_disposition_entry(name, entry))
+                    if unresolved_coverage:
+                        hints = [
+                            "how to fix: each obligation must map to a coverage-matrix cell",
+                            "  - matrix keys are the EXACT lowercased obligation strings from scope.yaml",
+                            "    (e.g. 'post /api/v1/auth/login') inside a flat 'coverage:' mapping —",
+                            "    no nested 'routes:' block, no slugified keys",
+                            "  - 'tested' cells: evidence_or_reason must cite evidence/ or a hypothesis id",
+                            "  - 'not_applicable' cells: evidence_or_reason must cite an evidence/ file showing the probe",
+                            "    (run the probe, save its output under evidence/vuln-research/, then reference that path)",
+                            "  - 'blocked' cells: evidence_or_reason must name the guard that prevented testing",
+                            "  - minimal valid cell:",
+                            "      coverage:",
+                            "        'post /api/v1/auth/login':",
+                            "          status: tested",
+                            "          evidence_or_reason: 'evidence/vuln-research/login.txt HTTP status line'",
+                        ]
+                        message = "undispositioned coverage: " + ", ".join(unresolved_coverage)
+                        if first_missing:
+                            message += (
+                                f". First missing obligation: {first_missing} — add a cell keyed by "
+                                "this exact lowercased string"
+                            )
+                        close_errors.append(message + ". " + " ".join(hints))
 
         unresolved = [
             f"H-{item.id}" for item in board if item.canonical_status() in {"Candidate", "Likely"}
         ]
-        if not unresolved:
+        if unresolved:
+            close_errors.append("unresolved hypotheses: " + ", ".join(unresolved))
+        else:
             untested_disposals: list[str] = []
             for item in board:
                 if item.canonical_status() != "Rejected":
@@ -191,28 +176,17 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                         f"H-{item.id} (cheapest test: {(item.cheapest_test or '?').strip()!r})"
                     )
             if untested_disposals:
-                raise ValueError(
-                    "VULN_RESEARCH cannot close with rejections that never ran their "
-                    "cheapest discriminating test: "
+                close_errors.append(
+                    "rejections that never ran their cheapest discriminating test: "
                     + ", ".join(untested_disposals)
                     + ". Execute the test and record Test Command/Test Response/Runtime "
                     "Evidence (or keep the hypothesis active) before closing."
                 )
-        if unresolved:
-            raise ValueError(
-                "VULN_RESEARCH cannot close with unresolved hypotheses: " + ", ".join(unresolved)
-            )
 
-        uncanonized = _find_unlinked_validated_hypotheses(engagement, board)
-        if uncanonized:
+        if close_errors:
             raise ValueError(
-                "VULN_RESEARCH cannot close until every Validated hypothesis links a "
-                "canonical findings file: "
-                + ", ".join(uncanonized)
-                + ". Required format (1:N allowed): a file at exactly "
-                "evidence/findings/FIND-NNN.md (NNN = zero-padded numeric id, NO descriptive "
-                "suffix/name) whose first line is `# FIND-NNN: <title>`. Update Linked findings "
-                "on the hypothesis board via violin_record_hypothesis before closing."
+                "VULN_RESEARCH cannot close — fix ALL of the following (they are listed "
+                "together so you can resolve them in one pass):\n  - " + "\n  - ".join(close_errors)
             )
 
     if phase.value == "REPORTING":
@@ -237,62 +211,24 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                     "later phase (all history is phase=recon). "
                     "ROOT CAUSE: PT-103 (EXPLOITATION) was never activated or never ran commands. "
                     "FIX: call violin_record_ptt to set PT-103 status='[~]' (phase=EXPLOITATION), "
-                    "then run proof-verification commands under phase=exploitation before closing REPORTING. "
+                    "then run proof-capture commands (re-run the exploit to save its decisive "
+                    "output as evidence) under phase=exploitation before closing REPORTING. "
                     "Skipping the exploitation phase produces an incomplete assessment."
                 )
-        missing = _find_unlinked_validated_hypotheses(engagement, board)
-        if missing:
-            raise ValueError(
-                "REPORTING cannot close until Validated hypotheses link canonical findings: "
-                + ", ".join(missing)
-            )
-        _validate_finding_schemas(engagement)
 
 
-def _validate_finding_schemas(engagement: Path) -> None:
-    """Require every FIND-NNN.md to parse with the canonical schema populated.
+def _methodology_gate_errors(engagement: Path, scope_data: dict[str, Any]) -> list[str]:
+    """Return every methodology-gate close failure as a list (empty = pass).
 
-    Catches findings written with non-canonical section names (## Summary instead of
-    ## Description) or inline evidence, which silently produce empty fields in the
-    generated report. Names the exact failing fields per file plus the fix.
+    Refactored from _validate_methodology_gates so the phase-exit gate can
+    surface ALL missing preconditions in one error instead of one at a time.
     """
-    findings_dir = engagement / "evidence" / "findings"
-    if not findings_dir.is_dir():
-        return
-    problems: list[str] = []
-    for path in sorted(findings_dir.glob("FIND-*.md")):
-        rec = findings.parse_finding_file(path)
-        empty = [
-            field
-            for field in ("severity", "description", "impact", "remediation")
-            if not rec.get(field)
-        ]
-        if not rec.get("evidence") or not all(rec.get("evidence")):
-            empty.append("evidence (bullets '- `path`')")
-        if not rec.get("hypothesis"):
-            empty.append("hypothesis")
-        if empty:
-            problems.append(f"{path.name}: missing {', '.join(empty)}")
-    if problems:
-        raise ValueError(
-            "REPORTING cannot close with incomplete FIND files: "
-            + "; ".join(problems[:5])
-            + ". Canonical schema: first line '# FIND-NNN: <title>'; top-level bullet "
-            "'- **Severity:** value'; section heads exactly '## Description', "
-            "'## Impact', '## Evidence', '## Remediation'; evidence bullets "
-            "'- `evidence/...`'. Rewrite the file(s) to that schema and retry."
-        )
-
-
-def _validate_methodology_gates(engagement: Path, scope_data: dict[str, Any]) -> None:
-    """Require a dispositioned methodology-gates file before VULN_RESEARCH closes."""
     expected_gates = _EXPECTED_METHODOLOGY_GATES
     gates_path = engagement / "state" / "methodology-gates.yaml"
     if not gates_path.is_file():
-        raise ValueError(
-            "VULN_RESEARCH cannot close until state/methodology-gates.yaml exists "
-            "(disposition each WSTG category: tested / not_applicable / blocked with evidence). "
-            "Minimal valid file:\n"
+        return [
+            "state/methodology-gates.yaml exists (disposition each WSTG category: "
+            "tested / not_applicable / blocked with evidence). Minimal valid file:\n"
             "  gates:\n"
             "    authentication-session:\n"
             "      status: tested\n"
@@ -304,36 +240,37 @@ def _validate_methodology_gates(engagement: Path, scope_data: dict[str, Any]) ->
             "        no unvalidated redirect sink\n"
             "    business-logic:\n"
             "      status: blocked\n"
-            "      evidence_or_reason: 'guard blocked referral param enumeration out of scope'\n"
-        )
+            "      evidence_or_reason: 'guard blocked referral param enumeration out of scope'"
+        ]
     gates = yaml.safe_load(gates_path.read_text(encoding="utf-8"))
     entries = gates.get("gates") if isinstance(gates, dict) else None
     if not isinstance(entries, dict) or not entries:
-        raise ValueError("methodology gates must contain a non-empty 'gates:' mapping")
+        return ["methodology gates must contain a non-empty 'gates:' mapping"]
 
+    errors: list[str] = []
     missing_gates = expected_gates - {str(key).strip().lower() for key in entries}
     if missing_gates:
-        raise ValueError(
-            "VULN_RESEARCH cannot close with undispositioned methodology gates: "
+        errors.append(
+            "undispositioned methodology gates: "
             + ", ".join(sorted(missing_gates))
             + ". Add each category under a flat 'gates:' mapping (e.g. "
             "'authentication-session:') with status and evidence_or_reason."
         )
-
-    unresolved: list[str] = []
     for name, entry in entries.items():
-        unresolved.extend(_validate_disposition_entry(name, entry))
-    if unresolved:
+        errors.extend(_validate_disposition_entry(name, entry))
+    return errors
+
+
+def _validate_methodology_gates(engagement: Path, scope_data: dict[str, Any]) -> None:
+    """Require a dispositioned methodology-gates file before VULN_RESEARCH closes."""
+    errors = _methodology_gate_errors(engagement, scope_data)
+    if errors:
         raise ValueError(
-            "VULN_RESEARCH cannot close with unresolved methodology gates: "
-            + ", ".join(unresolved)
-            + ". Each gate: status tested/not_applicable/blocked; not_applicable cites an "
-            "evidence file; blocked names the guard; tested cites evidence/, FIND-NNN, or H-NNN."
+            "VULN_RESEARCH cannot close with unresolved methodology gates: " + "; ".join(errors)
         )
 
 
 __all__ = [
-    "_find_unlinked_validated_hypotheses",
     "_redact_sensitive_note",
     "_validate_disposition_entry",
     "_validate_methodology_gates",

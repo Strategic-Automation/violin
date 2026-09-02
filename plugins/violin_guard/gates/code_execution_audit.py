@@ -51,7 +51,7 @@ _LOCAL_PATH_EXTENSIONS = frozenset(
         ".tokens.env",
     }
 )
-_LOCAL_PATH_RE = re.compile(r"(?i)FIND-\d+\.md|evidence/|state/|scope/|\./|\.\./|/tmp/|\.creds/")
+_LOCAL_PATH_RE = re.compile(r"(?i)evidence/|state/|scope/|\./|\.\./|/tmp/|\.creds/")
 _LOCAL_ANALYSIS_IMPORTS = frozenset(
     {
         "ast",
@@ -237,7 +237,7 @@ def validate_source(source: object) -> tuple[dict[str, str] | None, str | None]:
             continue
         value = node.value
         if _is_local_path_literal(value):
-            continue  # filename/path strings (FIND-*.md, evidence/..., *.json) are not targets
+            continue  # Local filename and path strings are not network targets.
         for candidate in extract_target_candidates(f"probe {value}"):
             normalized = normalize_target(candidate)
             if normalized not in {declared, "localhost", "127.0.0.1", "0.0.0.0", "::1"}:
@@ -254,8 +254,7 @@ def _is_local_path_literal(value: str) -> bool:
     """True when a string literal is clearly a local file path, not a network target.
 
     Guards the execute_code target-literal scanner against false positives on
-    canonical finding filenames (FIND-NNN.md), evidence paths, and temp paths that
-    appear inside code payloads.
+    evidence paths and temp paths that appear inside code payloads.
     """
     stripped = value.strip()
     if not stripped:
