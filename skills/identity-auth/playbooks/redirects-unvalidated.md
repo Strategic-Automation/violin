@@ -48,8 +48,10 @@ unexpected routes and parameter names:
 
 1. **Collect candidate routes**: every route that takes a URL-ish input —
    login, logout, register, checkout, product detail, search, error pages,
-   OAuth/callback handlers, password reset ("return to"), and any route that
-   renders "you will be redirected" text.
+   OAuth/callback handlers, password reset ("return to"), **the bare root `/`
+   and index routes** (redirect params very often live on the root path, e.g.
+   `/?redirect=`, `/?next=`, `/?returnUrl=`), and any route that renders "you
+   will be redirected" text.
 2. **Try each redirect parameter name** on every candidate route:
    `redirect`, `next`, `url`, `return`, `returnUrl`, `return_to`, `dest`,
    `destination`, `target`, `goto`, `callback`, `continue`, `checkout_url`,

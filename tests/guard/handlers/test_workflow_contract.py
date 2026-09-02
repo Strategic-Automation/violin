@@ -188,23 +188,6 @@ def test_audit_mode_vulnerability_research_exit_requires_dispositioned_matrix(
         _validate_phase_exit(engagement, "PT-030", "[x]")
 
 
-def test_reporting_exit_requires_canonical_finding(tmp_path: Path) -> None:
-    engagement = tmp_path / "engagement"
-    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
-    evidence = engagement / "evidence" / "exploitation" / "proof.txt"
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text("decisive runtime proof\n", encoding="utf-8")
-    hypotheses.update_hypothesis(
-        engagement / "hypotheses.md",
-        id="001",
-        title="Validated issue",
-        status="Validated",
-        runtime_evidence="evidence/exploitation/proof.txt",
-    )
-    with pytest.raises(ValueError, match="canonical findings: H-001"):
-        _validate_phase_exit(engagement, "PT-050", "[x]")
-
-
 def test_reporting_exit_accepts_uppercase_phase_token_in_audit_mode(tmp_path: Path) -> None:
     """REPORTING gate must match the canonical UPPERCASE phase token that
     violin_exec records verbatim (phase=EXPLOITATION), not only lowercase."""
@@ -274,10 +257,7 @@ def test_reporting_exit_allows_exploitation_history_in_audit_mode(tmp_path: Path
         status="Validated",
         runtime_evidence="evidence/exploitation/proof.txt",
     )
-    # No exploitation-phase-history error: the run reached EXPLOITATION. It
-    # still blocks on the unlinked Validated hypothesis (no FIND file yet).
-    with pytest.raises(ValueError, match="canonical findings: H-001"):
-        _validate_phase_exit(engagement, "PT-050", "[x]")
+    _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
 def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
@@ -432,6 +412,40 @@ def test_methodology_gates_rejects_test_without_evidence(tmp_path: Path) -> None
         _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
 
 
+def test_vuln_research_exit_batches_all_preconditions_in_one_error(tmp_path: Path) -> None:
+    """The close gate must surface methodology, coverage, AND hypothesis failures
+    together — not one at a time — so the agent fixes them in a single pass."""
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    scope = engagement / "scope" / "scope.yaml"
+    scope.write_text(
+        scope.read_text(encoding="utf-8")
+        + "\nengagement:\n  audit_mode: true\n  require_methodology_gates: true\n"
+        "  coverage_obligations:\n    - POST /api/route_a\n",
+        encoding="utf-8",
+    )
+    # 1. methodology-gates file missing
+    gates = engagement / "state" / "methodology-gates.yaml"
+    gates.unlink()
+    # 2. coverage matrix has a bad cell (status outside the vocabulary)
+    matrix = engagement / "state" / "coverage-matrix.yaml"
+    matrix.write_text(
+        "coverage:\n  route_a:\n    status: pending\n    evidence_or_reason: ''\n",
+        encoding="utf-8",
+    )
+    # 3. an unresolved hypothesis
+    hypotheses.update_hypothesis(
+        engagement / "hypotheses.md", id="001", title="Unresolved", status="Likely"
+    )
+    with pytest.raises(ValueError) as exc:
+        _validate_phase_exit(engagement, "PT-030", "[x]")
+    msg = str(exc.value)
+    # All three preconditions appear in the SAME error.
+    assert "methodology-gates.yaml exists" in msg
+    assert "undispositioned coverage" in msg
+    assert "unresolved hypotheses: H-001" in msg
+
+
 def test_vuln_research_coverage_error_teaches_remediation(tmp_path: Path) -> None:
     """The undispositioned-coverage error must name a fix, not just list failures."""
     engagement = tmp_path / "engagement"
@@ -534,83 +548,6 @@ def test_vuln_research_exit_accepts_surface_mapping_rejection_with_evidence(
         rejection_reason="not a vulnerability claim",
         evidence="evidence/recon/recon_bundle.js",
         cheapest_test="Probe each derived endpoint",
-    )
-    _validate_phase_exit(engagement, "PT-030", "[x]")  # no exception
-
-
-def test_vuln_research_exit_blocks_validated_hypothesis_without_linked_finding(
-    tmp_path: Path,
-) -> None:
-    """Scorer-confirmed contract: Validated hypotheses must link FIND files."""
-    engagement = tmp_path / "engagement"
-    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
-    scope = engagement / "scope" / "scope.yaml"
-    scope.write_text(
-        scope.read_text(encoding="utf-8") + "\nengagement:\n  audit_mode: true\n",
-        encoding="utf-8",
-    )
-    matrix = engagement / "state" / "coverage-matrix.yaml"
-    matrix.write_text(
-        "coverage:\n  routes:\n    status: tested\n    evidence_or_reason: 'evidence/recon/probe.txt'\n",
-        encoding="utf-8",
-    )
-    proof = engagement / "evidence" / "vuln-research" / "admin_users.txt"
-    proof.parent.mkdir(parents=True, exist_ok=True)
-    proof.write_text("200 with admin data\n", encoding="utf-8")
-    hypotheses.update_hypothesis(
-        engagement / "hypotheses.md",
-        id="001",
-        title="Admin ACL bypass",
-        status="Validated",
-        test_response="200 with admin data",
-        runtime_evidence="evidence/vuln-research/admin_users.txt",
-    )
-    with pytest.raises(ValueError, match="every Validated hypothesis links a canonical"):
-        _validate_phase_exit(engagement, "PT-030", "[x]")
-
-
-def test_vuln_research_exit_accepts_validated_hypothesis_with_linked_finding(
-    tmp_path: Path,
-) -> None:
-    engagement = tmp_path / "engagement"
-    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
-    scope = engagement / "scope" / "scope.yaml"
-    scope.write_text(
-        scope.read_text(encoding="utf-8") + "\nengagement:\n  audit_mode: true\n",
-        encoding="utf-8",
-    )
-    matrix = engagement / "state" / "coverage-matrix.yaml"
-    matrix.write_text(
-        "coverage:\n  routes:\n    status: tested\n    evidence_or_reason: 'evidence/recon/probe.txt'\n",
-        encoding="utf-8",
-    )
-    finding_dir = engagement / "evidence" / "findings"
-    finding_dir.mkdir(parents=True, exist_ok=True)
-    finding_dir.joinpath("FIND-001.md").write_text(
-        "# FIND-001: Admin ACL bypass\n"
-        "- **Severity:** High\n"
-        "- **Hypothesis:** H-001\n"
-        "## Description\n"
-        "Admin user list exposed without authorization.\n"
-        "## Impact\n"
-        "Full admin data disclosure.\n"
-        "## Evidence\n"
-        "- `evidence/vuln-research/admin_users.txt`\n"
-        "## Remediation\n"
-        "Enforce role checks on the admin endpoint.\n",
-        encoding="utf-8",
-    )
-    proof = engagement / "evidence" / "vuln-research" / "admin_users.txt"
-    proof.parent.mkdir(parents=True, exist_ok=True)
-    proof.write_text("200 with admin data\n", encoding="utf-8")
-    hypotheses.update_hypothesis(
-        engagement / "hypotheses.md",
-        id="001",
-        title="Admin ACL bypass",
-        status="Validated",
-        test_response="200 with admin data",
-        runtime_evidence="evidence/vuln-research/admin_users.txt",
-        linked_findings="FIND-001",
     )
     _validate_phase_exit(engagement, "PT-030", "[x]")  # no exception
 

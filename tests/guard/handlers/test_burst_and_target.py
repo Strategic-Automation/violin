@@ -484,6 +484,7 @@ def test_plugin_exposes_new_tools():
     assert "violin_exec_burst" in tool_names
     assert "violin_target" in tool_names
     assert "violin_review_batch" in tool_names
+    assert "violin_submit_finding" in tool_names
     assert (
         not {
             "violin_sync_done",
@@ -530,9 +531,9 @@ def test_removed_cli_commands_are_absent(removed):
     assert "invalid choice" in result.stderr
 
 
-def test_review_batch_cli_exposes_lifecycle_and_optional_finding_fields():
+def test_review_batch_cli_exposes_only_batch_lifecycle_fields():
     result = _run("review-batch", "--help")
     assert result.returncode == 0
     assert "--status" in result.stdout
     assert "--note" in result.stdout
-    assert "--finding-title" in result.stdout
+    assert "--finding-title" not in result.stdout

@@ -31,7 +31,7 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
 <table>
 <tr><td width="240"><strong>Guarded target execution</strong></td><td>Scope, phase, PTT, skill, hypothesis, history, and synchronization checks run before a target command starts.</td></tr>
 <tr><td><strong>Persistent engagement state</strong></td><td>PTT tasks, hypotheses, command history, checkpoints, evidence, and reports survive context compression.</td></tr>
-<tr><td><strong>Evidence-backed findings</strong></td><td>Validated findings require reproducible proof and canonical <code>FIND-NNN.md</code> artifacts.</td></tr>
+<tr><td><strong>Evidence-backed findings</strong></td><td>A typed submission binds each validated finding to authenticated execution receipts.</td></tr>
 <tr><td><strong>Routed methodology</strong></td><td>A pentest orchestrator selects focused web, identity, API, business-logic, LLM-security, and misconfiguration playbooks.</td></tr>
 <tr><td><strong>Bounded execution</strong></td><td>Single commands, command bursts, background processes, batch review, heartbeat checks, and cancellation share one state model.</td></tr>
 <tr><td><strong>Verifiable releases</strong></td><td>Plugin registration, schemas, skill snapshots, documentation contracts, lint, formatting, and the full test suite are release-gated.</td></tr>
@@ -85,7 +85,7 @@ flowchart LR
 3. Run target commands with `violin_exec` or `violin_exec_burst`.
 4. Update hypotheses as evidence changes their status.
 5. Review each bounded command batch with `violin_review_batch`.
-6. Generate canonical findings and the final report.
+6. Submit validated findings and generate the final report.
 7. Complete the retrospective.
 
 The complete phase model is:
@@ -231,13 +231,18 @@ fixtures; it does not establish live-agent recall, workflow completion, or
 report quality.
 
 ```bash
-uv run python benchmark/score.py --calibrate known-good
-uv run python benchmark/score.py --calibrate known-bad
-uv run python -m benchmark.run --target https://duck-store.escape.tech
+uv run python -m benchmark.score --calibrate known-good
+uv run python -m benchmark.score --calibrate known-bad
+uv run python -m benchmark.run \
+  --target http://localhost:<published-port> \
+  --provider <provider> \
+  --api-base <openai-compatible-base-url> \
+  --model <model-id> \
+  --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
 ```
 
 Read the [benchmark methodology](docs/BENCHMARKS.md) before publishing a score.
-It defines the proof, reproducibility, formalization, and disclosure
+It defines the proof, reproducibility, private evaluation, and disclosure
 requirements for a credible result.
 
 ## Development

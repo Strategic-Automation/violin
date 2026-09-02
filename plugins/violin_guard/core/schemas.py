@@ -100,7 +100,6 @@ class RecordHypothesisArgsModel(BaseModel):
         "", description="Why a rejected hypothesis is safe to stop pursuing"
     )
     next_step: str = ""
-    linked_findings: str = ""
     candidate_source: str = Field(
         "",
         description=(
@@ -115,8 +114,8 @@ class RecordHypothesisArgsModel(BaseModel):
     runtime_evidence: str = Field(
         "",
         description=(
-            "Required when status is Validated. Path to runtime execution receipt or evidence file "
-            "(e.g. evidence/executions/001-command.json, evidence/exploitation/poc.txt)."
+            "Required when status is Validated. One or more comma-separated, engagement-relative "
+            "evidence file paths; globs and semicolon-separated values are not accepted."
         ),
     )
 
@@ -138,6 +137,14 @@ class ExecArgsModel(BaseModel):
     timeout_seconds: int = Field(180, ge=1, le=1800)
     cwd: str = Field("", description="Engagement-relative working directory")
     label: str = ""
+    evidence_outputs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Engagement-relative files beneath evidence/ that this command will create or "
+            "update. Declared files are hashed into the signed execution receipt. Use this "
+            "for scripts and tools that write evidence outside captured stdout/stderr."
+        ),
+    )
     background: bool = Field(
         False,
         description=(
@@ -146,22 +153,52 @@ class ExecArgsModel(BaseModel):
     )
 
 
-class FindingModel(BaseModel):
-    """Optional structured finding derived only from this batch."""
-
+class FindingClaimModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    finding_id: str = Field("", description="Optional FIND-NNN id")
-    hypothesis_id: str = Field(..., description="Validated linked hypothesis")
-    title: str
+    title: str = Field(..., min_length=1)
     severity: Literal["Critical", "High", "Medium", "Low", "Info"]
-    description: str
-    impact: str
-    remediation: str
+    summary: str = Field(..., min_length=1)
+    receipt_paths: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=8,
+        description=(
+            "One to eight engagement-relative signed execution receipt JSON paths beneath "
+            "evidence/executions. Validation never exposes benchmark identities or score."
+        ),
+    )
+    evidence_paths: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description=(
+            "Optional engagement-relative saved output files under evidence/ that hold the "
+            "decisive request/response body (e.g. the exact payload or PII the receipt's "
+            "stdout only references). The scorer reads these as proof."
+        ),
+    )
+
+
+class SubmitFindingArgsModel(FindingClaimModel):
+    """Submit a generic receipt-backed finding without evaluator metadata."""
+
+    eng_dir: str
+
+
+class FindingRecordModel(FindingClaimModel):
+    """Canonical stored finding record."""
+
+    schema_version: Literal[1] = 1
+    finding_id: str = Field(..., pattern=r"^FIND-\d{3,}$")
+    status: Literal["validated"] = "validated"
+    execution_ids: list[str] = Field(default_factory=list)
+    evidence_paths: list[str] = Field(default_factory=list)
+    created_at: str = ""
+    engagement_id: str = ""
 
 
 class ReviewBatchArgsModel(BaseModel):
-    """Review the current completed batch, optionally create one receipt-backed finding, and release the sync lock. The active PTT task stays active unless status='[x]' is explicitly requested. All inputs are validated before mutation; the lock clears last."""
+    """Review a completed batch and release its sync lock. Submit findings separately."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -185,9 +222,6 @@ class ReviewBatchArgsModel(BaseModel):
     next_action: str = ""
     next_technique: str = ""
     research_attempted: bool = False
-    finding: FindingModel | None = Field(
-        None, description="Optional structured finding derived only from this batch"
-    )
 
 
 class RebindPendingBatchArgsModel(BaseModel):
@@ -326,6 +360,7 @@ def to_tool_schema(
 
 RECORD_PTT_SCHEMA = to_tool_schema(RecordPttArgsModel)
 RECORD_HYPOTHESIS_SCHEMA = to_tool_schema(RecordHypothesisArgsModel)
+SUBMIT_FINDING_SCHEMA = to_tool_schema(SubmitFindingArgsModel)
 EXEC_SCHEMA = to_tool_schema(ExecArgsModel)
 REVIEW_BATCH_SCHEMA = to_tool_schema(ReviewBatchArgsModel)
 REBIND_PENDING_BATCH_SCHEMA = to_tool_schema(RebindPendingBatchArgsModel)

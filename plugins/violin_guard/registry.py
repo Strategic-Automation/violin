@@ -47,6 +47,13 @@ TOOL_DEFINITIONS = (
         "🔎",
     ),
     ToolDefinition(
+        "violin_submit_finding",
+        schemas.SubmitFindingArgsModel,
+        schemas.SUBMIT_FINDING_SCHEMA,
+        handlers.handle_submit_finding,
+        "📌",
+    ),
+    ToolDefinition(
         "violin_exec", schemas.ExecArgsModel, schemas.EXEC_SCHEMA, handlers.handle_exec, "⚡"
     ),
     ToolDefinition(

@@ -61,18 +61,6 @@ def _pending_batch(eng: Path) -> None:
     state.mark_pending_sync(eng, command, "RECON", "PT-010")
 
 
-def _prepare_finding_review(eng: Path) -> None:
-    hypotheses.update_hypothesis(
-        eng / "hypotheses.md",
-        id="001",
-        title="HTTP listener is externally reachable",
-        status="Validated",
-        phase="RECON",
-        target="10.10.10.10",
-        runtime_evidence="evidence/executions/batch-command.stdout.txt",
-    )
-
-
 def test_create_task_inserts_into_requested_phase_table(tmp_path: Path) -> None:
     path = tmp_path / "ptt.md"
     path.write_text(
@@ -114,7 +102,6 @@ def test_status_explains_current_phase_pending_commands_and_skill(tmp_path: Path
 def test_review_batch_updates_ptt_and_clears_lock(tmp_path: Path, task_status: str) -> None:
     eng = _engagement(tmp_path)
     _pending_batch(eng)
-    _prepare_finding_review(eng)
 
     result = json.loads(
         service.handle_review_batch(
@@ -204,91 +191,12 @@ def test_review_batch_conflicting_skill_binds_to_binding_skill_not_deadlock(
     assert get_binding(eng, "PT-010") == original_binding
 
 
-def test_review_batch_creates_finding_from_current_batch_receipts(tmp_path: Path) -> None:
-    eng = _engagement(tmp_path)
-    _pending_batch(eng)
-    _prepare_finding_review(eng)
-
-    result = json.loads(
-        service.handle_review_batch(
-            {
-                "eng_dir": str(eng),
-                "id": "PT-010",
-                "status": "[~]",
-                "note": "Reviewed the HTTP service receipt",
-                "finding": {
-                    "finding_id": "FIND-001",
-                    "hypothesis_id": "H-001",
-                    "title": "Exposed HTTP service",
-                    "severity": "Info",
-                    "description": "An HTTP listener is reachable on the approved target.",
-                    "impact": "The service contributes to the externally reachable attack surface.",
-                    "remediation": (
-                        "Confirm the listener is intended and restrict it when unnecessary."
-                    ),
-                },
-            }
-        )
-    )
-
-    assert result["status"] == "ok"
-    finding = eng / result["finding"]["path"]
-    assert result["finding_path"] == result["finding"]["path"]
-    assert finding.is_file()
-    text = finding.read_text(encoding="utf-8")
-    assert "batch-command.stdout.txt" in text
-    assert "## Remediation" in text
-
-
-def test_review_batch_creates_finding_without_fp_check_preparation(tmp_path: Path) -> None:
-    eng = _engagement(tmp_path)
-    _pending_batch(eng)
-    hypotheses.update_hypothesis(
-        eng / "hypotheses.md",
-        id="001",
-        title="HTTP listener is externally reachable",
-        status="Validated",
-        phase="RECON",
-        target="10.10.10.10",
-        runtime_evidence="evidence/executions/batch-command.stdout.txt",
-    )
-
-    result = json.loads(
-        service.handle_review_batch(
-            {
-                "eng_dir": str(eng),
-                "id": "PT-010",
-                "status": "[~]",
-                "note": "Reviewed the HTTP service receipt",
-                "finding": {
-                    "hypothesis_id": "H-001",
-                    "title": "Exposed HTTP service",
-                    "severity": "Info",
-                    "description": "An HTTP listener is reachable on the approved target.",
-                    "impact": "The service contributes to the externally reachable attack surface.",
-                    "remediation": "Confirm the listener is intended.",
-                },
-            }
-        )
-    )
-
-    assert result["status"] == "ok"
-    assert result["released"] is True
-    assert result["finding"]["finding_id"] == "FIND-001"
-    finding = eng / result["finding"]["path"]
-    assert finding.is_file()
-    text = finding.read_text(encoding="utf-8")
-    assert "# FIND-001: Exposed HTTP service" in text
-    assert "batch-command.stdout.txt" in text
-
-
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
         ("history", "exact history"),
         ("task", "does not match batch task"),
         ("phase", "not phase-compatible"),
-        ("finding", "must be non-empty"),
     ],
 )
 def test_invalid_review_batch_leaves_sync_lock_active(
@@ -311,14 +219,6 @@ def test_invalid_review_batch_leaves_sync_lock_active(
         sync_data = state.read_json(sync_path)
         sync_data["pending"]["commands"][0]["phase"] = "EXPLOITATION"
         state.atomic_json(sync_path, sync_data)
-    else:
-        args["finding"] = {
-            "title": "",
-            "severity": "Info",
-            "description": "Description",
-            "impact": "Impact",
-            "remediation": "Remediation",
-        }
 
     result = json.loads(service.handle_review_batch(args))
 
@@ -328,26 +228,16 @@ def test_invalid_review_batch_leaves_sync_lock_active(
     assert state.has_pending_sync(eng)
 
 
-def test_review_batch_retry_reuses_marker_and_finding_after_partial_failure(
+def test_review_batch_retry_reuses_marker_after_partial_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     eng = _engagement(tmp_path)
     _pending_batch(eng)
-    _prepare_finding_review(eng)
     args = {
         "eng_dir": str(eng),
         "id": "PT-010",
         "status": "[~]",
         "note": "Reviewed HTTP receipt",
-        "finding": {
-            "finding_id": "FIND-001",
-            "hypothesis_id": "H-001",
-            "title": "Exposed HTTP service",
-            "severity": "Info",
-            "description": "An HTTP listener is reachable.",
-            "impact": "The service increases the reachable attack surface.",
-            "remediation": "Restrict the listener when it is not required.",
-        },
     }
     real_clear = state.clear_pending_sync
 
@@ -363,10 +253,8 @@ def test_review_batch_retry_reuses_marker_and_finding_after_partial_failure(
     retry = json.loads(service.handle_review_batch(args))
 
     assert retry["status"] == "ok"
-    assert retry["finding"]["reused"] is True
     ptt_text = (eng / "state" / "ptt.md").read_text(encoding="utf-8")
     assert ptt_text.count("[reviewed-batch:") == 1
-    assert len(list((eng / "evidence" / "findings").glob("FIND-*.md"))) == 1
     assert not state.has_pending_sync(eng)
 
 
@@ -392,14 +280,12 @@ def test_update_hypothesis_supports_discipline_fields(tmp_path: Path) -> None:
         cheapest_test="' OR 1=1 --",
         kill_criteria="Response status 404 or no error output",
         next_step="Run sqlmap probe",
-        linked_findings="FIND-001",
     )
     assert h.confidence == "0.8"
     assert h.timebox == "4 tool batches"
     assert h.cheapest_test == "' OR 1=1 --"
     assert h.kill_criteria == "Response status 404 or no error output"
     assert h.next_step == "Run sqlmap probe"
-    assert h.linked_findings == "FIND-001"
 
     parsed = hypotheses.parse_hypotheses(hyp_file)
     assert len(parsed) == 1

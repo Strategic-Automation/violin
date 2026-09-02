@@ -187,6 +187,25 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(
     assert closed["task_closed"] is True
 
 
+def test_explicit_ptt_task_creation_requires_phase(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    result = json.loads(
+        service.handle_record_ptt(
+            {
+                "eng_dir": str(eng),
+                "id": "PT-900",
+                "status": "[ ]",
+                "title": "extra check",
+                "note": "planned",
+                "skill": "pentest",
+                "technique": "recon",
+            }
+        )
+    )
+
+    assert "phase is required" in result["error"]
+
+
 def test_hypothesis_free_form_record_gets_an_id_and_parenthetical_target(tmp_path: Path) -> None:
     record = hypotheses.update_hypothesis(
         tmp_path / "hypotheses.md",

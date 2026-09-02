@@ -6,6 +6,7 @@ kind: standalone
 provides_tools:
 - violin_record_ptt
 - violin_record_hypothesis
+- violin_submit_finding
 - violin_exec
 - violin_exec_status
 - violin_exec_cancel

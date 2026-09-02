@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,16 +45,6 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
     ),
 ]
 
-_HTTP_CLIENT_RE = re.compile(r"\b(?:curl|wget)\b", re.I)
-_HTTP_URL_RE = re.compile(r"https?://\S+", re.I)
-_HTTP_LONG_FLAG_RE = re.compile(
-    r"-(?:include|verbose|head|dump-header|write-out|output|remote-name|output-document)\b",
-    re.I,
-)
-_HTTP_OFFLINE_CAPTURE_RE = re.compile(
-    r"-(?:o|O|output|remote-name|output-document)\b|\s>\s*[^\s|]+", re.I
-)
-
 
 @dataclass
 class HypothesisResult(GuardResult):
@@ -84,28 +75,40 @@ def check_local_artifact_paths(command: str) -> HypothesisResult:
     return result
 
 
-def _has_short_flag(command: str, *flags: str) -> bool:
-    """True if any single-dash short-flag cluster contains one of `flags`."""
-    wanted = set(flags)
-    return any(
-        any(ch in wanted for ch in token) for token in re.findall(r"(?<!\S)-[A-Za-z]+", command)
-    )
-
-
 def check_http_proof_flags(command: str) -> HypothesisResult:
-    """Review-level guard: HTTP probes must capture the response status/headers."""
+    """Review direct HTTP clients that omit an explicit status observation."""
     result = HypothesisResult()
-    if not _HTTP_CLIENT_RE.search(command) or not _HTTP_URL_RE.search(command):
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
         return result
-    if _HTTP_LONG_FLAG_RE.search(command) or _HTTP_OFFLINE_CAPTURE_RE.search(command):
+    clients = [Path(token).name.lower() for token in tokens]
+    if not any(client in {"curl", "wget"} for client in clients):
         return result
-    if _has_short_flag(command, "i", "v", "I", "D", "w", "o", "O"):
+    if not any(token.lower().startswith(("http://", "https://")) for token in tokens):
         return result
-    result.add_warning(
-        "HTTP probe without status/headers capture: add `-i` (or `-sv`) to curl "
-        "so the evidence file records the response status line — plain `-s` "
-        "produces no HTTP/1.1 line and fails decisive-proof scoring"
-    )
+    curl_capture = {"--include", "--verbose", "--head", "--dump-header", "--write-out"}
+    wget_capture = {"--server-response"}
+    for index, client in enumerate(clients):
+        if client not in {"curl", "wget"}:
+            continue
+        following = tokens[index + 1 :]
+        long_flags = {token.partition("=")[0] for token in following if token.startswith("--")}
+        short_flags = {
+            character
+            for token in following
+            if token.startswith("-") and not token.startswith("--")
+            for character in token[1:]
+        }
+        if client == "curl" and (long_flags & curl_capture or short_flags & set("ivIDw")):
+            continue
+        if client == "wget" and (long_flags & wget_capture or "S" in short_flags):
+            continue
+        result.add_warning(
+            "HTTP probe without an explicit status observation: use curl `-i`/`-w` or "
+            "wget `-S`; batch scripts should emit JSONL http_observation records"
+        )
+        break
     return result
 
 
@@ -330,7 +333,7 @@ def check_hypothesis_freshness(
             if evidence_age_beyond_board > _RECORD_AS_YOU_GO_GRACE:
                 # Record-as-you-go is a hint, not a block: re-syncing the board after
                 # every burst-loop probe drains the prompt budget and breaks the probe
-                # rhythm. False-positive protection lives at finding formalization /
+                # rhythm. False-positive protection lives at finding submission /
                 # REPORTING close, not here — so warn at a natural checkpoint instead.
                 result.add_warning(
                     "hint: hypothesis H-"
