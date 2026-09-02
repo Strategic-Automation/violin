@@ -23,6 +23,7 @@ Only the host runs this; it requires the private golden set, exactly like
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import statistics
 import sys
@@ -43,18 +44,31 @@ def _confirmed_ids(result: dict[str, Any]) -> set[str]:
 def _classify(path: Path) -> str:
     """Classify a directory as a scored engagement, an incomplete one, or a stub.
 
-    * ``"complete"`` — has ``evidence/findings.jsonl`` (a real, submitted-findings
-      engagement that the evaluator can score).
-    * ``"incomplete"`` — has a ``run-manifest.json`` but no findings file: an
-      engagement that was initialized but produced no findings (truncated, still
-      running, or genuinely empty).
+    * ``"complete"`` — has a successful runner result, a completed manifest, or
+      a legacy findings store. A valid run with zero findings is still complete.
+    * ``"incomplete"`` — was initialized but is running, failed, or lacks a
+      trustworthy terminal state.
     * ``"stub"`` — neither: a log tee target or unrelated directory, not an
       engagement at all.
     """
-    if (path / "evidence" / "findings.jsonl").is_file():
-        return "complete"
-    if (path / "run-manifest.json").is_file():
+    results_path = path / "results.json"
+    manifest_path = path / "run-manifest.json"
+    findings_path = path / "evidence" / "findings.jsonl"
+    if results_path.is_file():
+        with contextlib.suppress(OSError, ValueError, json.JSONDecodeError):
+            result = json.loads(results_path.read_text(encoding="utf-8"))
+            runner = result.get("runner") if isinstance(result, dict) else None
+            if isinstance(runner, dict) and runner.get("valid") is True:
+                return "complete"
         return "incomplete"
+    if manifest_path.is_file():
+        with contextlib.suppress(OSError, ValueError, json.JSONDecodeError):
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if isinstance(manifest, dict) and manifest.get("status") == "completed":
+                return "complete"
+        return "incomplete"
+    if findings_path.is_file():
+        return "complete"
     return "stub"
 
 
@@ -168,8 +182,8 @@ def print_result(result: dict[str, Any]) -> None:
     )
     print(f"pass@k       {envelope['pass_at_k_pct']}%  (any-run optimistic bound)")
     print(f"pass^k       {envelope['pass_caret_k_pct']}%  (every-run reliable floor)")
-    flaky = sorted((cid for cid, rate in result["challenge_solve_rate"].items() if rate == 1.0))
-    print(f"reliable     {len(flaky)} challenge(s) solved in every run")
+    reliable = sorted((cid for cid, rate in result["challenge_solve_rate"].items() if rate == 1.0))
+    print(f"reliable     {len(reliable)} challenge(s) solved in every run")
 
 
 def generate_markdown_summary(result: dict[str, Any]) -> str:

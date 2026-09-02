@@ -235,6 +235,9 @@ uv run python -m benchmark.score --calibrate known-good
 uv run python -m benchmark.score --calibrate known-bad
 uv run python -m benchmark.run \
   --target http://localhost:<published-port> \
+  --provider <provider> \
+  --api-base <openai-compatible-base-url> \
+  --model <model-id> \
   --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
 ```
 

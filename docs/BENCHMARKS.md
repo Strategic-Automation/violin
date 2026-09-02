@@ -11,6 +11,10 @@ For each validated vulnerability, call `violin_submit_finding` with:
 - a title, severity, and short technical summary;
 - one or more signed execution receipts that contain the decisive request and response.
 
+When a command writes its decisive response to a separate file, declare that path in the
+same `violin_exec` call through `evidence_outputs`, then cite it through the finding's
+`evidence_paths`. The signed receipt digest must authenticate the saved bytes.
+
 The guard verifies each receipt and its evidence digests before appending the finding to
 `evidence/findings.jsonl`. Finding IDs are local sequential identifiers. They do not identify
 or reveal evaluator cases.
@@ -127,6 +131,9 @@ checks the evaluator only; it is not a live benchmark result.
 ```powershell
 uv run python -m benchmark.run \
   --target http://localhost:<published-port> \
+  --provider <provider> \
+  --api-base <openai-compatible-base-url> \
+  --model <model-id> \
   --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
 ```
 
@@ -149,8 +156,8 @@ uv run python -m benchmark.aggregate --glob "engagements/benchmark-run-*" \
   --markdown-out benchmark/results/aggregate.md
 ```
 
-The aggregator re-scores every *complete* engagement (one with
-`evidence/findings.jsonl`) and reports:
+The aggregator re-scores every *complete* engagement, including a successful
+run that submitted zero findings, and reports:
 
 | Metric | Meaning |
 |---|---|

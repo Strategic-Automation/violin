@@ -78,30 +78,34 @@ def _verified_receipt(
     return receipt, verified
 
 
-def _verified_evidence_files(engagement: Path, evidence_paths: list[str]) -> list[str]:
-    """Resolve saved decisive-evidence files the agent attached to a finding.
-    An evidence path is valid iff it is a non-empty, non-symlink file under
-    evidence/ that is not an execution receipt itself. These are agent-supplied
-    pointers for the scorer; the authenticated anchor is ``receipt_paths`` (the
-    signed receipts), so structural path safety is the only check here.
-    """
+def _verified_evidence_files(
+    engagement: Path,
+    evidence_paths: list[str],
+    authenticated_paths: set[str],
+) -> list[str]:
+    """Resolve decisive-evidence files authenticated by the cited receipts."""
     valid: list[str] = []
     evidence_root = (engagement / "evidence").resolve()
     for value in dict.fromkeys(evidence_paths):
         relative = Path(str(value).strip())
-        if not str(value).strip():
-            continue
         candidate = (engagement / relative).resolve()
         if (
-            relative.is_absolute()
+            not str(value).strip()
+            or relative.is_absolute()
             or not candidate.is_relative_to(evidence_root)
             or candidate.is_symlink()
             or candidate.suffix.lower() == ".json"
             or not candidate.is_file()
             or candidate.stat().st_size == 0
         ):
-            continue
-        valid.append(relative.as_posix())
+            raise ValueError("evidence_paths must name non-empty, non-JSON files beneath evidence/")
+        normalized = candidate.relative_to(engagement).as_posix()
+        if normalized not in authenticated_paths:
+            raise ValueError(
+                "evidence_paths must be authenticated by a cited execution receipt; "
+                "declare each saved file through violin_exec evidence_outputs"
+            )
+        valid.append(normalized)
     return valid
 
 
@@ -178,7 +182,11 @@ def submit_finding(
         verified_paths.extend(path.relative_to(engagement).as_posix() for path in verified)
 
     evidence_paths = evidence_paths or []
-    saved_evidence = _verified_evidence_files(engagement, evidence_paths)
+    saved_evidence = _verified_evidence_files(
+        engagement,
+        evidence_paths,
+        set(verified_paths),
+    )
 
     warnings = _proof_byte_warnings(engagement, verified_paths, saved_evidence)
 

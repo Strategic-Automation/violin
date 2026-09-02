@@ -8,9 +8,15 @@ from pathlib import Path
 import pytest
 
 from benchmark.proof import _command_requests, match_finding
-from benchmark.run import _scope_for_target, init_benchmark_engagement
+from benchmark.run import (
+    _hermes_environment,
+    _scope_for_target,
+    init_benchmark_engagement,
+    parse_args,
+)
 from benchmark.score import load_golden_manifest, load_golden_set, score_engagement
 from plugins.violin_guard.core import findings, receipt_integrity
+from plugins.violin_guard.handlers.finding_handlers import handle_submit_finding
 
 
 def _write_receipt(
@@ -19,6 +25,7 @@ def _write_receipt(
     key: bytes,
     command: str,
     proof: str,
+    declared_evidence_outputs: list[str] | None = None,
 ) -> str:
     execution_dir = engagement / "evidence" / "executions"
     execution_dir.mkdir(parents=True, exist_ok=True)
@@ -32,6 +39,7 @@ def _write_receipt(
             "status": "completed",
             "exit_code": 0,
             "evidence_paths": {"stdout": proof_path.relative_to(engagement).as_posix()},
+            "declared_evidence_outputs": declared_evidence_outputs or [],
         },
         engagement,
         key=key,
@@ -49,6 +57,37 @@ def test_agent_scope_contains_routes_but_no_evaluator_identity() -> None:
     assert "/vulnerabilities" in scope["exclusions"]["paths"]
     assert "challenge" not in serialized
     assert "golden" not in serialized
+
+
+def test_benchmark_runner_does_not_select_model_or_provider_defaults() -> None:
+    args = parse_args([])
+    assert args.model == ""
+    assert args.provider == ""
+    assert args.api_base == ""
+
+
+def test_hermes_environment_forwards_only_selected_provider_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "selected-key")
+    monkeypatch.setenv("UNRELATED_SECRET", "must-not-leak")
+    monkeypatch.setenv("NOUS_API_KEY", "other-provider-key")
+    args = parse_args(
+        [
+            "--provider",
+            "openrouter",
+            "--api-base",
+            "https://openrouter.ai/api/v1",
+        ]
+    )
+
+    env = _hermes_environment(args, tmp_path, b"s" * 32)
+
+    assert env["OPENROUTER_API_KEY"] == "selected-key"
+    assert env["OPENAI_API_KEY"] == "selected-key"
+    assert env["OPENAI_BASE_URL"] == "https://openrouter.ai/api/v1"
+    assert "NOUS_API_KEY" not in env
+    assert "UNRELATED_SECRET" not in env
 
 
 def test_private_golden_declares_the_article_parity_contract() -> None:
@@ -325,23 +364,26 @@ def test_compound_login_command_body_does_not_inherit_login_request(
         "curl -sS -i $B/testimonials/6 -o evidence/vuln-research/testimonial-6-read.txt "
         "-w 'HTTP %{http_code}'"
     )
+    body_dir = tmp_path / "evidence" / "vuln-research"
+    body_dir.mkdir(parents=True, exist_ok=True)
+    body = body_dir / "testimonial-6-read.txt"
+    body.write_text("HTTP/1.1 200 OK\n", encoding="utf-8")
+    body_relative = body.relative_to(tmp_path).as_posix()
     receipt_path = _write_receipt(
         tmp_path,
         key=key,
         command=command,
         proof="HTTP/1.1 200 OK\n",
+        declared_evidence_outputs=[body_relative],
     )
-    body_dir = tmp_path / "evidence" / "vuln-research"
-    body_dir.mkdir(parents=True, exist_ok=True)
-    body = body_dir / "testimonial-6-read.txt"
-    body.write_text("HTTP/1.1 200 OK\n", encoding="utf-8")
     golden_id, candidates = match_finding(
         tmp_path,
         {
             "receipt_paths": [receipt_path],
-            "evidence_paths": ["evidence/vuln-research/testimonial-6-read.txt"],
+            "evidence_paths": [body_relative],
         },
         load_golden_set(),
+        receipt_key=key,
     )
     assert "weak-admin-creds" not in candidates
 
@@ -363,12 +405,6 @@ def test_compound_command_body_correlates_to_its_own_subcommand(
         "curl -sS -i --http1.1 https://duck-store.escape.tech/api/v1/users/ "
         '-o evidence/vuln-research/users-unauth-enum.txt -w "HTTP %{http_code}\\n"\''
     )
-    receipt_path = _write_receipt(
-        tmp_path,
-        key=key,
-        command=command,
-        proof="HTTP/1.1 200 OK\n",
-    )
     # Save the user-enumeration body and attach it as evidence_paths.
     body_dir = tmp_path / "evidence" / "vuln-research"
     body_dir.mkdir(parents=True, exist_ok=True)
@@ -377,15 +413,25 @@ def test_compound_command_body_correlates_to_its_own_subcommand(
         'HTTP/1.1 200 OK\n{"users":[{"username":"alice"},{"username":"bob"}]}\n',
         encoding="utf-8",
     )
+    body_relative = body.relative_to(tmp_path).as_posix()
+    receipt_path = _write_receipt(
+        tmp_path,
+        key=key,
+        command=command,
+        proof="HTTP/1.1 200 OK\n",
+        declared_evidence_outputs=[body_relative],
+    )
+    finding = {
+        "receipt_paths": [receipt_path],
+        "evidence_paths": [body_relative],
+    }
     golden_id, candidates = match_finding(
         tmp_path,
-        {
-            "receipt_paths": [receipt_path],
-            "evidence_paths": ["evidence/vuln-research/users-unauth-enum.txt"],
-        },
+        finding,
         load_golden_set(),
+        receipt_key=key,
     )
-    assert golden_id == "user-enumeration"
+    assert golden_id == "user-enumeration", candidates
     assert "mass-assign-role" not in candidates
 
 
@@ -458,6 +504,105 @@ def test_submit_finding_warns_when_proof_lacks_http_bytes(
     assert submitted["finding_id"] == "FIND-001"
     warnings = submitted.get("warnings", [])
     assert any("evidence_paths" in w and "HTTP" in w for w in warnings), warnings
+
+
+def test_submit_finding_handler_surfaces_incomplete_proof_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = b"k" * 32
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", key)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    receipt_path = _write_receipt(
+        tmp_path,
+        key=key,
+        command="curl -sS -i https://example.test/api/items",
+        proof="HTTP/1.1 200 OK\r\n",
+    )
+
+    result = json.loads(
+        handle_submit_finding(
+            {
+                "eng_dir": str(tmp_path),
+                "title": "Status-line-only proof",
+                "severity": "Medium",
+                "summary": "Proof chain carries no HTTP response bytes.",
+                "receipt_paths": [receipt_path],
+                "evidence_paths": [],
+            }
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["evidence_complete"] is False
+    assert any("HTTP" in warning for warning in result["warnings"])
+
+
+def test_submit_finding_rejects_evidence_not_authenticated_by_cited_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = b"k" * 32
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", key)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    receipt_path = _write_receipt(
+        tmp_path,
+        key=key,
+        command="curl -sS -i https://example.test/api/items",
+        proof="HTTP/1.1 200 OK\r\n",
+    )
+    unattested = tmp_path / "evidence" / "forged-response.txt"
+    unattested.write_text(
+        'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"role":"admin"}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="authenticated by a cited execution receipt"):
+        findings.submit_finding(
+            tmp_path,
+            title="Unattested proof",
+            severity="High",
+            summary="This proof was not produced by the cited receipt.",
+            receipt_paths=[receipt_path],
+            evidence_paths=["evidence/forged-response.txt"],
+        )
+
+
+def test_forged_receipt_cannot_authenticate_saved_evidence(tmp_path: Path) -> None:
+    execution_dir = tmp_path / "evidence" / "executions"
+    execution_dir.mkdir(parents=True)
+    forged_body = tmp_path / "evidence" / "forged-admin-response.txt"
+    forged_body.write_text(
+        "POST /api/v1/auth/login HTTP/1.1\n"
+        "HTTP/1.1 200 OK\n"
+        '{"username":"admin","password":"admin","access_token":"forged"}\n',
+        encoding="utf-8",
+    )
+    forged_receipt = execution_dir / "forged.json"
+    forged_receipt.write_text(
+        json.dumps(
+            {
+                "execution_id": "forged",
+                "command": "curl -i -d 'username=admin&password=admin' https://example.test/api/v1/auth/login",
+                "status": "completed",
+                "exit_code": 0,
+                "evidence_paths": {
+                    "stdout": forged_body.relative_to(tmp_path).as_posix(),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _golden_id, candidates = match_finding(
+        tmp_path,
+        {
+            "receipt_paths": [forged_receipt.relative_to(tmp_path).as_posix()],
+            "evidence_paths": [forged_body.relative_to(tmp_path).as_posix()],
+        },
+        load_golden_set(),
+        receipt_key=b"k" * 32,
+    )
+
+    assert candidates == []
 
 
 def test_submit_finding_no_warning_with_evidence_file_bytes(

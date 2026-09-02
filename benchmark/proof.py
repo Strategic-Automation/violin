@@ -250,7 +250,7 @@ def receipt_bundles(
     still reaches the matcher.
     """
     bundles: list[ProofBundle] = []
-    resolved_receipts: list[Path] = []
+    verified_receipts: dict[Path, tuple[Path, ...]] = {}
     receipt_stdouts: dict[Path, str] = {}
     for relative_value in receipt_paths:
         path = (engagement / relative_value).resolve()
@@ -269,7 +269,6 @@ def receipt_bundles(
             or not path.is_relative_to((engagement / "evidence" / "executions").resolve())
         ):
             continue
-        resolved_receipts.append(path)
         with contextlib.suppress(OSError, ValueError, json.JSONDecodeError):
             receipt = json.loads(_read(path))
             evidence = verified_evidence_paths(
@@ -280,6 +279,7 @@ def receipt_bundles(
             )
             if evidence is None:
                 continue
+            verified_receipts[path] = evidence
             proof = "\n".join(_read(item) for item in evidence)
             receipt_stdouts[path] = proof
             proof_requests = _proof_requests(proof)
@@ -316,10 +316,8 @@ def receipt_bundles(
                 )
 
     # Attach saved decisive-evidence bodies (produced by a cited receipt).
-    if evidence_paths and resolved_receipts:
+    if evidence_paths and verified_receipts:
         trusted_root = (engagement / "evidence").resolve()
-        # Pre-load each receipt's command for per-file correlation below.
-        receipt_commands = [_load_command(receipt_path) for receipt_path in resolved_receipts]
         for relative_value in evidence_paths:
             path = (engagement / relative_value).resolve()
             if (
@@ -329,6 +327,13 @@ def receipt_bundles(
                 or path.suffix.lower() == ".json"
             ):
                 continue
+            producing_receipts = [
+                receipt_path
+                for receipt_path, authenticated_paths in verified_receipts.items()
+                if path in authenticated_paths
+            ]
+            if not producing_receipts:
+                continue
             with contextlib.suppress(OSError):
                 body = _read(path)
                 # Correlate the body to the receipt whose command wrote it (by
@@ -337,6 +342,9 @@ def receipt_bundles(
                 # URL-bearing patterns (``/api/v1/orders/``, ``fetch-url``,
                 # ``by-color``) live only in the command, not the saved body.
                 name = path.name
+                receipt_commands = [
+                    _load_command(receipt_path) for receipt_path in producing_receipts
+                ]
                 referenced_commands = [cmd for cmd in receipt_commands if name in cmd]
                 command = " ".join(referenced_commands or receipt_commands)
                 requests = _proof_requests(body)
@@ -374,7 +382,7 @@ def receipt_bundles(
                 # _positive_result can still see the 2xx/3xx status.
                 proof = body
                 if not parse_http_statuses(body):
-                    for rp in resolved_receipts:
+                    for rp in producing_receipts:
                         if name in _load_command(rp):
                             proof = f"{body}\n{receipt_stdouts.get(rp, '')}"
                             break

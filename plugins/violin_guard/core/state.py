@@ -82,11 +82,6 @@ def resolve_eng_dir(eng_dir: str | Path) -> Path:
     else:
         resolved = path.resolve()
 
-    # A mistyped path (e.g. timestamp transposition 20260123 vs 20260823)
-    # would otherwise be silently materialized by ensure_dir(); fall back to
-    # the runner-provided active engagement when the resolved path is bogus.
-    if not resolved.exists() and env_root is not None and env_root.exists():
-        return env_root
     return resolved
 
 

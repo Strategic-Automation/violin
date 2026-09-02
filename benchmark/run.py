@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""run.py — Automated Hermes Profile Benchmark Runner with OpenRouter integration.
+"""Automated Hermes profile benchmark runner for OpenAI-compatible providers.
 
 Executes Hermes non-interactively using the target profile against a benchmark lab target,
 manages engagement state, and evaluates it only when the private evaluator is present.
@@ -38,6 +38,37 @@ from plugins.violin_guard.core.receipt_integrity import RECEIPT_SIGNING_KEY_ENV 
 from plugins.violin_guard.gates.command import validate_scope  # noqa: E402
 
 _DEFAULT_HERMES_MAX_TOKENS = 32_000
+_HERMES_ENV_ALLOWLIST = frozenset(
+    {
+        "APPDATA",
+        "COLORTERM",
+        "COMSPEC",
+        "HOME",
+        "HOSTNAME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LOCALAPPDATA",
+        "NO_COLOR",
+        "PATH",
+        "PATHEXT",
+        "SSH_AUTH_SOCK",
+        "SYSTEMROOT",
+        "TEMP",
+        "TERM",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+        "WINDIR",
+    }
+)
+_PROVIDER_KEY_ENV = {
+    "nous": "NOUS_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "opencode-go": "OPENCODE_GO_API_KEY",
+    "opencode_go": "OPENCODE_GO_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 _COVERAGE_OBLIGATIONS = (
     "POST /api/v1/auth/login",
     "POST /api/v1/auth/login/totp",
@@ -60,10 +91,8 @@ _COVERAGE_OBLIGATIONS = (
 )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Automated Hermes Profile Benchmark Runner with OpenRouter support."
-    )
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Automated Hermes profile benchmark runner.")
     parser.add_argument(
         "--eng-dir",
         type=Path,
@@ -73,8 +102,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default="deepseek/deepseek-v4-flash-0731",
-        help="Optional LLM model ID or openrouter/model-name (default: deepseek/deepseek-v4-flash-latest)",
+        default="",
+        help="Optional Hermes model ID; omitted uses the operator's Hermes configuration",
     )
     parser.add_argument(
         "--skill",
@@ -85,14 +114,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--provider",
         type=str,
-        default="openrouter",
-        help="Hermes LLM provider (e.g. openrouter, openai, custom) (default: openrouter)",
+        default="",
+        help="Optional provider label used for manifest metadata and API-key selection",
     )
     parser.add_argument(
         "--api-base",
         type=str,
-        default="https://openrouter.ai/api/v1",
-        help="OpenAI-compatible API base URL (default: https://openrouter.ai/api/v1)",
+        default="",
+        help="Optional OpenAI-compatible base URL; omitted uses Hermes configuration",
     )
     parser.add_argument(
         "--target",
@@ -120,7 +149,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Optional path to write markdown summary",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _sha256(path: Path) -> str:
@@ -133,6 +162,41 @@ def _git_output(*args: str) -> str:
         ["git", *args], cwd=REPO_ROOT, check=False, capture_output=True, text=True
     )
     return completed.stdout.strip() if completed.returncode == 0 else "unknown"
+
+
+def _hermes_environment(
+    args: argparse.Namespace,
+    eng_dir: Path,
+    signing_key_bytes: bytes,
+) -> dict[str, str]:
+    """Build a narrow child environment without forwarding unrelated secrets."""
+    env = {key: value for key, value in os.environ.items() if key.upper() in _HERMES_ENV_ALLOWLIST}
+    env["ENG_DIR"] = str(eng_dir.resolve())
+    env[RECEIPT_SIGNING_KEY_ENV] = signing_key_bytes.hex()
+
+    api_base = str(args.api_base or "").strip()
+    if api_base:
+        env["OPENAI_API_BASE"] = api_base
+        env["OPENAI_BASE_URL"] = api_base
+        env["CUSTOM_BASE_URL"] = api_base
+
+    provider = str(args.provider or "").strip().casefold()
+    key_name = _PROVIDER_KEY_ENV.get(provider)
+    if key_name is None and api_base:
+        key_name = "OPENAI_API_KEY"
+    if key_name and (key_value := os.environ.get(key_name)):
+        env[key_name] = key_value
+        env["OPENAI_API_KEY"] = key_value
+
+    configured_max_tokens = os.environ.get("VIOLIN_BENCHMARK_MAX_TOKENS", "").strip()
+    env["HERMES_MAX_TOKENS"] = configured_max_tokens or str(_DEFAULT_HERMES_MAX_TOKENS)
+
+    venv_scripts = str(REPO_ROOT / ".venv" / "Scripts")
+    venv_bin = str(REPO_ROOT / ".venv" / "bin")
+    current_path = env.get("PATH", "")
+    env["PATH"] = os.pathsep.join([path for path in (venv_scripts, venv_bin, current_path) if path])
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    return env
 
 
 def _run_manifest(
@@ -417,32 +481,7 @@ def main() -> int:
     )
     manifest_path = eng_dir / "run-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    env = os.environ.copy()
-    env["ENG_DIR"] = str(eng_dir.resolve())
-    env[RECEIPT_SIGNING_KEY_ENV] = signing_key_bytes.hex()
-    env["OPENAI_API_BASE"] = args.api_base
-    env["OPENAI_BASE_URL"] = args.api_base
-    env["CUSTOM_BASE_URL"] = args.api_base
-    # OpenRouter rejects requests whose declared output ceiling exceeds the
-    # account's affordable budget, even when the model would stop earlier.
-    # Keep the benchmark provider-safe while allowing an explicit override for
-    # accounts with a larger entitlement.
-    configured_max_tokens = os.environ.get("VIOLIN_BENCHMARK_MAX_TOKENS", "").strip()
-    env["HERMES_MAX_TOKENS"] = configured_max_tokens or str(_DEFAULT_HERMES_MAX_TOKENS)
-    if "NOUS_API_KEY" in env and "OPENAI_API_KEY" not in env:
-        env["OPENAI_API_KEY"] = env["NOUS_API_KEY"]
-    if "OPENROUTER_API_KEY" in env and "OPENAI_API_KEY" not in env:
-        env["OPENAI_API_KEY"] = env["OPENROUTER_API_KEY"]
-    if "OPENCODE_GO_API_KEY" in env and "OPENAI_API_KEY" not in env:
-        env["OPENAI_API_KEY"] = env["OPENCODE_GO_API_KEY"]
-    if "OPENAI_API_KEY" not in env:
-        env["OPENAI_API_KEY"] = "not-needed"
-
-    venv_scripts = str(REPO_ROOT / ".venv" / "Scripts")
-    venv_bin = str(REPO_ROOT / ".venv" / "bin")
-    current_path = env.get("PATH", "")
-    env["PATH"] = os.pathsep.join([path for path in (venv_scripts, venv_bin, current_path) if path])
-    env["PYTHONPATH"] = str(REPO_ROOT)
+    env = _hermes_environment(args, eng_dir, signing_key_bytes)
 
     cmd = [
         "hermes",
@@ -460,8 +499,8 @@ def main() -> int:
         cmd.extend(["-s", args.skill])
     if args.model:
         cmd.extend(["-m", args.model])
-    # Don't pass --provider to hermes CLI when using custom base URL via env vars
-    # The env vars OPENAI_BASE_URL and OPENAI_API_BASE are already set above
+    # A custom base URL is supplied through the child environment. Model
+    # selection remains an explicit operator input or Hermes configuration.
 
     print(f"\nExecution Command: {' '.join(cmd)}")
 

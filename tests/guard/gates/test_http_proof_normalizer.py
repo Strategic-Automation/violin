@@ -14,6 +14,7 @@ def test_injects_i_into_curl_with_data():
     cmd = "curl -sS -X POST -H 'Content-Type: application/json' -d '{}' https://duck-store.escape.tech/api/v1/auth/login"
     out = normalize_http_proof_flags(cmd)
     assert "-i" in out
+    assert "-H 'Content-Type: application/json' -d '{}'" in out
 
 
 def test_injects_i_once_only():
@@ -42,15 +43,15 @@ def test_leaves_none_curl_untouched():
     assert normalize_http_proof_flags(cmd) == cmd
 
 
-def test_leaves_offline_capture_untouched():
+def test_adds_status_capture_to_redirected_body():
     cmd = "curl -sS --max-time 30 https://duck-store.escape.tech/ > /tmp/out.txt"
-    assert normalize_http_proof_flags(cmd) == cmd
+    assert normalize_http_proof_flags(cmd).startswith("curl -i -sS")
 
 
 def test_injects_i_for_wget_too():
     cmd = "wget -q https://duck-store.escape.tech/robots.txt"
     out = normalize_http_proof_flags(cmd)
-    assert "wget -i" in out
+    assert "wget -S" in out
 
 
 def test_preserves_quoted_url_fragments():
@@ -72,4 +73,4 @@ def test_injects_i_into_mixed_clients_in_compound_command():
     cmd = "curl -s https://duck-store.escape.tech/a && wget -q https://duck-store.escape.tech/b"
     out = normalize_http_proof_flags(cmd)
     assert "curl -i -s" in out
-    assert "wget -i -q" in out
+    assert "wget -S -q" in out

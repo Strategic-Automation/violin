@@ -16,11 +16,13 @@ def handle_submit_finding(args: dict, **kwargs) -> str:
         receipt_paths=args["receipt_paths"],
         evidence_paths=args.get("evidence_paths") or [],
     )
+    warnings = list(result.get("warnings") or [])
     return _json(
         "ok",
         finding_id=result["finding_id"],
         status=result["status"],
         duplicate=result["duplicate"],
         receipt_validation=result["receipt_validation"],
-        evidence_complete=True,
+        evidence_complete=not warnings,
+        warnings=warnings,
     )

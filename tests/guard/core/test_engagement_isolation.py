@@ -32,13 +32,15 @@ def test_relative_engagement_path_uses_profile_root_not_cwd(monkeypatch, tmp_pat
     )
 
 
-def test_resolve_eng_dir_self_heals_mistyped_absolute_path(monkeypatch, tmp_path: Path) -> None:
+def test_resolve_eng_dir_does_not_redirect_explicit_path_to_environment(
+    monkeypatch, tmp_path: Path
+) -> None:
     target_eng = tmp_path / "engagements" / "benchmark-run-20260823_204011"
     (target_eng / "scope").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ENG_DIR", str(target_eng))
 
     mistyped = tmp_path / "engagements" / "benchmark-run-20260123_204011"  # does not exist
-    assert resolve_eng_dir(str(mistyped)) == target_eng.resolve()
+    assert resolve_eng_dir(str(mistyped)) == mistyped.resolve()
 
 
 def test_check_cross_engagement_paths_blocks_foreign_dir(tmp_path: Path) -> None:

@@ -11,23 +11,42 @@ from benchmark import aggregate
 from benchmark.aggregate import _classify, aggregate_engagements
 
 
-def _make_engagement(root: Path, name: str, *, findings: bool, manifest: bool) -> Path:
+def _make_engagement(
+    root: Path,
+    name: str,
+    *,
+    findings: bool,
+    manifest: bool,
+    manifest_status: str = "completed",
+) -> Path:
     path = root / name
     path.mkdir(parents=True, exist_ok=True)
     if findings:
         (path / "evidence").mkdir(parents=True, exist_ok=True)
         (path / "evidence" / "findings.jsonl").write_text("", encoding="utf-8")
     if manifest:
-        (path / "run-manifest.json").write_text(json.dumps({"run_id": name}), encoding="utf-8")
+        (path / "run-manifest.json").write_text(
+            json.dumps({"run_id": name, "status": manifest_status}), encoding="utf-8"
+        )
     return path
 
 
 def test_classify_distinguishes_engagement_kinds(tmp_path: Path) -> None:
     complete = _make_engagement(tmp_path, "complete", findings=True, manifest=True)
-    incomplete = _make_engagement(tmp_path, "incomplete", findings=False, manifest=True)
+    incomplete = _make_engagement(
+        tmp_path,
+        "incomplete",
+        findings=False,
+        manifest=True,
+        manifest_status="running",
+    )
+    completed_without_findings = _make_engagement(
+        tmp_path, "zero-findings", findings=False, manifest=True
+    )
     stub = _make_engagement(tmp_path, "stub", findings=False, manifest=False)
     assert _classify(complete) == "complete"
     assert _classify(incomplete) == "incomplete"
+    assert _classify(completed_without_findings) == "complete"
     assert _classify(stub) == "stub"
 
 
@@ -54,7 +73,13 @@ def test_aggregate_reports_mean_and_envelope(
         dirs.append(d)
     # Stub + incomplete dirs must be excluded without affecting the distribution.
     _make_engagement(tmp_path, "tee-stub", findings=False, manifest=False)
-    _make_engagement(tmp_path, "still-running", findings=False, manifest=True)
+    _make_engagement(
+        tmp_path,
+        "still-running",
+        findings=False,
+        manifest=True,
+        manifest_status="running",
+    )
 
     # Bind each engagement to its own confirmed set deterministically.
     mapping = {str(d.resolve()): ids for d, ids in zip(dirs, cases, strict=True)}
@@ -102,3 +127,27 @@ def test_aggregate_excludes_explicitly_incomparable_runs(
 
     assert result["runs"] == 0
     assert result["incomparable_engagements"] == ["hosted-without-snapshot"]
+
+
+def test_aggregate_counts_completed_zero_finding_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    engagement = _make_engagement(
+        tmp_path, "completed-zero-findings", findings=False, manifest=True
+    )
+
+    monkeypatch.setattr(
+        aggregate,
+        "score_engagement",
+        lambda _engagement: {
+            **_fake_score(set())(_engagement),
+            "protocol_alignment": {"comparable": True},
+        },
+    )
+    monkeypatch.setattr(aggregate, "load_golden_set", lambda: [{"id": "a"}])
+
+    result = aggregate_engagements([engagement])
+
+    assert result["runs"] == 1
+    assert result["summary"]["mean_confirmed"] == 0.0
+    assert result["summary"]["mean_pass_at_1_pct"] == 0.0

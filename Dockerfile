@@ -100,4 +100,4 @@ VOLUME ["/violin/engagements"]
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default entrypoint
-CMD ["uv", "run", "python", "-m", "benchmark.run"]
+CMD ["uv", "run", "--no-dev", "python", "-m", "benchmark.run"]
