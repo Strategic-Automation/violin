@@ -43,6 +43,7 @@ _HERMES_ENV_ALLOWLIST = frozenset(
         "APPDATA",
         "COLORTERM",
         "COMSPEC",
+        "HERMES_YOLO_MODE",
         "HOME",
         "HOSTNAME",
         "LANG",
@@ -173,6 +174,7 @@ def _hermes_environment(
     env = {key: value for key, value in os.environ.items() if key.upper() in _HERMES_ENV_ALLOWLIST}
     env["ENG_DIR"] = str(eng_dir.resolve())
     env[RECEIPT_SIGNING_KEY_ENV] = signing_key_bytes.hex()
+    env["HERMES_YOLO_MODE"] = "1"
 
     api_base = str(args.api_base or "").strip()
     if api_base:

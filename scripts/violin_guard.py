@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,6 +14,51 @@ from pathlib import Path
 _PROFILE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
+
+
+def _ensure_venv() -> None:
+    try:
+        import pydantic  # noqa: F401
+
+        return
+    except ImportError:
+        pass
+
+    candidates: list[Path] = []
+    if os.getenv("VIRTUAL_ENV"):
+        candidates.append(Path(os.environ["VIRTUAL_ENV"]))
+    candidates.extend(
+        [
+            _PROFILE_ROOT / ".venv",
+            _PROFILE_ROOT.parent / ".venv",
+            Path("/violin/.venv"),
+        ]
+    )
+
+    for venv in candidates:
+        if not venv.is_dir():
+            continue
+        site_packages = list(venv.glob("lib/python*/site-packages")) + list(
+            venv.glob("Lib/site-packages")
+        )
+        for sp in site_packages:
+            if sp.is_dir() and str(sp) not in sys.path:
+                sys.path.insert(0, str(sp))
+        try:
+            import pydantic  # noqa: F401
+
+            return
+        except ImportError:
+            pass
+
+        for exe_name in ("bin/python", "bin/python3", "Scripts/python.exe", "Scripts/python"):
+            exe = venv / exe_name
+            if exe.is_file() and Path(sys.executable).resolve() != exe.resolve():
+                res = subprocess.run([str(exe), *sys.argv], check=False)
+                sys.exit(res.returncode)
+
+
+_ensure_venv()
 
 from plugins.violin_guard import handlers
 from plugins.violin_guard.core import bootstrap, findings, state

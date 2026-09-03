@@ -91,3 +91,79 @@ def test_recency_gate_recon_phases_untouched(tmp_path: Path) -> None:
     eng = _make_engagement(tmp_path, _STALE_HYP, evidence_age=2 * 3600)
     result = command.check_hypothesis_freshness(eng, Phase.RECON, "nmap -p- 10.129.47.140")
     assert not result.errors
+
+
+def test_recency_gate_suppressed_during_burst(tmp_path: Path) -> None:
+    """During burst execution, recency hints must be suppressed."""
+    eng = _make_engagement(tmp_path, _STALE_HYP, evidence_age=2 * 3600)
+    result = command.check_hypothesis_freshness(
+        eng,
+        Phase.EXPLOITATION,
+        "python3 exploit.py 10.129.47.140 1515",
+        is_burst=True,
+    )
+    assert not result.errors
+    assert not any("predates the latest execution" in w for w in result.warnings)
+
+
+def test_recency_gate_suppressed_when_batch_in_progress(tmp_path: Path) -> None:
+    """When a bounded batch is in progress, recency hints must be suppressed."""
+    from plugins.violin_guard.core import state
+
+    eng = _make_engagement(tmp_path, _STALE_HYP, evidence_age=2 * 3600)
+    # Simulate an active pending sync batch
+    state.mark_pending_sync(eng, "curl http://10.129.47.140/probe", "exploitation", "PT-103")
+    result = command.check_hypothesis_freshness(
+        eng,
+        Phase.EXPLOITATION,
+        "python3 exploit.py 10.129.47.140 1515",
+    )
+    assert not result.errors
+    assert not any("predates the latest execution" in w for w in result.warnings)
+
+
+def test_operational_task_in_exploitation_hypothesis_optional(tmp_path: Path) -> None:
+    """PT-103/PT-104 operational checks (e.g. CORS/rate-limiting) do not require hypotheses."""
+    eng = tmp_path / "eng"
+    eng.mkdir(parents=True, exist_ok=True)
+    # Empty hypothesis board
+    (eng / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+
+    # Under PT-103 in EXPLOITATION, check passes without error
+    result = command.check_hypothesis_freshness(
+        eng,
+        Phase.EXPLOITATION,
+        "curl -i http://10.129.47.140:1515/api/cors-test",
+        primary_target="10.129.47.140:1515",
+        task_id="PT-103",
+    )
+    assert not result.errors
+    assert any("operational check" in info for info in result.infos)
+
+    # Under PT-104 in EXPLOITATION, check also passes without error
+    result_pt104 = command.check_hypothesis_freshness(
+        eng,
+        Phase.EXPLOITATION,
+        "curl -i http://10.129.47.140:1515/api/rate-limit-test",
+        primary_target="10.129.47.140:1515",
+        task_id="PT-104",
+    )
+    assert not result_pt104.errors
+    assert any("operational check" in info for info in result_pt104.infos)
+
+
+def test_non_operational_task_in_exploitation_requires_hypothesis(tmp_path: Path) -> None:
+    """Non-operational tasks (e.g. PT-102) in EXPLOITATION still require valid hypotheses."""
+    eng = tmp_path / "eng"
+    eng.mkdir(parents=True, exist_ok=True)
+    (eng / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+
+    result = command.check_hypothesis_freshness(
+        eng,
+        Phase.EXPLOITATION,
+        "curl -i http://10.129.47.140:1515/api/exploit",
+        primary_target="10.129.47.140:1515",
+        task_id="PT-102",
+    )
+    assert result.errors
+    assert any("requires at least one hypothesis" in err for err in result.errors)
