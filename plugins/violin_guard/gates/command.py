@@ -48,6 +48,7 @@ class CheckCommandArgs:
     session_id: str | None = None
     account_sync: bool = True
     hypothesis_id: str | None = None
+    is_burst: bool = False
 
 
 @dataclass
@@ -151,6 +152,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     ptt_validation = ptt.validate_ptt(ptt.parse_ptt(ptt_path))
     result.errors.extend(ptt_validation.errors)
     result.warnings.extend(ptt_validation.warnings)
+    active_task = None
     active_task_hyp_id = None
     if ptt_validation.active_task:
         result.infos.append(f"active PTT task: {ptt_validation.active_task}")
@@ -200,6 +202,8 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
         args.target,
         hypothesis_id=args.hypothesis_id or active_task_hyp_id,
         match_command_target=not research_primary,
+        is_burst=args.is_burst or bool(pending),
+        task_id=active_task.id if active_task else None,
     )
     result.errors.extend(hyp_result.errors)
     result.warnings.extend(hyp_result.warnings)

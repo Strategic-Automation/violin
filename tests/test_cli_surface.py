@@ -47,3 +47,19 @@ def test_smoke_script_imports_from_owning_modules() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_generate_closeout_script_surface() -> None:
+    closeout_script = ROOT / "scripts" / "generate-closeout.py"
+    assert closeout_script.is_file()
+
+    result = subprocess.run(
+        [sys.executable, str(closeout_script), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--eng-dir" in result.stdout
+    assert "--target" in result.stdout

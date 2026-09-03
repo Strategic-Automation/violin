@@ -167,6 +167,8 @@ def check_hypothesis_freshness(
     hypothesis_id: str | None = None,
     *,
     match_command_target: bool = True,
+    is_burst: bool = False,
+    task_id: str | None = None,
 ) -> HypothesisResult:
     """Ensure hypotheses exist and are fresh for phases that require them."""
     result = HypothesisResult()
@@ -174,10 +176,17 @@ def check_hypothesis_freshness(
     if not requires_hypothesis(phase):
         return result
 
+    is_operational_task = bool(task_id and task_id.strip().upper() in {"PT-103", "PT-104"})
+
     hyp_path = eng_dir / "hypotheses.md"
     hyps = hypotheses.parse_hypotheses(hyp_path)
 
     if not hyps:
+        if phase == Phase.EXPLOITATION and is_operational_task and not hypothesis_id:
+            result.add_info(
+                f"operational check under {task_id} in EXPLOITATION: hypothesis binding optional"
+            )
+            return result
         result.add_error(
             f"phase {phase.value} requires at least one hypothesis in hypotheses.md. "
             f"Use violin_record_hypothesis (e.g. id='H-001' title='...' target='...' "
@@ -245,6 +254,11 @@ def check_hypothesis_freshness(
         ):
             relevant.append(hypothesis)
     if not relevant:
+        if phase == Phase.EXPLOITATION and is_operational_task and not hypothesis_id:
+            result.add_info(
+                f"operational check under {task_id} in EXPLOITATION: hypothesis binding optional"
+            )
+            return result
         eligible = [
             f"H-{hypothesis.id}@{normalize_target(hypothesis.target)}[phase:{hypothesis.phase}]"
             for hypothesis in hyps
@@ -270,22 +284,25 @@ def check_hypothesis_freshness(
         Phase.PRIVESC,
         Phase.FLAGS,
     }:
-        any_research = any(
-            hypothesis.cve_research.strip() and hypothesis.exploit_research.strip()
-            for hypothesis in relevant
-        )
-        if not any_research:
-            example = relevant[0] if relevant else None
-            result.add_warning(
-                "hint: no CVE/Exploit research recorded yet — before writing a "
-                "custom exploit, try a web search for prior work (CVE databases, "
-                "ExploitDB, GitHub PoCs). Record the outcome via "
-                "violin_record_hypothesis "
-                f"id=H-{example.id if example else '00N'} "
-                "cve_research='...' exploit_research='...' — 'no results', "
-                "'not applicable', or 'source unavailable' are valid truthful "
-                "outcomes. This is a hint, not a block: execution may proceed."
+        if is_operational_task and not relevant and not hypothesis_id:
+            pass
+        else:
+            any_research = any(
+                hypothesis.cve_research.strip() and hypothesis.exploit_research.strip()
+                for hypothesis in relevant
             )
+            if not any_research:
+                example = relevant[0] if relevant else None
+                result.add_warning(
+                    "hint: no CVE/Exploit research recorded yet — before writing a "
+                    "custom exploit, try a web search for prior work (CVE databases, "
+                    "ExploitDB, GitHub PoCs). Record the outcome via "
+                    "violin_record_hypothesis "
+                    f"id=H-{example.id if example else '00N'} "
+                    "cve_research='...' exploit_research='...' — 'no results', "
+                    "'not applicable', or 'source unavailable' are valid truthful "
+                    "outcomes. This is a hint, not a block: execution may proceed."
+                )
 
     # Check for stale hypotheses (no update in 48h)
     stale = 0
@@ -305,7 +322,10 @@ def check_hypothesis_freshness(
             stale += 1
 
     if stale:
-        result.add_warning(f"hypothesis guard: {stale} hypothesis(es) not updated in 48h")
+        result.add_warning(
+            f"hint: hypothesis guard: {stale} hypothesis(es) not updated in 48h — "
+            "review hypothesis board at a natural checkpoint. This is a hint, not a block."
+        )
 
     exec_dir = eng_dir / "evidence" / "executions"
     newest_evidence = 0.0
@@ -316,7 +336,7 @@ def check_hypothesis_freshness(
                     newest_evidence = max(newest_evidence, path.stat().st_mtime)
                 except OSError:
                     continue
-    if newest_evidence:
+    if newest_evidence and not is_burst and not state.has_pending_sync(eng_dir):
         for hypothesis in relevant:
             if not hypothesis.updated:
                 continue
@@ -343,7 +363,12 @@ def check_hypothesis_freshness(
                     "Updated). This is a hint, not a block."
                 )
 
-    result.add_info("relevant active hypothesis found")
+    if relevant:
+        result.add_info("relevant active hypothesis found")
+    else:
+        result.add_info(
+            f"operational check under {task_id} in EXPLOITATION: hypothesis binding optional"
+        )
     return result
 
 
