@@ -15,6 +15,8 @@ _PROFILE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
 
+from scripts.cli_environment import project_imports
+
 
 def _ensure_venv() -> None:
     try:
@@ -58,12 +60,13 @@ def _ensure_venv() -> None:
                 sys.exit(res.returncode)
 
 
-_ensure_venv()
+with project_imports(_PROFILE_ROOT):
+    _ensure_venv()
 
-from plugins.violin_guard import handlers
-from plugins.violin_guard.core import bootstrap, findings, state
-from plugins.violin_guard.engine import release
-from plugins.violin_guard.gates import command
+    from plugins.violin_guard import handlers
+    from plugins.violin_guard.core import bootstrap, findings, state
+    from plugins.violin_guard.engine import release
+    from plugins.violin_guard.gates import command
 
 
 def _print_result(result) -> int:
