@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Landing page aimed at working testers: how the guard works, an engagement walkthrough, an approach
+  comparison, coverage, honest limits, and the questions testers actually ask.
+- Repository social preview card so shared links unfurl with the project identity.
+- GitHub Discussions as the community surface for playbook requests, setup questions, and engagement feedback.
+- Operator-facing articles under `docs/articles/` on guardrails, coverage discipline, and how to evaluate an
+  agentic pentest tool.
+
+### Fixed
+
+- README registered-tool list now includes `violin_submit_finding` and states the correct count of twelve.
+
+### Changed
+
+- Corrected the README playbook, reference, and template counts to match the repository contents.
+- Linked the landing page and Discussions from the README badge row and section navigation.
+
 ## 3.2.1
 
 ### Fixed

@@ -10,10 +10,12 @@
   <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.18.0-FFD700?style=for-the-badge" alt="Hermes >=0.18.0"></a>
   <a href="https://www.kali.org/"><img src="https://img.shields.io/badge/Kali%20Linux-557C94?style=for-the-badge&logo=kali-linux&logoColor=white" alt="Kali Linux"></a>
   <a href="https://www.parrotsec.org/"><img src="https://img.shields.io/badge/Parrot%20OS-2E8B57?style=for-the-badge" alt="Parrot OS"></a>
+  <a href="https://strategic-automation.github.io/violin/"><img src="https://img.shields.io/badge/Site-Landing%20page-FF3B4A?style=for-the-badge" alt="Landing page"></a>
+  <a href="https://github.com/Strategic-Automation/violin/stargazers"><img src="https://img.shields.io/github/stars/Strategic-Automation/violin?style=for-the-badge&color=FFD166" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
-  <b>35 playbooks · 17 references · 13 templates · required execution guard · Hermes-native</b>
+  <b>35 playbooks · 19 references · 15 templates · required execution guard · Hermes-native</b>
 </p>
 
 Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, seven routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
@@ -23,6 +25,8 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
   <a href="#engagement-lifecycle">Workflow</a> ·
   <a href="#guard-tools">Guard tools</a> ·
   <a href="#benchmarks">Benchmarks</a> ·
+  <a href="https://strategic-automation.github.io/violin/">Landing page</a> ·
+  <a href="https://github.com/Strategic-Automation/violin/discussions">Discussions</a> ·
   <a href="#development">Development</a>
 </p>
 
@@ -101,12 +105,13 @@ tasks are not moved between phase sections.
 
 ## Guard tools
 
-The plugin registers eleven Hermes tools from one typed registry:
+The plugin registers twelve Hermes tools from one typed registry:
 
 | Tool | Purpose |
 |---|---|
 | `violin_record_ptt` | Create, start, refresh, close, or cancel a PTT task |
 | `violin_record_hypothesis` | Create or update a scoped hypothesis |
+| `violin_submit_finding` | Submit a validated finding bound to its signed execution receipts |
 | `violin_exec` | Execute one guarded command |
 | `violin_exec_burst` | Execute a bounded command file |
 | `violin_exec_status` | Read background execution status |
