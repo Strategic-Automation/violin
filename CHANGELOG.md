@@ -9,7 +9,7 @@
 - Repository social preview card so shared links unfurl with the project identity.
 - GitHub Discussions as the community surface for playbook requests, setup questions, and engagement feedback.
 - Operator-facing articles under `docs/articles/` on guardrails, coverage discipline, and how to evaluate an
-  agentic pentest tool, plus `PROMOTION.md` as the launch and outreach kit.
+  agentic pentest tool.
 
 ### Fixed
 
