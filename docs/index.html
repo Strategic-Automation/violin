@@ -1076,11 +1076,12 @@ violin_exec(
   command = "nmap -sV -sC app.example.com"
 )
 → GATES PASSED (7/7)
-→ Cryptographic receipt issued:
+→ Receipt sealed and signed:
 {
-  "receipt_sha256": "4b7e9a...8f12",
-  "status": "APPROVED",
-  "signature": "ed25519:signed_bytes"
+  "status": "ok",
+  "receipt_hmac_sha256": "9f2c41d8...a7",
+  "receipt_ed25519": "ed25519:MEUCIQDk3f...",
+  "evidence_sha256": ["3b1f8c04..."]
 }</div>
         </div>
       </aside>
@@ -1633,13 +1634,14 @@ violin_exec(
   command = "nmap -sV -sC app.example.com"
 )
 → GATES PASSED (7/7)
-→ Cryptographic receipt written:
+→ Receipt sealed and signed:
 {
-  "receipt_sha256": "4b7e9a...8f12",
-  "status": "APPROVED",
+  "status": "ok",
   "target": "app.example.com",
   "phase": "RECON",
-  "signature": "ed25519:signed_bytes"
+  "receipt_hmac_sha256": "9f2c41d8...a7",
+  "receipt_ed25519": "ed25519:MEUCIQDk3f...",
+  "evidence_sha256": ["3b1f8c04...", "c07a2e91..."]
 }`
     },
     scope_deny: {
@@ -1652,7 +1654,7 @@ violin_exec(
   target  = "internal.corp",
   command = "curl -i https://internal.corp/admin"
 )
-→ GATE 2 FAILURE: VIOLIN-E002 TargetOutOfScope
+→ SCOPE GATE: target resolution failed
 → Target 'internal.corp' not in scope.yaml targets: ['app.example.com']
 → Execution BLOCKED at boundary (fail-closed)
 → Hint: Update scope.yaml or execute against authorized target.`
@@ -1667,7 +1669,7 @@ violin_exec(
   target  = "app.example.com",
   command = "rm -rf /var/log/*"
 )
-→ GATE 7 FAILURE: VIOLIN-E007 DestructiveSafetyPolicy
+→ COMMAND GATE: destructive pattern matched
 → Destructive filesystem payload pattern matched: 'rm -rf'
 → Hard block enforced. No operator bypass allowed.`
     },
@@ -1681,7 +1683,7 @@ violin_exec(
   target  = "app.example.com",
   command = "sqlmap -u 'http://app.example.com/item?id=1' --batch"
 )
-→ GATE 3 FAILURE: VIOLIN-E003 PhaseDesynchronization
+→ PHASE GATE: no active task under that phase
 → Active PTT task is under phase 'RECON', but exploit tool 'sqlmap' requires 'EXPLOITATION'.
 → Denied until an active task under EXPLOITATION is started.`
     }
@@ -1748,6 +1750,9 @@ violin_exec(
   if (searchInput) {
     searchInput.addEventListener('input', updatePlaybooks);
   }
+
+  // Cards ship hidden in CSS so the grid can be filtered; render the initial state.
+  updatePlaybooks();
 </script>
 
 </body>
