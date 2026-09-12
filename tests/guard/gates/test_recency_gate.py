@@ -51,6 +51,7 @@ def test_recency_gate_hints_during_exploitation(tmp_path: Path) -> None:
     assert not result.errors  # must not hard-block mid-exploitation
     assert any("predates the latest execution" in w for w in result.warnings)
     assert "hint, not a block" in " ".join(result.warnings)
+    assert result.exit_code() == 0  # advisory hints must not escalate exit code
 
 
 def test_recency_gate_passes_when_board_fresh(tmp_path: Path) -> None:

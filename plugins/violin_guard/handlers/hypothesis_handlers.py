@@ -32,7 +32,11 @@ def handle_record_hypothesis(args, **kwargs):
         h = hypotheses.update_hypothesis(
             _eng_path(eng_dir) / "hypotheses.md", in_scope_hosts=in_scope, **fields
         )
-        if fields.get("cve_research") or fields.get("exploit_research"):
+        if (
+            fields.get("cve_research")
+            or fields.get("exploit_research")
+            or fields.get("research_attempted")
+        ):
             state.record_research_attempt(eng_dir, "hypothesis_research", True)
     operation = "updated" if requested_id and h.id in existing else "created"
     return _json("ok", operation=operation, hypothesis=h.to_dict())

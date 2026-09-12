@@ -18,9 +18,9 @@ from .scope_gate import validate_scope
 
 # Grace window for the record-as-you-go recency gate: evidence newer than the
 # hypothesis board's last update by more than this many seconds blocks further
-# target commands. 15 minutes is generous enough for burst timing/clock skew
+# target commands. 30 minutes is generous enough for burst timing/clock skew
 # while still catching run-long bookkeeping deferral.
-_RECORD_AS_YOU_GO_GRACE = 15 * 60
+_RECORD_AS_YOU_GO_GRACE = 30 * 60
 
 _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
     (
@@ -293,7 +293,7 @@ def check_hypothesis_freshness(
             )
             if not any_research:
                 example = relevant[0] if relevant else None
-                result.add_warning(
+                result.add_hint(
                     "hint: no CVE/Exploit research recorded yet — before writing a "
                     "custom exploit, try a web search for prior work (CVE databases, "
                     "ExploitDB, GitHub PoCs). Record the outcome via "
@@ -322,7 +322,7 @@ def check_hypothesis_freshness(
             stale += 1
 
     if stale:
-        result.add_warning(
+        result.add_hint(
             f"hint: hypothesis guard: {stale} hypothesis(es) not updated in 48h — "
             "review hypothesis board at a natural checkpoint. This is a hint, not a block."
         )
@@ -337,7 +337,9 @@ def check_hypothesis_freshness(
                 except OSError:
                     continue
     if newest_evidence and not is_burst and not state.has_pending_sync(eng_dir):
-        for hypothesis in relevant:
+        target_hyps = [h for h in relevant if h.id == hypothesis_id] if hypothesis_id else relevant
+        stale_ids: list[str] = []
+        for hypothesis in target_hyps:
             if not hypothesis.updated:
                 continue
             raw = hypothesis.updated.strip()
@@ -351,17 +353,18 @@ def check_hypothesis_freshness(
             board_epoch = updated_ts.timestamp()
             evidence_age_beyond_board = newest_evidence - board_epoch
             if evidence_age_beyond_board > _RECORD_AS_YOU_GO_GRACE:
-                # Record-as-you-go is a hint, not a block: re-syncing the board after
-                # every burst-loop probe drains the prompt budget and breaks the probe
-                # rhythm. False-positive protection lives at finding submission /
-                # REPORTING close, not here — so warn at a natural checkpoint instead.
-                result.add_warning(
-                    "hint: hypothesis H-"
-                    f"{hypothesis.id} predates the latest execution evidence — record the "
-                    "batch result on the hypothesis board at a natural checkpoint "
-                    "(violin_record_hypothesis: status, Test Response, Runtime Evidence, "
-                    "Updated). This is a hint, not a block."
-                )
+                stale_ids.append(f"H-{hypothesis.id}")
+
+        if stale_ids:
+            summary_ids = ", ".join(stale_ids[:3]) + (
+                f" (+{len(stale_ids) - 3} more)" if len(stale_ids) > 3 else ""
+            )
+            result.add_hint(
+                f"hint: hypothesis {summary_ids} predates the latest execution evidence — record the "
+                "batch result on the hypothesis board at a natural checkpoint "
+                "(violin_record_hypothesis: status, Test Response, Runtime Evidence, "
+                "Updated). This is a hint, not a block."
+            )
 
     if relevant:
         result.add_info("relevant active hypothesis found")

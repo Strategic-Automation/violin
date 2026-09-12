@@ -199,14 +199,17 @@ _EXCLUDED_SOURCES = frozenset(
         "yaklang/hack-skills",
     }
 )
-
 _VULNERABILITY_ROUTES = {
+    "auth": "identity-auth",
+    "authn": "identity-auth",
+    "authz": "identity-auth",
     "access-control": "identity-auth",
     "auth-bypass": "identity-auth",
     "authentication": "identity-auth",
     "authorization": "identity-auth",
     "broken-access-control": "identity-auth",
     "broken-object-level-authorization": "identity-auth",
+    "cors": "misconfig",
     "csrf": "identity-auth",
     "cryptographic-issues": "identity-auth",
     "idor": "identity-auth",
@@ -221,6 +224,8 @@ _VULNERABILITY_ROUTES = {
     "nosql-injection": "web-app",
     "path-traversal": "web-app",
     "prototype-pollution": "web-app",
+    "rate-limit": "web-app",
+    "rate-limiting": "web-app",
     "sqli": "web-app",
     "sql-injection": "web-app",
     "ssrf": "web-app",

@@ -77,3 +77,15 @@ def test_log_guard_friction_escapes_pipes(tmp_path: Path) -> None:
     text = feedback.read_text(encoding="utf-8")
     # the pipe inside the issue must not split the table row into extra cells
     assert text.count("| a \\| b \\| c |") == 1
+
+
+def test_log_guard_friction_noop_on_advisory_hints(tmp_path: Path) -> None:
+    """Advisory hints (exit code 0) must not pollute framework_feedback.md."""
+    eng_dir = tmp_path / "eng"
+    (eng_dir / "state").mkdir(parents=True)
+    feedback = _feedback_file(eng_dir)
+    feedback.write_text("header\n", encoding="utf-8")
+    result = CheckResult()
+    result.add_hint("hint: hypothesis H-001 predates evidence. This is a hint, not a block.")
+    _log_guard_friction(eng_dir, result, "curl http://10.0.0.1")
+    assert "Guard" not in feedback.read_text(encoding="utf-8")

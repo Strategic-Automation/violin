@@ -57,17 +57,8 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
     result = _check_command_internal(args)
     exit_code = result.exit_code()
     status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
-    is_pure_hint = bool(
-        result.warnings
-        and all(
-            "hint" in w.lower()
-            or "execution still allowed" in w.lower()
-            or "execution may proceed" in w.lower()
-            for w in result.warnings
-        )
-    )
     if status_name not in ("ok",) and not (
-        status_name == "review" and (os.environ.get("HERMES_YOLO_MODE") == "1" or is_pure_hint)
+        status_name == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
     ):
         sync_status = (
             "sync_required"

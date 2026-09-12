@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core import state
+from ..core.results import _is_advisory_hint
 from ..gates import command as cmd_module
 from ..gates.command import CheckCommandArgs
 
@@ -58,11 +59,13 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
     blocked from memory at the end of the run.
     """
     feedback = eng_dir / "state" / "framework_feedback.md"
-    if not feedback.exists():
+    if not feedback.exists() or result.exit_code() == 0:
         return
-    rows = [("Guard Block", err) for err in result.errors] + [
-        ("Guard Review", warn) for warn in result.warnings
-    ]
+    rows = [("Guard Block", err) for err in result.errors]
+    if result.exit_code() == 2:
+        rows.extend(
+            [("Guard Review", warn) for warn in result.warnings if not _is_advisory_hint(warn)]
+        )
     if not rows:
         return
     existing = feedback.read_text(encoding="utf-8", errors="replace")
@@ -100,7 +103,7 @@ def _check_command_internal(args: dict[str, Any]) -> cmd_module.CheckResult:
         eng_path = state.resolve_eng_dir(args.get("eng_dir", ""))
     except Exception:  # noqa: BLE001 — logging must never break the gate
         eng_path = None
-    if eng_path is not None and (result.errors or result.warnings):
+    if eng_path is not None and result.exit_code() != 0:
         _log_guard_friction(eng_path, result, args.get("command", ""))
     return result
 

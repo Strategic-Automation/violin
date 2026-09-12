@@ -100,6 +100,10 @@ class RecordHypothesisArgsModel(BaseModel):
         "", description="Why a rejected hypothesis is safe to stop pursuing"
     )
     next_step: str = ""
+    research_attempted: bool = Field(
+        False,
+        description="Flag indicating a research attempt was made to discover prior work or techniques",
+    )
     candidate_source: str = Field(
         "",
         description=(
