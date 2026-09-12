@@ -9,10 +9,8 @@ from typing import Any
 import yaml
 
 from ..core import hypotheses, ptt
+from ..core.redaction import redact_single_line
 
-_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
-_BEARER_RE = re.compile(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]+")
-_OPENROUTER_KEY_RE = re.compile(r"\bsk-or-v1-[A-Za-z0-9]+\b")
 _CANONICAL_FINDING_OR_HYPOTHESIS_RE = re.compile(r"evidence/|FIND-\d+|H-\d+", re.IGNORECASE)
 
 _EXPECTED_METHODOLOGY_GATES = frozenset(
@@ -32,16 +30,8 @@ _EXPECTED_METHODOLOGY_GATES = frozenset(
 
 
 def _redact_sensitive_note(note: str) -> str:
-    """Prevent credentials and bearer tokens from entering PTT state notes.
-
-    Multiline notes must also be collapsed to a single line: the PTT row table
-    format requires a trailing ``|`` on one physical line, and embedded line
-    breaks split the row so the row parser drops the task.
-    """
-    one_line = " ".join(note.splitlines()).strip()
-    redacted = _JWT_RE.sub("[REDACTED_JWT]", one_line)
-    redacted = _BEARER_RE.sub(r"\1[REDACTED_TOKEN]", redacted)
-    return _OPENROUTER_KEY_RE.sub("[REDACTED_API_KEY]", redacted)
+    """Prevent credentials and bearer tokens from entering PTT state notes."""
+    return redact_single_line(note)
 
 
 def _with_skill_token(note: str, skill: str, digest: str) -> str:
@@ -261,19 +251,10 @@ def _methodology_gate_errors(engagement: Path, scope_data: dict[str, Any]) -> li
     return errors
 
 
-def _validate_methodology_gates(engagement: Path, scope_data: dict[str, Any]) -> None:
-    """Require a dispositioned methodology-gates file before VULN_RESEARCH closes."""
-    errors = _methodology_gate_errors(engagement, scope_data)
-    if errors:
-        raise ValueError(
-            "VULN_RESEARCH cannot close with unresolved methodology gates: " + "; ".join(errors)
-        )
-
-
 __all__ = [
+    "_methodology_gate_errors",
     "_redact_sensitive_note",
     "_validate_disposition_entry",
-    "_validate_methodology_gates",
     "_validate_phase_exit",
     "_with_skill_token",
 ]

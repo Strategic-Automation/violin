@@ -439,9 +439,6 @@ def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
     ensure_dir(path.parent)
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
 
-    # Remove template instruction HTML comment if present
-    template = re.sub(r"<!--.*?-->", "", template, flags=re.DOTALL)
-
     # Preserve section structure (e.g. ## Active Theories ... ## Observations ... ## Decoy Trail)
     active_heading = "## Active Theories"
     active_pos = template.find(active_heading)

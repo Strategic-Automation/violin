@@ -49,8 +49,9 @@ def test_recency_gate_hints_during_exploitation(tmp_path: Path) -> None:
         eng, Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
     )
     assert not result.errors  # must not hard-block mid-exploitation
-    assert any("predates the latest execution" in w for w in result.warnings)
-    assert "hint, not a block" in " ".join(result.warnings)
+    assert any("predates the latest execution" in h for h in result.hints)
+    assert "hint, not a block" in " ".join(result.hints)
+    assert not result.warnings
     assert result.exit_code() == 0  # advisory hints must not escalate exit code
 
 
@@ -104,7 +105,7 @@ def test_recency_gate_suppressed_during_burst(tmp_path: Path) -> None:
         is_burst=True,
     )
     assert not result.errors
-    assert not any("predates the latest execution" in w for w in result.warnings)
+    assert not any("predates the latest execution" in h for h in result.hints)
 
 
 def test_recency_gate_suppressed_when_batch_in_progress(tmp_path: Path) -> None:
@@ -120,7 +121,7 @@ def test_recency_gate_suppressed_when_batch_in_progress(tmp_path: Path) -> None:
         "python3 exploit.py 10.129.47.140 1515",
     )
     assert not result.errors
-    assert not any("predates the latest execution" in w for w in result.warnings)
+    assert not any("predates the latest execution" in h for h in result.hints)
 
 
 def test_operational_task_in_exploitation_hypothesis_optional(tmp_path: Path) -> None:
@@ -168,3 +169,27 @@ def test_non_operational_task_in_exploitation_requires_hypothesis(tmp_path: Path
     )
     assert result.errors
     assert any("requires at least one hypothesis" in err for err in result.errors)
+
+
+def test_hypothesis_zero_parsing(tmp_path: Path) -> None:
+    """Verify hypothesis H-0 or '0' parses as '0' instead of being stripped to empty string."""
+    hyp_file = tmp_path / "hypotheses.md"
+    hyp_file.write_text(
+        "# Hypotheses\n\n"
+        "### H-0\n"
+        "- Status: Formulated\n"
+        "- Phase: VULN_RESEARCH\n"
+        "- Target: 10.0.0.1\n"
+        "- CVE Research: N/A\n"
+        "- Exploit Research: N/A\n",
+        encoding="utf-8",
+    )
+
+    res = command.check_hypothesis_freshness(
+        eng_dir=tmp_path,
+        phase=Phase.VULN_RESEARCH,
+        command="nmap 10.0.0.1",
+        primary_target="10.0.0.1",
+        hypothesis_id="H-0",
+    )
+    assert not any("unlinked" in err.lower() for err in res.errors)

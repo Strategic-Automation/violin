@@ -86,7 +86,7 @@ def parse_http_statuses(content: str) -> tuple[int, ...]:
         # The status may land in its own token (`(200,`) or glom onto a
         # preceding label token (`LABEL(200,`), so strip both sides.
         tuple_match = re.match(
-            r"^\(?[A-Za-z_][A-Za-z0-9_]*\s*\(\s*(\d{3})\s*[,)]",
+            r"^(?:[A-Za-z_][A-Za-z0-9_]*\s*)?\(\s*(\d{3})\s*[,)]",
             line.strip(),
         )
         if tuple_match and _is_status_code_token(tuple_match.group(1)):
@@ -122,9 +122,12 @@ def parse_http_statuses(content: str) -> tuple[int, ...]:
             continue
         # `-w '%{http_code} '` immediately followed by the response body on the
         # same line: "200 [{\"id\":...}" or "400 {\"detail\":...}". The leading
-        # 3-digit token is the status; the rest is body. (The all-status bare
-        # form above only fires when every token is a status code.)
-        if _is_status_code_token(parts[0]):
+        # 3-digit token is the status; the rest is body.
+        if (
+            _is_status_code_token(parts[0])
+            and len(parts) >= 2
+            and parts[1].startswith(("{", "[", "<", '"', "'"))
+        ):
             statuses.append(int(parts[0]))
     return tuple(statuses)
 

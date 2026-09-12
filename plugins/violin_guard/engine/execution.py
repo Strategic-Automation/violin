@@ -147,19 +147,8 @@ def _terminate_pid(pid: int) -> None:
     """Recursively terminate a process tree by PID using psutil."""
     if pid <= 0:
         return
-    try:
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        procs = children + [parent]
-        for proc in procs:
-            with contextlib.suppress(psutil.NoSuchProcess):
-                proc.terminate()
-        _, alive = psutil.wait_procs(procs, timeout=2)
-        for proc in alive:
-            with contextlib.suppress(psutil.NoSuchProcess):
-                proc.kill()
-    except psutil.NoSuchProcess:
-        pass
+    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        _terminate_tracked_process(psutil.Process(pid))
 
 
 def _terminate_process(proc: subprocess.Popen) -> None:

@@ -19,7 +19,12 @@ from typing import Any
 
 from ..core import history, state
 from ..core.ptt import find_active_task, parse_ptt
-from ..core.targets import extract_target_candidates, normalize_target
+from ..core.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
+from ..core.targets import (
+    KNOWN_FILE_EXTENSIONS,
+    extract_target_candidates,
+    normalize_target,
+)
 from ..engine.execution import PREVIEW_BYTES, _commit_guard_state
 from . import command
 
@@ -29,80 +34,8 @@ _REQUIRED_FIELDS = frozenset({"eng_dir", "phase", "target", "session_id"})
 # Match the executor's 32 KiB preview budget so result manifests remain useful
 # without becoming an unbounded second copy of tool output.
 MAX_STORED_RESULT_BYTES = PREVIEW_BYTES
-_REDACTED = "[REDACTED]"
-_REDACTED_JWT = "[REDACTED_JWT]"
-_REDACTED_PRIVATE_KEY = "[REDACTED_PRIVATE_KEY]"
-_REDACTED_TOKEN = "[REDACTED_TOKEN]"
-_SENSITIVE_RESULT_KEYS = frozenset(
-    {
-        "password",
-        "passwd",
-        "secret",
-        "token",
-        "access_token",
-        "refresh_token",
-        "api_key",
-        "apikey",
-        "authorization",
-        "cookie",
-        "private_key",
-        "set_cookie",
-    }
-)
-_PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN (?P<label>(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?)-----.*?"
-    r"(?:-----END (?P=label)-----|\Z)",
-    re.IGNORECASE | re.DOTALL,
-)
-_AUTHORIZATION_RE = re.compile(
-    r"(?i)([\"']?\bauthorization\b[\"']?\s*[:=]\s*)"
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,;}]+)"
-)
-_COOKIE_RE = re.compile(
-    r"(?im)([\"']?\b(?:set[-_]?cookie|cookie)\b[\"']?\s*[:=]\s*)"
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,}]+)"
-)
-_SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)([\"']?\b(?:password|passwd|secret|token|access[_-]?token|refresh[_-]?token|"
-    r"api[_-]?key|apikey|private[_-]?key)\b[\"']?\s*[:=]\s*)"
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)"
-)
-_BEARER_TOKEN_RE = re.compile(r"(?i)\bbearer[ \t]+[A-Za-z0-9._~+/=-]{8,}")
-_JWT_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\."
-    r"[A-Za-z0-9_-]{5,}(?![A-Za-z0-9_-])"
-)
-_PROVIDER_TOKEN_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|"
-    r"xox[baprs]-[A-Za-z0-9-]{10,})(?![A-Za-z0-9_-])"
-)
 
-_LOCAL_PATH_EXTENSIONS = frozenset(
-    {
-        ".md",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".txt",
-        ".log",
-        ".py",
-        ".sh",
-        ".env",
-        ".csv",
-        ".xml",
-        ".html",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".wav",
-        ".mp3",
-        ".zip",
-        ".tar",
-        ".gz",
-        ".tokens.env",
-    }
-)
+_LOCAL_PATH_EXTENSIONS = KNOWN_FILE_EXTENSIONS
 _LOCAL_PATH_RE = re.compile(r"(?i)evidence/|state/|scope/|\./|\.\./|/tmp/|\.creds/")
 _LOCAL_ANALYSIS_IMPORTS = frozenset(
     {
@@ -460,36 +393,26 @@ def _normalized_result_key(key: object) -> str:
     return re.sub(r"[-\s]+", "_", str(key).strip().casefold())
 
 
-def _redact_result_text(value: str) -> str:
-    redacted = _PRIVATE_KEY_RE.sub(_REDACTED_PRIVATE_KEY, value)
-    redacted = _COOKIE_RE.sub(lambda match: f"{match.group(1)}{_REDACTED}", redacted)
-    redacted = _AUTHORIZATION_RE.sub(lambda match: f"{match.group(1)}{_REDACTED}", redacted)
-    redacted = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}{_REDACTED}", redacted)
-    redacted = _BEARER_TOKEN_RE.sub(f"Bearer {_REDACTED_TOKEN}", redacted)
-    redacted = _JWT_RE.sub(_REDACTED_JWT, redacted)
-    return _PROVIDER_TOKEN_RE.sub(_REDACTED_TOKEN, redacted)
-
-
 def _normalize_result_value(value: object, *, redact: bool) -> Any:
     if isinstance(value, dict):
         normalized: dict[str, Any] = {}
         for key, item in value.items():
             normalized_key = str(key)
-            if redact and _normalized_result_key(key) in _SENSITIVE_RESULT_KEYS:
-                normalized[normalized_key] = _REDACTED
+            if redact and _normalized_result_key(key) in SENSITIVE_FIELD_KEYS:
+                normalized[normalized_key] = REDACTED
             else:
                 normalized[normalized_key] = _normalize_result_value(item, redact=redact)
         return normalized
     if isinstance(value, list | tuple):
         return [_normalize_result_value(item, redact=redact) for item in value]
     if isinstance(value, str):
-        return _redact_result_text(value) if redact else value
+        return redact_text(value) if redact else value
     if value is None or isinstance(value, bool | int):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else str(value)
     rendered = str(value)
-    return _redact_result_text(rendered) if redact else rendered
+    return redact_text(rendered) if redact else rendered
 
 
 def _canonical_result_json(value: object) -> str:
@@ -505,7 +428,7 @@ def _bounded_result(result: object) -> tuple[dict[str, Any], object]:
             parsed = json.loads(result)
         except json.JSONDecodeError:
             parsed = {"error": "non-JSON tool result"}
-            stored_text = _redact_result_text(result)
+            stored_text = redact_text(result)
             parsed_as_json = False
             representation_type = "text"
         else:

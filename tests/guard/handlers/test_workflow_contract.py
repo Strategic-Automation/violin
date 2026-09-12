@@ -11,8 +11,8 @@ from plugins.violin_guard.core.phases import Phase
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
 from plugins.violin_guard.handlers.ptt_gates import (
+    _methodology_gate_errors,
     _redact_sensitive_note,
-    _validate_methodology_gates,
     _validate_phase_exit,
 )
 from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
@@ -391,8 +391,9 @@ def test_methodology_gates_accepts_dispositioned_gates(tmp_path: Path) -> None:
     )
     gates = engagement / "state" / "methodology-gates.yaml"
     gates.write_text(_valid_gates_yaml(), encoding="utf-8")
-    _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
-    # no exception
+    assert not _methodology_gate_errors(
+        engagement, yaml.safe_load(scope.read_text(encoding="utf-8"))
+    )
 
 
 def test_methodology_gates_rejects_missing_categories(tmp_path: Path) -> None:
@@ -409,8 +410,8 @@ def test_methodology_gates_rejects_missing_categories(tmp_path: Path) -> None:
         "gates:\n  authentication-session:\n    status: tested\n    evidence_or_reason: 'evidence/x.txt'\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="undispositioned methodology gates"):
-        _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    errors = _methodology_gate_errors(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    assert any("undispositioned methodology gates" in err for err in errors)
 
 
 def test_methodology_gates_rejects_test_without_evidence(tmp_path: Path) -> None:
@@ -427,8 +428,8 @@ def test_methodology_gates_rejects_test_without_evidence(tmp_path: Path) -> None
         _valid_gates_yaml().replace("'evidence/vuln-research/", "'not-an-artifact/"),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="tested without evidence"):
-        _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    errors = _methodology_gate_errors(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    assert any("tested without evidence" in err for err in errors)
 
 
 def test_vuln_research_exit_batches_all_preconditions_in_one_error(tmp_path: Path) -> None:

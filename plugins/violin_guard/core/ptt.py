@@ -192,18 +192,11 @@ def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, P
             cells[-1] = note
         lines[target_idx] = "| " + " | ".join(cells) + " |"
 
-    bullet_re = re.compile(r"^(\s*-\s*)\[[ x~!-]\](\s+(?P<id>PT-[\w-]+)\b.*)")
-    for i, line in enumerate(lines):
-        m = bullet_re.match(line)
-        if m and m.group("id") in normalized:
-            lines[i] = f"{m.group(1)}{normalized[m.group('id')][0]}{m.group(2)}"
-
     atomic_text(
         path,
         "\n".join(lines) + ("\n" if content and not content.endswith("\n") else ""),
     )
-
-    tasks = parse_ptt(path)
+    tasks = sync_ptt(path)
     result = {task.id: task for task in tasks if task.id in normalized}
     if len(result) != len(normalized):
         raise RuntimeError("internal error: updated PTT tasks were not found after rewrite")

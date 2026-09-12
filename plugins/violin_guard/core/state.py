@@ -441,7 +441,7 @@ def record_semantic_review(
     key = "|".join((task_id, hypothesis_id, skill, technique.strip().lower()))
     clean_evidence_paths = [path_item for path_item in evidence_paths if path_item]
     has_evidence = bool(clean_evidence_paths)
-    positive = has_evidence or outcome in {"progress", "validated", "rejected"}
+    positive = has_evidence or outcome.strip().lower() in {"validated", "rejected"}
     pivoted = bool(
         next_technique.strip().lower()
         and next_technique.strip().lower() != technique.strip().lower()

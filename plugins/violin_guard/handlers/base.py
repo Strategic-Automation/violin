@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -10,7 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from ..core import state
-from ..core.results import _is_advisory_hint
+from ..core.skill_policy import skill_spec
+from ..core.skill_receipts import HermesSkillViewAdapter, complete_delivery, prepare_delivery
 from ..gates import command as cmd_module
 from ..gates.command import CheckCommandArgs
 
@@ -45,8 +47,67 @@ def _json(status_name: str, **payload) -> str:
     return json.dumps({"schema_version": 2, "status": status_name, **payload})
 
 
+def _prepare_skill_reservation_payload(
+    eng_dir: str | Path,
+    *,
+    skill: str,
+    phase: str,
+    task_id: str,
+    session_fallback: str = "ptt",
+    vulnerability_class: str | None = None,
+    candidate_source: str | None = None,
+    extra_fields: dict[str, Any] | None = None,
+    adapter_cls: Any = HermesSkillViewAdapter,
+) -> tuple[Any, str, str | None]:
+    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
+    reservation = prepare_delivery(
+        eng_dir,
+        session_id=state.resolve_session_id(eng_dir) or session_fallback,
+        skill=skill,
+        bundle_digest=digest,
+        phase=phase,
+        vulnerability_class=vulnerability_class or None,
+        candidate_source=candidate_source or None,
+    )
+    if reservation.owner:
+        viewed = adapter_cls().view(skill, task_id=task_id)
+        completed = complete_delivery(eng_dir, reservation, viewed)
+        spec = skill_spec(skill)
+        early_resp = _json(
+            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
+            transition_applied=False,
+            **(extra_fields or {}),
+            skill={
+                "name": skill,
+                "digest": digest,
+                "content": viewed.content,
+                "error": viewed.error,
+                "delivery_id": reservation.id,
+                "source": spec.source if spec else None,
+                "install_hint": spec.install_hint if spec else None,
+                "trust": spec.trust if spec else None,
+            },
+        )
+        return reservation, digest, early_resp
+    if reservation.status == "preparing":
+        early_resp = _json(
+            "skill_preparing",
+            transition_applied=False,
+            **(extra_fields or {}),
+            skill={"name": skill, "digest": digest},
+        )
+        return reservation, digest, early_resp
+    return reservation, digest, None
+
+
 def _result(result) -> dict[str, list[str]]:
-    return {"errors": result.errors, "warnings": result.warnings, "infos": result.infos}
+    hints = getattr(result, "hints", [])
+    return {
+        "errors": result.errors,
+        "warnings": result.warnings,
+        "infos": result.infos,
+        "hints": hints,
+    }
 
 
 def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
@@ -63,9 +124,7 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
         return
     rows = [("Guard Block", err) for err in result.errors]
     if result.exit_code() == 2:
-        rows.extend(
-            [("Guard Review", warn) for warn in result.warnings if not _is_advisory_hint(warn)]
-        )
+        rows.extend([("Guard Review", warn) for warn in result.warnings])
     if not rows:
         return
     existing = feedback.read_text(encoding="utf-8", errors="replace")
@@ -108,22 +167,17 @@ def _check_command_internal(args: dict[str, Any]) -> cmd_module.CheckResult:
     return result
 
 
-def _call(fn, args, **kwargs) -> Any:
-    """Wrap a handler function with uniform error serialization."""
-    try:
-        return fn(args or {}, **kwargs)
-    except (ValueError, TypeError, OSError, KeyError) as exc:
-        return _json("error", error=str(exc))
-    except Exception as exc:
-        logger.exception("Unexpected handler error during execution: %s", exc)
-        return _json("error", error=str(exc))
-
-
 def _serialize_errors(fn):
     """Keep every model-visible handler on the stable JSON response contract."""
 
     @wraps(fn)
     def wrapped(args=None, **kwargs):
-        return _call(fn, args, **kwargs)
+        try:
+            return fn(args or {}, **kwargs)
+        except (ValueError, TypeError, OSError, KeyError) as exc:
+            return _json("error", error=str(exc))
+        except Exception as exc:
+            logger.exception("Unexpected handler error during execution: %s", exc)
+            return _json("error", error=str(exc))
 
     return wrapped

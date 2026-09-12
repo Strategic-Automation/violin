@@ -56,6 +56,28 @@ def test_exclusions_and_ipv6_cidrs_are_enforced(tmp_path: Path) -> None:
     assert check_scope_targets(scope, "curl https://excluded.example").errors
 
 
+def test_path_scoped_url_exclusion_does_not_exclude_the_whole_host(tmp_path: Path) -> None:
+    """A path-scoped URL exclusion must stay path-scoped, not become a host block.
+
+    Benchmark engagements derive ``exclusions.urls`` from ``exclusions.paths``,
+    so harvesting the ``urls`` key as host selectors put the in-scope host in
+    the host-level exclusion set and blocked every target-touching command.
+    """
+    scope = tmp_path / "scope.yaml"
+    _write_scope(scope)
+    scope.write_text(
+        scope.read_text(encoding="utf-8").replace(
+            "exclusions:\n",
+            "exclusions:\n  urls: [https://allowed.example/vulnerabilities]\n"
+            "  paths: [/vulnerabilities]\n",
+        ),
+        encoding="utf-8",
+    )
+
+    assert not check_scope_targets(scope, "curl -sS https://allowed.example/openapi.json").errors
+    assert check_scope_targets(scope, "curl -sS https://allowed.example/vulnerabilities/x").errors
+
+
 def test_unc_paths_expose_their_authority_as_a_target() -> None:
     assert extract_target_candidates("smbclient //10.10.10.10/Share") == ["10.10.10.10"]
     assert "allowed.example" in extract_target_candidates(

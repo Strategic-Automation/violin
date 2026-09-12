@@ -40,26 +40,78 @@ _TARGET_VALUE_FLAGS = {
 }
 _REDIRECTION_OPERATORS = {">", ">>", "2>", "2>>", "&>"}
 _DEV_NETWORK_PREFIXES = ("/dev/tcp/", "/dev/udp/")
-_COMMON_FILE_SUFFIXES = {
-    ".html",
-    ".htm",
-    ".js",
-    ".json",
-    ".py",
-    ".php",
-    ".sh",
-    ".txt",
-    ".yaml",
-    ".yml",
-    ".xml",
-    ".zip",
-    ".vsix",
-    ".exe",
-    ".dll",
-    ".token",
-    ".pem",
-    ".key",
-}
+KNOWN_FILE_EXTENSIONS = frozenset(
+    {
+        ".bash",
+        ".c",
+        ".cc",
+        ".cfg",
+        ".cjs",
+        ".conf",
+        ".cpp",
+        ".cs",
+        ".css",
+        ".csv",
+        ".dat",
+        ".dll",
+        ".env",
+        ".err",
+        ".exe",
+        ".gif",
+        ".go",
+        ".gz",
+        ".h",
+        ".hpp",
+        ".htm",
+        ".html",
+        ".ini",
+        ".java",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".json",
+        ".jsonl",
+        ".jsx",
+        ".key",
+        ".log",
+        ".lua",
+        ".md",
+        ".mjs",
+        ".mp3",
+        ".out",
+        ".pdf",
+        ".pem",
+        ".php",
+        ".pl",
+        ".png",
+        ".ps1",
+        ".py",
+        ".pyw",
+        ".rb",
+        ".rs",
+        ".rst",
+        ".sh",
+        ".sql",
+        ".svg",
+        ".tar",
+        ".tar.gz",
+        ".tar.xz",
+        ".tgz",
+        ".token",
+        ".tokens.env",
+        ".ts",
+        ".tsv",
+        ".tsx",
+        ".txt",
+        ".vsix",
+        ".wav",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".zip",
+        ".zsh",
+    }
+)
 _NON_TARGET_DOTTED_TOKENS = frozenset(
     {
         "urllib.request",
@@ -549,7 +601,7 @@ def _looks_like_local_path(token: str) -> bool:
     normalized = token.replace("\\", "/")
     if normalized.startswith(("/", "./", "../", "~/", "$", "%")):
         return True
-    if any(normalized.lower().endswith(suffix) for suffix in _COMMON_FILE_SUFFIXES):
+    if any(normalized.lower().endswith(suffix) for suffix in KNOWN_FILE_EXTENSIONS):
         return True
     if "/" in normalized:
         first_part = normalized.split("/", 1)[0]
@@ -579,12 +631,21 @@ def _read_scope(path: Path) -> dict[str, Any] | None:
 
 
 def scope_hosts(scope: dict[str, Any], section: str = "targets") -> set[str]:
-    """Return canonical hosts from one scope section."""
+    """Return canonical hosts from one scope section.
+
+    ``exclusions.urls`` is deliberately not harvested as host selectors: a URL
+    exclusion such as ``https://host/vulnerabilities`` is a path-scoped
+    directive, enforced path-wise by ``_TargetPolicy.check_command_payload``
+    through ``excluded_urls``/``excluded_paths``. Promoting it to a host-level
+    exclusion would make a single excluded path exclude the entire in-scope
+    host and block the whole assessment.
+    """
     values = scope.get(section, {}) or {}
-    if section == "exclusions":
-        keys = ("ip_addresses", "domains", "hostnames", "roles")
-        return {normalize_target(value) for key in keys for value in _values(values.get(key, []))}
-    keys = ("ip_addresses", "in_scope_urls", "urls", "domains", "hostnames", "roles")
+    keys = (
+        ("ip_addresses", "domains", "hostnames", "roles")
+        if section == "exclusions"
+        else ("ip_addresses", "in_scope_urls", "urls", "domains", "hostnames", "roles")
+    )
     return {normalize_target(value) for key in keys for value in _values(values.get(key, []))}
 
 

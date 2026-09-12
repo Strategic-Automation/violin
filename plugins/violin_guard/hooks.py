@@ -19,6 +19,31 @@ from .gates import code_execution_audit
 from .gates.terminal_policy import block_terminal_command
 
 _SESSION_ENGAGEMENTS: dict[str, str] = {}
+_SESSION_ENGAGEMENTS_LOCK = threading.Lock()
+_MAX_SESSION_ENGAGEMENTS = 256
+
+
+def _record_session_engagement(session_id: object, eng_dir: object) -> None:
+    sid = str(session_id or "").strip()
+    ed = str(eng_dir or "").strip()
+    if not sid or not ed:
+        return
+    with _SESSION_ENGAGEMENTS_LOCK:
+        if len(_SESSION_ENGAGEMENTS) >= _MAX_SESSION_ENGAGEMENTS:
+            prune_count = max(1, len(_SESSION_ENGAGEMENTS) - _MAX_SESSION_ENGAGEMENTS + 1)
+            for key in list(_SESSION_ENGAGEMENTS.keys())[:prune_count]:
+                _SESSION_ENGAGEMENTS.pop(key, None)
+        _SESSION_ENGAGEMENTS[sid] = ed
+
+
+def _get_session_engagement(session_id: object) -> str:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return ""
+    with _SESSION_ENGAGEMENTS_LOCK:
+        return _SESSION_ENGAGEMENTS.get(sid, "")
+
+
 _EXECUTE_CODE_RECEIPTS: dict[str, tuple[str, str]] = {}
 _EXECUTE_CODE_RECEIPTS_LOCK = threading.Lock()
 _TARGET_TOOLS = {
@@ -37,7 +62,7 @@ _BROWSER_TARGET_TOOLS = {
 def _check_turn_binding(tool_name: str, args: dict[str, Any], hook: dict[str, Any]) -> str | None:
     """Stop target/browser activity until an earlier-turn receipt is bound."""
     session_id = str(hook.get("session_id") or args.get("session_id") or "")
-    eng_dir = str(args.get("eng_dir") or _SESSION_ENGAGEMENTS.get(session_id) or "")
+    eng_dir = str(args.get("eng_dir") or _get_session_engagement(session_id) or "")
     if not eng_dir:
         return (
             f"{tool_name} needs an engagement associated through violin_status or a Violin tool "
@@ -98,7 +123,7 @@ def _pre_tool_call_hook(
     session_id = str(kwargs.get("session_id") or args.get("session_id") or "")
     eng_dir = str(args.get("eng_dir") or "")
     if session_id and eng_dir:
-        _SESSION_ENGAGEMENTS[session_id] = eng_dir
+        _record_session_engagement(session_id, eng_dir)
         state.record_session_id(eng_dir, session_id)
     if tool_name in _TARGET_TOOLS or tool_name in _BROWSER_TARGET_TOOLS:
         blocked = _check_turn_binding(tool_name or "", args, kwargs)
@@ -162,12 +187,12 @@ def _post_tool_call_hook(
             raise
     if tool_name in {"web_search", "web_extract"}:
         session_id = str(kwargs.get("session_id") or "")
-        eng_dir = _SESSION_ENGAGEMENTS.get(session_id)
+        eng_dir = _get_session_engagement(session_id)
         if eng_dir:
             with contextlib.suppress(Exception):
                 state.record_research_attempt(eng_dir, tool_name, not bool(result is None))
 
-    if tool_name not in {"violin_record_ptt", "violin_review_batch"}:
+    if tool_name != "violin_record_ptt":
         return
     args = args if isinstance(args, dict) else {}
     eng_dir = str(args.get("eng_dir") or "")
@@ -188,11 +213,7 @@ def _post_tool_call_hook(
                 turn_id=turn_id,
                 api_request_id=api_request_id,
             )
-        task_id = ""
-        if tool_name == "violin_record_ptt":
-            task_id = str(payload.get("task_id") or "")
-        elif tool_name == "violin_review_batch":
-            task_id = str(payload.get("binding_task_id") or "")
+        task_id = str(payload.get("task_id") or "")
         if payload.get("status") == "ok" and task_id:
             record_binding_turn(
                 eng_dir,
@@ -211,13 +232,13 @@ def _pre_llm_call_hook(session_id: Any = None, eng_dir: Any = None, **kwargs: An
             state.tick_message(str(eng_dir))
             state.record_session_id(str(eng_dir), session_id)
             if session_id:
-                _SESSION_ENGAGEMENTS[str(session_id)] = str(eng_dir)
+                _record_session_engagement(session_id, eng_dir)
 
 
 def _on_session_reset_hook(session_id: Any = None, eng_dir: Any = None, **kwargs: Any) -> None:
     """Hook: session reset (context compression, /goal set, etc.)."""
     _abandon_execute_code_receipts(session_id, "session reset before tool completion")
-    eng_dir = eng_dir or (_SESSION_ENGAGEMENTS.get(str(session_id)) if session_id else None)
+    eng_dir = eng_dir or _get_session_engagement(session_id)
     if eng_dir:
         with contextlib.suppress(Exception):
             state.tick_message(str(eng_dir))
@@ -227,7 +248,7 @@ def _on_session_reset_hook(session_id: Any = None, eng_dir: Any = None, **kwargs
 def _on_session_finalize_hook(session_id: Any = None, eng_dir: Any = None, **kwargs: Any) -> None:
     """Hook: session finalize."""
     _abandon_execute_code_receipts(session_id, "session finalized before tool completion")
-    eng_dir = eng_dir or (_SESSION_ENGAGEMENTS.get(str(session_id)) if session_id else None)
+    eng_dir = eng_dir or _get_session_engagement(session_id)
     if eng_dir:
         with contextlib.suppress(Exception):
             pending = state.has_pending_sync(str(eng_dir))

@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from ..core import hypotheses, ptt, state
 from ..core.phases import requires_hypothesis
-from ..core.skill_policy import skill_spec
 from ..core.skill_receipts import (
     HermesSkillViewAdapter,
     bind_task,
-    complete_delivery,
-    prepare_delivery,
 )
 from .base import (
     _eng_path,
     _json,
+    _prepare_skill_reservation_payload,
     _serialize_errors,
 )
 from .ptt_gates import (
@@ -129,41 +126,16 @@ def _prepare_record_ptt_delivery(
     candidate_source: str,
 ):
     """Prepare skill delivery reservation and return (reservation, digest, early_response_or_None)."""
-    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
-    reservation = prepare_delivery(
+    return _prepare_skill_reservation_payload(
         eng_dir,
-        session_id=state.resolve_session_id(eng_dir) or "ptt",
         skill=skill,
-        bundle_digest=digest,
         phase=phase.value,
+        task_id=task,
+        session_fallback="ptt",
         vulnerability_class=vulnerability_class or None,
         candidate_source=candidate_source or None,
+        adapter_cls=HermesSkillViewAdapter,
     )
-    if reservation.owner:
-        viewed = HermesSkillViewAdapter().view(skill, task_id=task)
-        completed = complete_delivery(eng_dir, reservation, viewed)
-        spec = skill_spec(skill)
-        early_resp = _json(
-            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
-            transition_applied=False,
-            skill={
-                "name": skill,
-                "digest": digest,
-                "content": viewed.content,
-                "error": viewed.error,
-                "delivery_id": reservation.id,
-                "source": spec.source if spec else None,
-                "install_hint": spec.install_hint if spec else None,
-                "trust": spec.trust if spec else None,
-            },
-        )
-        return reservation, digest, early_resp
-    if reservation.status == "preparing":
-        early_resp = _json(
-            "skill_preparing", transition_applied=False, skill={"name": skill, "digest": digest}
-        )
-        return reservation, digest, early_resp
-    return reservation, digest, None
 
 
 def _apply_ptt_task_transition(

@@ -19,6 +19,7 @@ import re
 from urllib.parse import urlsplit
 
 from ..core.bash_ast import CommandSegment, parse_bash_segments, split_heredoc_body
+from ..core.targets import KNOWN_FILE_EXTENSIONS
 
 # ---------------------------------------------------------------------------
 # Rule Sets & Pattern Definitions
@@ -103,7 +104,6 @@ _NETWORK_MODULE_RE = re.compile(
     re.IGNORECASE,
 )
 _COMMAND_SUBSTITUTION_RE = re.compile(r"\$\(|`")
-_HEREDOC_REDIRECT_RE = re.compile(r"<<-?\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)")
 
 
 def _shell_consumes_heredoc(head: str) -> bool:
@@ -131,36 +131,7 @@ _SUSPICIOUS_SCRIPT_RE = re.compile(
     r"\b(?:attack|exploit|fuzz|payload|poc|probe|recon|scan|scanner)\b",
     re.IGNORECASE,
 )
-_LOCAL_FILE_SUFFIXES = frozenset(
-    {
-        ".py",
-        ".pyw",
-        ".sh",
-        ".bash",
-        ".zsh",
-        ".ps1",
-        ".js",
-        ".mjs",
-        ".cjs",
-        ".rb",
-        ".pl",
-        ".log",
-        ".txt",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".xml",
-        ".csv",
-        ".tsv",
-        ".out",
-        ".err",
-        ".dat",
-        ".conf",
-        ".cfg",
-        ".ini",
-        ".md",
-    }
-)
+_LOCAL_FILE_SUFFIXES = KNOWN_FILE_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +256,12 @@ def _is_local_package_import_check(seg: CommandSegment) -> bool:
     if _url_hosts(seg.raw_text) or _IPV4_RE.search(seg.raw_text):
         return False
     text = seg.raw_text.strip()
-    return bool(re.search(r"""(?:python|python3)\s+-c\s+["']\s*import\s+[\w\s,.]+\s*["']""", text))
+    return bool(
+        re.search(
+            r"""(?:python|python3|py)\s+-c\s+["']\s*(?:import\s+[\w\s,.]+|from\s+[\w.]+\s+import)""",
+            text,
+        )
+    )
 
 
 def _block_terminal_segment(seg: CommandSegment) -> str | None:
@@ -357,12 +333,11 @@ def block_terminal_command(command: str) -> str | None:
     # command. (Non-shell interpreters like python3 - <<EOF treat the body as
     # program *source*, not executed shell tokens — payload URLs there are
     # data, not connection targets, and are intentionally not scanned.)
-    if _HEREDOC_REDIRECT_RE.search(command):
-        head, body = split_heredoc_body(command)
-        if body is not None and _shell_consumes_heredoc(head):
-            message = block_terminal_command(body)
-            if message:
-                return message
+    head, body = split_heredoc_body(command)
+    if body is not None and _shell_consumes_heredoc(head):
+        message = block_terminal_command(body)
+        if message:
+            return message
 
     tainted_variables = {
         name

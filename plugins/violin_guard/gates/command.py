@@ -173,6 +173,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
             result.errors.extend(binding_result.errors)
             result.warnings.extend(binding_result.warnings)
             result.infos.extend(binding_result.infos)
+            result.hints.extend(binding_result.hints)
 
     semantic_lock = state.semantic_lock(eng_dir)
     if semantic_lock:
@@ -208,6 +209,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     result.errors.extend(hyp_result.errors)
     result.warnings.extend(hyp_result.warnings)
     result.infos.extend(hyp_result.infos)
+    result.hints.extend(hyp_result.hints)
 
     # 7-8. Target execution accounting.
     if args.account_sync:
