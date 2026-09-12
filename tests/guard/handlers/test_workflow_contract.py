@@ -103,6 +103,25 @@ def test_runtime_command_rejects_scope_substitution(tmp_path: Path) -> None:
     assert any("canonical scope.yaml" in error for error in result.errors)
 
 
+def test_command_scope_diagnostic_uses_canonical_path_without_mutation(tmp_path: Path) -> None:
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    scope_path = engagement / "scope" / "scope.yaml"
+    original_scope = scope_path.read_bytes()
+
+    result = command.check_command(
+        command.CheckCommandArgs(
+            command="curl https://outside.example/status",
+            phase="recon",
+            eng_dir=str(engagement),
+            target="10.10.10.10",
+        )
+    )
+
+    assert any(str(scope_path.resolve()) in warning for warning in result.warnings)
+    assert scope_path.read_bytes() == original_scope
+
+
 def test_multi_task_ptt_update_validates_before_atomic_replace(tmp_path: Path) -> None:
     path = tmp_path / "ptt.md"
     path.write_text(
