@@ -105,12 +105,13 @@ tasks are not moved between phase sections.
 
 ## Guard tools
 
-The plugin registers eleven Hermes tools from one typed registry:
+The plugin registers twelve Hermes tools from one typed registry:
 
 | Tool | Purpose |
 |---|---|
 | `violin_record_ptt` | Create, start, refresh, close, or cancel a PTT task |
 | `violin_record_hypothesis` | Create or update a scoped hypothesis |
+| `violin_submit_finding` | Submit a validated finding bound to its signed execution receipts |
 | `violin_exec` | Execute one guarded command |
 | `violin_exec_burst` | Execute a bounded command file |
 | `violin_exec_status` | Read background execution status |
