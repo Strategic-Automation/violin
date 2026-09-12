@@ -16,6 +16,11 @@
 
 ### Fixed
 
+- Articles under `docs/articles/` each carried a duplicate `canonical_url` key, and both YAML and the
+  cross-posting editors take the last one, so every article claimed the repository root as its canonical page
+  instead of its own URL. Each article now declares one canonical URL, pointing at the article.
+- Promotional copy and cover-graphic notes no longer sit inside the published articles; that material moved to
+  `PROMOTION.md`, where the rest of the launch copy lives.
 - README registered-tool list now includes `violin_submit_finding` and states the correct count of twelve.
 
 ### Changed

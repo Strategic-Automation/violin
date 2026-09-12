@@ -480,3 +480,48 @@ Re-read this before every post:
 ---
 
 *End of kit. Before each new platform push, re-verify star count and version from the repo (section 10 references the exact commands) so every post ships accurate numbers.*
+
+## Per-article launch copy
+Material that describes the articles lives here, not inside the published files. Each entry is ready topaste when the piece goes out.
+
+### `docs/articles/coverage-discipline-for-agent-assisted-pentests.md`
+
+Cover graphic spec: Dark technical graphic — a coverage matrix on the left with tested / not_applicable / blocked cells, a scope.yaml obligations list in the centre, and a signed receipt on the right; the three are linked but visibly separate.
+
+```text
+Social (X / LinkedIn): The real failure mode of agent-assisted pentesting is never a missing technique — it is unchecked coverage: an agent that finds three good bugs and silently skips forty owed tests, leaving you unable to tell a client 'tested and clean' from 'never tested'. This article shows a disposition matrix derived from scope obligations, with three enforced states, that stays strictly separate from vulnerability credit.
+Reddit r/netsec / r/cybersecurity title candidates:
+- Your agent found three bugs and skipped forty tests — and you can't tell the difference
+- "Tested and clean" vs "never tested": the coverage problem in agent-assisted pentests
+- The pentest lever agents can't fake: dispositioning every in-scope obligation, not just counting findings
+```
+
+### `docs/articles/guardrails-for-agentic-pentesting.md`
+
+Cover graphic spec: Dark technical cover graphic — a terminal on the left, a signed JSON execution receipt on the right, a clear scope boundary drawn between them.
+
+```text
+Social (X / LinkedIn): Violin is an open-source, Hermes-native agentic pentest profile that puts a required execution guard at the target boundary and binds every finding to a signed execution receipt. It is honest about its limits — no network containment, no model picking, and multi-run benchmark accounting that reports mean pass@1 instead of cherry-picked best runs.
+
+HN title candidates:
+- Agentic pentesting runs on an execution guard and signed receipts
+- Violin: an open-source supervised agentic pentest profile
+- I put a hard guard between an LLM and its pentest target
+- Receipt-backed findings and enforcement for autonomous pentest agents
+- What agentic pentest tooling forgets to demo: proof and scope
+- Violin: a Hermes-native agentic pentester with a fail-closed target guard
+```
+
+### `docs/articles/how-to-evaluate-an-agentic-pentest-tool.md`
+
+Cover graphic spec: Dark technical graphic — a checklist card on the left, a signed JSON execution receipt on the right, and a scope boundary line closing a gap in between. No flags, no trophies.
+
+```text
+Social (X / LinkedIn): Agentic pentesting is demo-rich and evidence-poor. Before you point an agent at a client network, evaluate the accountability layer — one enforced execution boundary, fail-closed gates, signed receipts bound to reproducible findings, and distribution-based benchmarks — not the demo reel. This walkthrough of the controls and a short buyer's checklist is based on Violin, an MIT-licensed, Hermes-native, authorized-only profile: hermes profile install https://github.com/Strategic-Automation/violin
+
+HN title candidates:
+- How to evaluate an agentic pentest tool
+- Agentic pentesting: capability is the easy half, accountability is the job
+- The demo-to-production gap in agentic pentest tooling
+```
+
