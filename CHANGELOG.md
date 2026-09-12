@@ -10,6 +10,9 @@
 - GitHub Discussions as the community surface for playbook requests, setup questions, and engagement feedback.
 - Operator-facing articles under `docs/articles/` on guardrails, coverage discipline, and how to evaluate an
   agentic pentest tool.
+- `PROMOTION.md`, the launch and outreach kit: positioning, launch sequencing, Show HN and subreddit drafts,
+  X thread, LinkedIn post, cross-posting plan, community and newsletter outreach, directory listings, and
+  reply templates.
 
 ### Fixed
 
