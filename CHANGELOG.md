@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Landing page for the project with the guard flow, registered tool surface, routed playbooks, and stated limits.
+- Repository social preview card so shared links unfurl with the project identity.
+- GitHub Discussions as the community surface for playbook requests, setup questions, and engagement feedback.
+
+### Changed
+
+- Corrected the README playbook, reference, and template counts to match the repository contents.
+- Linked the landing page and Discussions from the README badge row and section navigation.
+
 ## 3.2.1
 
 ### Fixed
