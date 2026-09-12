@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 from plugins.violin_guard.core.receipt_integrity import (
     DIGESTS_FIELD,
     PUBLIC_SIGNATURE_FIELD,
@@ -59,3 +61,41 @@ def test_playbook_grid_is_rendered_on_load() -> None:
     assert re.search(r"^\s{0,4}updatePlaybooks\(\);\s*$", page(), re.MULTILINE), (
         "no top-level updatePlaybooks() call: the grid would render empty until a pill is clicked"
     )
+
+
+def articles() -> list[Path]:
+    return sorted((ROOT / "docs" / "articles").glob("*.md"))
+
+
+def front_matter(path: Path) -> str:
+    return path.read_text(encoding="utf-8").split("---", 2)[1]
+
+
+def test_article_front_matter_has_no_duplicate_keys() -> None:
+    """YAML and the cross-posting editors both take the last duplicate key, silently overriding the first."""
+    for path in articles():
+        keys = [
+            line.split(":")[0]
+            for line in front_matter(path).splitlines()
+            if ":" in line and not line.startswith(" ")
+        ]
+        duplicates = {key for key in keys if keys.count(key) > 1}
+
+        assert not duplicates, f"{path.name}: duplicate front-matter keys {duplicates}"
+
+
+def test_article_canonical_url_points_at_the_article() -> None:
+    """A cross-posted copy must point readers at its own page, not the repository root."""
+    for path in articles():
+        canonical = yaml.safe_load(front_matter(path))["canonical_url"]
+
+        assert canonical.endswith(f"/articles/{path.stem}.html"), f"{path.name}: {canonical}"
+
+
+def test_articles_do_not_carry_promotional_material() -> None:
+    """Launch copy belongs in PROMOTION.md, not in the source of what readers are served."""
+    for path in articles():
+        text = path.read_text(encoding="utf-8")
+
+        assert "<!-- PROMO" not in text, f"{path.name} carries a promo block"
+        assert "cover_image_note" not in text, f"{path.name} carries a cover-graphic note"
