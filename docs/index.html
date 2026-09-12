@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Violin — supervised agentic pentest profile for Hermes Agent</title>
+<meta name="description" content="Violin is an open-source, supervised agentic penetration-testing profile for Hermes Agent. Scope-gated target execution, signed execution receipts, receipt-backed findings, and engagement state that survives context compression."/>
+<link rel="canonical" href="https://strategic-automation.github.io/violin/"/>
+<meta property="og:type" content="website"/>
+<meta property="og:title" content="Violin — supervised agentic pentest profile for Hermes Agent"/>
+<meta property="og:description" content="Scope-gated target execution, signed execution receipts, and receipt-backed findings. MIT licensed, installs in one command."/>
+<meta property="og:image" content="https://strategic-automation.github.io/violin/assets/social-preview.png"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<link rel="icon" href="assets/logo.png"/>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Violin",
+  "applicationCategory": "SecurityApplication",
+  "operatingSystem": "Linux, macOS, Windows",
+  "license": "https://opensource.org/licenses/MIT",
+  "url": "https://github.com/Strategic-Automation/violin",
+  "description": "Supervised agentic penetration-testing profile for Hermes Agent with a required execution guard, signed execution receipts, and receipt-backed findings.",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+}
+</script>
+<style>
+  :root{
+    --bg:#0a0a0f; --panel:#12121a; --panel2:#171722; --line:#26263a;
+    --fg:#e9e9f0; --muted:#a0a0b0; --red:#ff3b4a; --gold:#ffd166;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--gold);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 24px}
+  header.top{border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(10,10,15,.92);backdrop-filter:blur(8px);z-index:9}
+  header.top .wrap{display:flex;align-items:center;gap:14px;height:64px}
+  header.top img{width:30px;height:30px;border-radius:6px}
+  header.top b{letter-spacing:.14em;text-transform:uppercase;font-size:13px}
+  header.top nav{margin-left:auto;display:flex;gap:20px;font-size:14px}
+  header.top nav a{color:var(--muted)}
+  header.top nav a:hover{color:var(--fg);text-decoration:none}
+  .hero{padding:60px 0 44px;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;left:-14%;top:-190px;width:900px;height:520px;
+    background:radial-gradient(closest-side,rgba(255,59,74,.16),transparent 72%);pointer-events:none}
+  .hero .wrap{position:relative}
+  .hero-cols{display:grid;grid-template-columns:minmax(0,1fr) 356px;gap:52px;align-items:start}
+  h1{font-size:50px;line-height:1.1;margin:0 0 16px;letter-spacing:-.025em;max-width:20ch;text-wrap:balance}
+  h1 .accent{color:var(--red)}
+  .lede{font-size:19px;color:var(--muted);margin:0 0 22px;max-width:62ch}
+  .install{display:flex;align-items:flex-start;gap:12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:13px 15px;font-family:var(--mono);font-size:13.5px;overflow:auto}
+  .install code{color:var(--gold);white-space:pre-wrap;word-break:break-word;line-height:1.55}
+  .install button{margin-left:auto;background:transparent;color:var(--fg);border:1px solid var(--line);
+    border-radius:999px;padding:6px 15px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+    white-space:nowrap;flex:0 0 auto}
+  .install button:hover{border-color:var(--red);color:var(--fg)}
+  .meta-line{margin:14px 0 0;font-size:13.5px;color:#bcbcc9}
+  .meta-line span{white-space:nowrap}
+  .meta-line .dot{margin:0 8px;color:var(--line)}
+  .gate-panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
+    margin-top:5px}
+  .gate-panel h3{margin:0 0 4px;font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--red)}
+  .gate-panel p.gp-sub{margin:0 0 14px;font-size:13.5px;color:var(--muted)}
+  .gate-panel ol{margin:0;padding:0;list-style:none;counter-reset:g}
+  .gate-panel li{counter-increment:g;display:flex;gap:10px;align-items:baseline;font-size:14px;
+    padding:6px 0;border-bottom:1px solid var(--line)}
+  .gate-panel li:last-child{border-bottom:0}
+  .gate-panel li::before{content:counter(g);color:var(--gold);font-family:var(--mono);font-size:12.5px;
+    min-width:14px}
+  .gate-panel .gp-foot{margin-top:14px;font-size:13px;color:var(--muted);border-left:2px solid var(--gold);
+    padding-left:11px}
+  .badges{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .links{margin-top:18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .chip{display:inline-block;border:1px solid var(--line);background:transparent;color:var(--muted);
+    border-radius:999px;padding:6px 13px;font-size:13px}
+  .chip:hover{border-color:var(--red);color:var(--fg);text-decoration:none}
+  .btn-primary{display:inline-block;background:#d92b3a;color:#fff;border-radius:999px;
+    padding:9px 18px;font-size:13.5px;font-weight:600}
+  .btn-primary:hover{filter:brightness(1.1);text-decoration:none}
+  .install .prompt{color:var(--muted);user-select:none}
+  section{padding:56px 0;border-top:1px solid var(--line)}
+  h2{font-size:27px;margin:0 0 8px;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0 0 28px;max-width:78ch}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+  .card h3{margin:0 0 8px;font-size:16px}
+  .card h3::before{content:"▸ ";color:var(--red)}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 26px}
+  .step{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 14px;font-size:14px}
+  .step b{display:block;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--red)}
+  .arrow{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:14.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-size:12px;letter-spacing:.09em;text-transform:uppercase}
+  td code{font-family:var(--mono);color:var(--gold);font-size:13.5px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .group{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .group h4{margin:0 0 10px;font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--gold)}
+  .group ul{margin:0;padding:0;list-style:none;font-size:14px;color:var(--muted);columns:1}
+  .group li{padding:2px 0}
+  .note{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--gold);
+    border-radius:8px;padding:16px 18px;color:var(--muted);font-size:14.5px}
+  .note b{color:var(--fg)}
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px;
+    overflow:auto;font-family:var(--mono);font-size:13.5px;color:#dcdce6}
+  footer{border-top:1px solid var(--line);padding:34px 0 56px;color:var(--muted);font-size:14px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:center}
+  footer nav{display:flex;gap:18px;margin-left:auto}
+  @media (max-width:980px){.hero-cols{grid-template-columns:1fr;gap:30px}
+    .gate-panel{max-width:520px}}
+  @media (max-width:720px){h1{font-size:33px}header.top nav{display:none}
+    .install code{white-space:normal;word-break:break-word}
+    .flow{gap:8px}.step{flex:1 1 130px;font-size:13px}}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="wrap">
+  <img src="assets/logo.png" alt="Violin logo"/>
+  <b>Violin</b>
+  <nav>
+    <a href="#how">How it works</a>
+    <a href="#tools">Tools</a>
+    <a href="#playbooks">Playbooks</a>
+    <a href="#limits">Limits</a>
+    <a href="#start">Quick start</a>
+    <a href="https://github.com/Strategic-Automation/violin/discussions">Discussions</a>
+    <a href="https://github.com/Strategic-Automation/violin">GitHub ↗</a>
+  </nav>
+</div></header>
+
+<div class="hero"><div class="wrap"><div class="hero-cols">
+  <div class="hero-copy">
+    <h1>Supervised agentic pentesting that produces <span class="accent">proof, not prose</span>.</h1>
+    <p class="lede">Violin is an open-source <b>Hermes Agent</b> profile for authorised penetration tests.
+      Every target-touching command passes a required execution guard, every command returns a signed
+      receipt, and every finding must bind to the receipt that proves it.</p>
+    <div class="install">
+      <span class="prompt">$</span>
+      <code>hermes profile install \
+    https://github.com/Strategic-Automation/violin</code>
+      <button onclick="navigator.clipboard.writeText('hermes profile install https://github.com/Strategic-Automation/violin');this.textContent='✓ Copied'">Copy</button>
+    </div>
+    <div class="links">
+      <a class="btn-primary" href="https://github.com/Strategic-Automation/violin">★ Star on GitHub</a>
+      <a class="chip" href="#start">Quick start</a>
+    </div>
+    <p class="meta-line"><span>MIT licensed</span><span class="dot">·</span><span>v3.2.1</span><span class="dot">·</span><span>Hermes Agent 0.18.0+</span><span class="dot">·</span><span>Kali / Parrot</span></p>
+  </div>
+  <aside class="gate-panel">
+    <h3>Before a target command runs</h3>
+    <p class="gp-sub">Seven checks, one boundary — <code>violin_exec</code>.</p>
+    <ol>
+      <li>Written authorisation in <code>scope.yaml</code></li>
+      <li>Approved scope match for the resolved target</li>
+      <li>Active PTT task under the current phase</li>
+      <li>Routed specialist skill bound to the task</li>
+      <li>Hypothesis binding for the command</li>
+      <li>Command history and synchronisation state</li>
+      <li>Engagement gates — fail closed</li>
+    </ol>
+    <div class="gp-foot">A passing command returns a signed execution receipt. A finding without one is not a
+      finding.</div>
+  </aside>
+</div></div></div>
+
+<section id="how"><div class="wrap">
+  <h2>The trust problem</h2>
+  <p class="sub">An agent that finds real vulnerabilities is not the hard part any more. The hard part is
+    answering three questions a client, an auditor, or your own team will ask: did it stay in scope, can you
+    prove the finding, and can you resume the engagement tomorrow?</p>
+  <div class="cards">
+    <div class="card"><h3>Is it in scope?</h3>
+      <p>Scope, phase, active PTT task, routed skill, hypothesis binding, and command history are all checked
+        before a target command is allowed to start. Gates fail closed.</p></div>
+    <div class="card"><h3>Can you prove it?</h3>
+      <p>Each execution returns a signed receipt. A finding is only accepted when it binds to receipts that
+        authenticate the decisive request and response bytes.</p></div>
+    <div class="card"><h3>Can you resume it?</h3>
+      <p>PTT tasks, hypotheses, checkpoints, evidence, and reports live in engagement state on disk, so context
+        compression does not reset the assessment.</p></div>
+  </div>
+
+  <div class="flow">
+    <div class="step"><b>1</b>Written authorisation</div><span class="arrow">→</span>
+    <div class="step"><b>2</b>Approved scope</div><span class="arrow">→</span>
+    <div class="step"><b>3</b>Active phase task</div><span class="arrow">→</span>
+    <div class="step"><b>4</b>Guard gates</div><span class="arrow">→</span>
+    <div class="step"><b>5</b>Guarded execution</div><span class="arrow">→</span>
+    <div class="step"><b>6</b>Signed receipt</div><span class="arrow">→</span>
+    <div class="step"><b>7</b>Batch review</div>
+  </div>
+
+  <div class="note"><b>Stated plainly:</b> the guard is an execution-boundary control, not network containment.
+    Violin documents this instead of implying otherwise — read the safety model and the benchmark limits before
+    you point it at anything. Use it only against systems you own or are written-authorised to test.</div>
+</div></section>
+
+<section id="tools"><div class="wrap">
+  <h2>Eleven registered tools</h2>
+  <p class="sub">One typed registry, no tool-specific execution adapters, no target allowlists. The
+    <code>violin_exec</code> boundary is the same for every installed non-interactive tool.</p>
+  <table>
+    <tr><th>Tool</th><th>Purpose</th></tr>
+    <tr><td><code>violin_record_ptt</code></td><td>Create, start, refresh, close, or cancel a PTT task</td></tr>
+    <tr><td><code>violin_record_hypothesis</code></td><td>Create or update a scoped hypothesis</td></tr>
+    <tr><td><code>violin_exec</code></td><td>Execute one guarded command</td></tr>
+    <tr><td><code>violin_exec_burst</code></td><td>Execute a bounded command file</td></tr>
+    <tr><td><code>violin_exec_status</code></td><td>Read background execution status</td></tr>
+    <tr><td><code>violin_exec_cancel</code></td><td>Cancel tracked background execution</td></tr>
+    <tr><td><code>violin_review_batch</code></td><td>Review a completed batch and settle state</td></tr>
+    <tr><td><code>violin_rebind_pending_batch</code></td><td>Rebind a pending batch after confirmation</td></tr>
+    <tr><td><code>violin_heartbeat_done</code></td><td>Clear a completed heartbeat review</td></tr>
+    <tr><td><code>violin_target</code></td><td>Resolve the approved assessment target</td></tr>
+    <tr><td><code>violin_status</code></td><td>Explain current tasks, skills, and blockers</td></tr>
+  </table>
+</div></section>
+
+<section id="playbooks"><div class="wrap">
+  <h2>Routed methodology</h2>
+  <p class="sub">35 playbooks across 7 routed skills. An orchestrator selects the focused playbook for the
+    capability under test instead of loading one generic checklist.</p>
+  <div class="grid">
+    <div class="group"><h4>Recon &amp; scoping</h4><ul>
+      <li>recon</li><li>scoping</li><li>tools</li></ul></div>
+    <div class="group"><h4>Injection</h4><ul>
+      <li>sqli</li><li>nosql-injection</li><li>command-injection</li><li>ldap-injection</li>
+      <li>xpath-injection</li><li>ssti</li><li>xxe</li><li>deserialization</li>
+      <li>prototype-pollution</li><li>path-traversal</li></ul></div>
+    <div class="group"><h4>Client-side</h4><ul><li>xss</li><li>csrf</li></ul></div>
+    <div class="group"><h4>Access &amp; identity</h4><ul>
+      <li>idor-access-control</li><li>auth-bypass</li><li>jwt-attacks</li>
+      <li>redirects-unvalidated</li></ul></div>
+    <div class="group"><h4>Server, API &amp; supply chain</h4><ul>
+      <li>ssrf</li><li>api-security</li><li>mcp-api-testing</li><li>security-misconfiguration</li>
+      <li>observability-failures</li><li>supply-chain</li><li>anti-automation</li>
+      <li>security-through-obscurity</li></ul></div>
+    <div class="group"><h4>Logic, crypto &amp; LLM</h4><ul>
+      <li>workflow-state-abuse</li><li>input-validation</li><li>cryptographic-issues</li>
+      <li>llm-prompt-injection</li></ul></div>
+    <div class="group"><h4>Lifecycle</h4><ul>
+      <li>vuln-research</li><li>exploitation</li><li>post-exploitation</li>
+      <li>reporting</li></ul></div>
+  </div>
+</div></section>
+
+<section id="limits"><div class="wrap">
+  <h2>Honest limits</h2>
+  <p class="sub">Promotional pages usually skip this section. Violin's own documentation does not.</p>
+  <div class="cards">
+    <div class="card"><h3>A single run is a noisy sample</h3>
+      <p>Agentic runs vary run to run. The project reports a distribution — mean pass@1, pass@k, pass^k — and
+        prefers the mean over the best run. A repo test pass is not a live benchmark score.</p></div>
+    <div class="card"><h3>The guard is not containment</h3>
+      <p>The raw-terminal hook is a best-effort safety net. Network-level containment is your environment's job,
+        not the profile's.</p></div>
+    <div class="card"><h3>No model choices baked in</h3>
+      <p>Violin adds no credentials and selects no model or provider; it inherits whatever Hermes is configured
+        with.</p></div>
+    <div class="card"><h3>Human validation stays</h3>
+      <p>Receipts prove what the tool saw and sent. They do not replace a human judgement call on severity,
+        impact, or whether a finding is worth reporting.</p></div>
+  </div>
+</div></section>
+
+<section id="start"><div class="wrap">
+  <h2>Quick start</h2>
+  <p class="sub">Requirements: Hermes Agent 0.18.0+, a Kali Linux or Parrot OS tool environment, Python 3.11
+    and <code>uv</code> for local development, and written authorisation with an approved scope.</p>
+<pre>hermes profile install https://github.com/Strategic-Automation/violin
+hermes -p violin
+
+# then, in the session:
+Run an authorized penetration test against example.com.</pre>
+  <p class="sub">Violin collects scope before any target interaction. Read the
+    <a href="https://github.com/Strategic-Automation/violin#engagement-lifecycle">engagement lifecycle</a> and
+    the <a href="https://github.com/Strategic-Automation/violin/blob/master/docs/BENCHMARKS.md">benchmark
+    methodology</a> before your first run.</p>
+</div></section>
+
+<footer><div class="wrap">
+  <span>MIT licensed · Violin contributors</span>
+  <nav>
+    <a href="https://github.com/Strategic-Automation/violin">GitHub</a>
+    <a href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md">Security</a>
+    <a href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md">Contributing</a>
+    <a href="https://hermes-agent.nousresearch.com/">Hermes Agent by Nous Research</a>
+  </nav>
+</div></footer>
+
+</body>
+</html>
