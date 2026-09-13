@@ -39,7 +39,16 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
    uv run ruff format --check .
    uv run python scripts/violin_guard.py check-release
    ```
-5. Open a pull request with a clear description of the change
+5. Open a pull request against `dev`:
+   - Title: Conventional Commits format — `type(scope): lowercase summary` with
+     no trailing period. Types: `feat fix refactor perf test docs chore ci style
+     revert build release`. CI checks every title.
+   - Description: fill in `PULL_REQUEST_TEMPLATE.md` (Summary and Verification
+     are required; CI checks this too). Link the issue you close with
+     `Fixes #123` on its own line.
+   - Area labels (guard, playbooks, benchmark, docs, ci, tests, packaging) are
+     applied automatically; add others by hand where useful.
+   - Feature branches are squash-merged; release PRs merge with a merge commit.
 
 ### Playbook Standards
 

@@ -1,0 +1,48 @@
+# Area labels for pull requests (actions/labeler v5 path rules).
+# Label names must exist in the repository (created via gh/labels API).
+
+guard:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "plugins/violin_guard/**"
+          - "scripts/violin_guard.py"
+
+playbooks:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "skills/**/playbooks/**"
+          - "skills/**/SKILL.md"
+
+benchmark:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "benchmark/**"
+          - "scripts/run_benchmark*"
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+          - "assets/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+
+packaging:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "uv.lock"
+          - "distribution.yaml"
+          - "config.yaml"
+          - "Dockerfile"
+          - ".dockerignore"
+          - ".python-version"
