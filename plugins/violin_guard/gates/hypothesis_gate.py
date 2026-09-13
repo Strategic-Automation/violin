@@ -10,11 +10,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..core import hypotheses, state
+from ..core.http_proof import has_capture_flag
 from ..core.phases import Phase, normalize_phase, requires_hypothesis
 from ..core.results import GuardResult
 from ..core.skill_receipts import get_binding
 from ..core.targets import normalize_target, resolve_command_targets
 from .scope_gate import validate_scope
+
+
+def _parse_hypothesis_timestamp(value: str) -> datetime | None:
+    candidate = value.strip().removesuffix(" UTC").removesuffix("Z").strip()
+    with contextlib.suppress(ValueError):
+        ts = datetime.fromisoformat(candidate)
+        return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+    return None
+
 
 # Grace window for the record-as-you-go recency gate: evidence newer than the
 # hypothesis board's last update by more than this many seconds blocks further
@@ -87,28 +97,13 @@ def check_http_proof_flags(command: str) -> HypothesisResult:
         return result
     if not any(token.lower().startswith(("http://", "https://")) for token in tokens):
         return result
-    curl_capture = {"--include", "--verbose", "--head", "--dump-header", "--write-out"}
-    wget_capture = {"--server-response"}
-    for index, client in enumerate(clients):
-        if client not in {"curl", "wget"}:
-            continue
-        following = tokens[index + 1 :]
-        long_flags = {token.partition("=")[0] for token in following if token.startswith("--")}
-        short_flags = {
-            character
-            for token in following
-            if token.startswith("-") and not token.startswith("--")
-            for character in token[1:]
-        }
-        if client == "curl" and (long_flags & curl_capture or short_flags & set("ivIDw")):
-            continue
-        if client == "wget" and (long_flags & wget_capture or "S" in short_flags):
-            continue
-        result.add_warning(
-            "HTTP probe without an explicit status observation: use curl `-i`/`-w` or "
-            "wget `-S`; batch scripts should emit JSONL http_observation records"
-        )
-        break
+    for client in ("curl", "wget"):
+        if client in clients and not has_capture_flag(command, client):
+            result.add_warning(
+                "HTTP probe without an explicit status observation: use curl `-i`/`-w` or "
+                "wget `-S`; batch scripts should emit JSONL http_observation records"
+            )
+            break
     return result
 
 
@@ -310,15 +305,8 @@ def check_hypothesis_freshness(
     for hypothesis in hyps:
         if not hypothesis.updated:
             continue
-        ts = None
-        raw = hypothesis.updated.strip()
-        candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
-        with contextlib.suppress(ValueError):
-            ts = datetime.fromisoformat(candidate)
-        if ts is None:
-            continue
-        ts = ts.replace(tzinfo=UTC)
-        if (now - ts).total_seconds() > 48 * 3600:
+        ts = _parse_hypothesis_timestamp(hypothesis.updated)
+        if ts is not None and (now - ts).total_seconds() > 48 * 3600:
             stale += 1
 
     if stale:
@@ -342,14 +330,9 @@ def check_hypothesis_freshness(
         for hypothesis in target_hyps:
             if not hypothesis.updated:
                 continue
-            raw = hypothesis.updated.strip()
-            candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
-            updated_ts = None
-            with contextlib.suppress(ValueError):
-                updated_ts = datetime.fromisoformat(candidate)
+            updated_ts = _parse_hypothesis_timestamp(hypothesis.updated)
             if updated_ts is None:
                 continue
-            updated_ts = updated_ts.replace(tzinfo=UTC)
             board_epoch = updated_ts.timestamp()
             evidence_age_beyond_board = newest_evidence - board_epoch
             if evidence_age_beyond_board > _RECORD_AS_YOU_GO_GRACE:
