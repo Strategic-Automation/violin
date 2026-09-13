@@ -1385,3 +1385,8 @@ def test_command_after_heredoc_close_is_still_scanned() -> None:
     )
     result = _pre_tool_call_hook(tool_name="terminal", args={"command": command})
     assert result and result["action"] == "block"
+
+
+def test_inline_python_inspecting_recon_evidence_is_allowed() -> None:
+    command = "python3 -c \"import json; data = json.load(open('evidence/recon/openapi.json'))\""
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None

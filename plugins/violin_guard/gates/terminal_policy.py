@@ -339,6 +339,7 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
 
     if (
         executable in _SCRIPT_INTERPRETERS
+        and "-c" not in seg.words
         and _SUSPICIOUS_SCRIPT_RE.search(segment_text)
         and not _is_local_compilation_or_test(seg)
     ):

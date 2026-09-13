@@ -176,7 +176,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     semantic_lock = state.semantic_lock(eng_dir)
     if semantic_lock:
-        result.add_warning(
+        result.add_hint(
             "semantic anti-stuck lock active: five evidence-poor reviews suggest the "
             "current technique is not yielding fresh evidence. Next action: record a "
             "research attempt (violin_record_hypothesis ... research_attempted='true') "

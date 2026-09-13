@@ -441,7 +441,7 @@ def record_semantic_review(
     key = "|".join((task_id, hypothesis_id, skill, technique.strip().lower()))
     clean_evidence_paths = [path_item for path_item in evidence_paths if path_item]
     has_evidence = bool(clean_evidence_paths)
-    positive = outcome in {"progress", "validated", "rejected"} and has_evidence
+    positive = has_evidence or outcome in {"progress", "validated", "rejected"}
     pivoted = bool(
         next_technique.strip().lower()
         and next_technique.strip().lower() != technique.strip().lower()
@@ -467,11 +467,11 @@ def record_semantic_review(
         entries[key] = entry
         lock = data.get("lock") or {}
         # Whole-engagement stuck signal: total no-progress reviews across all
-        # keys.  Pivots and evidence reset it, so a busy CTF loop stays open.
+        # keys. Pivots and evidence reset it, so a busy CTF loop stays open.
         total_stuck = sum(
             int(item.get("count") or 0) for item in entries.values() if not item.get("pivoted")
         )
-        if lock and (has_evidence or (data.get("research_attempts") and pivoted)):
+        if has_evidence or (lock and data.get("research_attempts") and pivoted):
             data.pop("lock", None)
         elif total_stuck >= 5 and not pivoted and not has_evidence:
             data["lock"] = {

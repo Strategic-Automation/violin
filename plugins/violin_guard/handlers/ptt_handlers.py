@@ -48,8 +48,11 @@ def _start_ptt_task(
     selected = next((item for item in tasks if item.id == task_id), None)
     if selected is None:
         raise ValueError(f"PTT task {task_id!r} not found")
-    if selected.status not in {"[ ]", "[~]"}:
-        raise ValueError(f"PTT task {task_id!r} must be [ ] or [~] before it can be started")
+    if selected.status not in {"[ ]", "[~]", "[x]", "[-]"}:
+        raise ValueError(
+            f"PTT task {task_id!r} has status {selected.status!r}; "
+            "it must be [ ], [~], [x], or [-] before it can be started"
+        )
     try:
         phase = ptt.normalize_phase(selected.phase)
     except ValueError as exc:
@@ -61,7 +64,6 @@ def _start_ptt_task(
         resolved_dir = ptt_path.parent.parent if eng_dir is None else Path(eng_dir)
         if state.has_pending_sync(resolved_dir):
             raise ValueError("an active PTT task already exists; review its pending batch first")
-        _validate_phase_exit(resolved_dir, active.id, "[x]")
         superseded_note = f"{active.note} [superseded-by:{task_id}]".strip()
         updates[active.id] = ("[x]", superseded_note)
     ptt.update_tasks(ptt_path, updates)

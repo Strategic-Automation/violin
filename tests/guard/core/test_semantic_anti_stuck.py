@@ -48,3 +48,15 @@ def test_evidence_backed_progress_resets_the_semantic_counter(tmp_path) -> None:
     )
     assert result["count"] == 0
     assert not result["warning"]
+
+
+def test_evidence_paths_reset_counter_even_with_blank_outcome(tmp_path) -> None:
+    _review(tmp_path)
+    _review(tmp_path)
+    result = _review(
+        tmp_path,
+        outcome="",
+        evidence_paths=["evidence/recon/response.txt"],
+    )
+    assert result["count"] == 0
+    assert not result["warning"]
