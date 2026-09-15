@@ -244,10 +244,14 @@ def test_calibration_known_good_matches_every_golden_case() -> None:
 
 
 def test_calibration_known_bad_receives_no_credit() -> None:
-    result = score_engagement(
-        Path("benchmark/targets/duck-store/calibration/known-bad"),
-        trusted_fixture=True,
-    )
+    # The negative fixture was removed with the receipt-backed scoring rewrite,
+    # which left this check passing on a missing directory: an absent engagement
+    # also scores zero. Report the missing negative case instead of claiming
+    # calibration coverage the scorer does not have.
+    fixture = Path("benchmark/targets/duck-store/calibration/known-bad")
+    if not fixture.is_dir():
+        pytest.skip("no known-bad calibration fixture; the scorer has no negative case")
+    result = score_engagement(fixture, trusted_fixture=True)
     assert result["confirmed"] == 0
     assert result["benchmark_pass"] is False
 
