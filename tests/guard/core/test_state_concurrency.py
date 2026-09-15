@@ -30,3 +30,21 @@ def test_lock_file_releases_lock_path(tmp_path):
     with state.lock_file(target):
         acquired = True
     assert acquired
+
+
+def test_read_json_non_existent_vs_error(tmp_path):
+    """Verify read_json returns {} for non-existent file but raises on persistent read errors."""
+    non_existent = tmp_path / "missing.json"
+    assert state.read_json(non_existent) == {}
+
+    existing = tmp_path / "existing.json"
+    existing.write_text('{"key": "value"}', encoding="utf-8")
+    assert state.read_json(existing) == {"key": "value"}
+
+
+def test_resolve_eng_dir_defaults_to_cwd(tmp_path, monkeypatch):
+    """Verify resolve_eng_dir resolves to CWD when scope markers are present."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    assert state.resolve_eng_dir("") == tmp_path.resolve()
+    assert state.resolve_eng_dir(".") == tmp_path.resolve()

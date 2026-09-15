@@ -33,7 +33,7 @@ _CAPTURE_SHORT_FLAGS = {"curl": "ivIDw", "wget": "S"}
 _INJECTED_CAPTURE_FLAG = {"curl": "-i", "wget": "-S"}
 
 
-def _has_capture_flag(command: str, client: str) -> bool:
+def has_capture_flag(command: str, client: str) -> bool:
     """Return whether one curl/wget command already records response status."""
     try:
         tokens = shlex.split(command, posix=True)
@@ -65,7 +65,7 @@ def normalize_http_proof_flags(command: str) -> str:
         client = segment.executable.casefold().removesuffix(".exe")
         if client not in _CLIENT_TOKEN_RE or not _HTTP_URL_RE.search(segment.raw_text):
             continue
-        if _has_capture_flag(segment.raw_text, client):
+        if has_capture_flag(segment.raw_text, client):
             continue
         segment_start = command.find(segment.raw_text, search_start)
         if segment_start < 0:
@@ -82,3 +82,9 @@ def normalize_http_proof_flags(command: str) -> str:
     for position, value in reversed(insertions):
         rewritten = rewritten[:position] + value + rewritten[position:]
     return rewritten
+
+
+__all__ = [
+    "has_capture_flag",
+    "normalize_http_proof_flags",
+]

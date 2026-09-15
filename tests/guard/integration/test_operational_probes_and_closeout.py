@@ -1,4 +1,4 @@
-"""Integration tests for Phase 1 feedback-driven improvements.
+"""Integration tests for operational probes, advisory hints, and closeout generation.
 
 Tests:
 1. Recency hints suppressed during burst and active batch.
@@ -96,6 +96,19 @@ def test_handle_exec_allows_pure_hints_without_yolo(monkeypatch, tmp_path):
     exec_dir.mkdir(parents=True, exist_ok=True)
     receipt = exec_dir / "2026-08-10T120000-exec.json"
     receipt.write_text('{"command": "test"}', encoding="utf-8")
+
+    # Mock execution.execute to avoid network timeout against 10.10.10.10
+    monkeypatch.setattr(
+        "plugins.violin_guard.engine.execution.execute",
+        lambda *args, **kwargs: {
+            "executed": True,
+            "exit_code": 0,
+            "stdout_preview": "HTTP/1.1 200 OK",
+            "stderr_preview": "",
+            "command": kwargs.get("command", ""),
+            "execution_id": "test-exec-1",
+        },
+    )
 
     # Command against 10.10.10.10 without curl -i will produce hints/warnings
     args = {

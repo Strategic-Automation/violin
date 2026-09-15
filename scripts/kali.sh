@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Kali container exec helper for the Violin Hermes profile.
 #
+# NOTICE: Target-touching commands during an authorized engagement must be
+# executed through Violin's registered guard tools (violin_exec, violin_exec_burst).
+# Raw interactive terminal invocations bypass target scoping, recency gating,
+# and cryptographic execution receipt logging.
+#
 # Usage:  kali <command> [args...]
 #   Runs <command> inside the kali-pentest Docker container.
 #   All args are passed through verbatim.

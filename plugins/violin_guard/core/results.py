@@ -10,6 +10,7 @@ class GuardResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     infos: list[str] = field(default_factory=list)
+    hints: list[str] = field(default_factory=list)
 
     def add_error(self, msg: str) -> None:
         self.errors.append(msg)
@@ -19,6 +20,9 @@ class GuardResult:
 
     def add_info(self, msg: str) -> None:
         self.infos.append(msg)
+
+    def add_hint(self, msg: str) -> None:
+        self.hints.append(msg)
 
     def exit_code(self) -> int:
         if self.errors:

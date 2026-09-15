@@ -257,7 +257,7 @@ def test_recon_does_not_require_hypothesis(tmp_path):
             session_id="ts",
         )
     )
-    assert any("hypothesis guard:" in warning for warning in research3.warnings)
+    assert any("hypothesis guard:" in hint for hint in research3.hints)
 
 
 def test_exploit_phase_does_not_gate_on_research(tmp_path):
@@ -450,7 +450,7 @@ def test_exploitation_hints_when_research_missing_but_does_not_block(tmp_path):
     )
     # Missing Exploit Research yields a hint, never a block.
     assert not result.errors, result.errors
-    assert any("hint:" in w.lower() and "exploit research" in w.lower() for w in result.warnings)
+    assert any("hint:" in h.lower() and "exploit research" in h.lower() for h in result.hints)
 
     (tmp_path / "hypotheses.md").write_text(
         (tmp_path / "hypotheses.md").read_text(encoding="utf-8")
@@ -460,9 +460,7 @@ def test_exploitation_hints_when_research_missing_but_does_not_block(tmp_path):
     allowed = command.check_hypothesis_freshness(
         tmp_path, command.Phase.EXPLOITATION, "python3 exploit.py 10.129.47.140 1515"
     )
-    assert not any(
-        "hint:" in w.lower() and "exploit research" in w.lower() for w in allowed.warnings
-    )
+    assert not any("hint:" in h.lower() and "exploit research" in h.lower() for h in allowed.hints)
 
 
 def test_hypothesis_enforces_scope_target_fallback(tmp_path):
@@ -609,7 +607,7 @@ def test_check_command_routes_research_hint_to_active_task_hypothesis(tmp_path):
     res = command.check_command(cmd_args)
     # Research must not block, but the hint must name the bound hypothesis.
     assert not any("missing CVE Research" in err for err in res.errors)
-    assert any("hint:" in w.lower() and "H-002" in w for w in res.warnings)
+    assert any("hint:" in h.lower() and "H-002" in h for h in res.hints)
 
 
 class _ReadySkillAdapter:
@@ -986,3 +984,10 @@ def test_message_ticks_are_diagnostic_and_do_not_trigger_heartbeat(monkeypatch, 
 
     assert not state.has_heartbeat_pending(str(eng))
     assert state.read_counts(str(eng))["messages"] == 100
+
+
+def test_on_session_reset_hook_none_session_id():
+    """Verify _on_session_reset_hook handles None session_id without throwing or raising KeyError."""
+    from plugins.violin_guard.hooks import _on_session_reset_hook
+
+    _on_session_reset_hook(session_id=None, eng_dir=None)

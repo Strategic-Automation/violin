@@ -191,7 +191,7 @@ def submit_finding(
     warnings = _proof_byte_warnings(engagement, verified_paths, saved_evidence)
 
     store = _store_path(engagement)
-    with state.workflow_lock(engagement), state.lock_file(store.with_suffix(".lock")):
+    with state.workflow_lock(engagement), state.lock_file(store):
         records = load_findings(engagement)
         signature = {
             "title": title.strip().casefold(),

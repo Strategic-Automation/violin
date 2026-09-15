@@ -145,7 +145,6 @@ def _expand_shell_vars(command: str) -> str:
     """
     if not command or "$" not in command:
         return command
-    import re
 
     tokens: list[str]
     try:
@@ -405,8 +404,6 @@ def _sub_commands(command: str) -> list[str]:
     common separators (``;``, ``&&``, ``||``, newline) recovers the segments so
     filename correlation can bind a body to the exact curl that wrote it.
     """
-    import re
-
     return [segment for segment in re.split(r";|\n|&&|\|\|", command) if segment.strip()]
 
 
