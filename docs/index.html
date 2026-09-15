@@ -18,7 +18,7 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 
 <script type="application/ld+json">
 {
@@ -36,24 +36,24 @@
 
 <style>
   :root {
-    --bg: #07070b;
-    --panel: #0e0e16;
-    --panel-elevated: #141420;
+    --bg: #101214;
+    --panel: #171a1d;
+    --panel-elevated: #202428;
     --panel-hover: #191928;
-    --border: #222234;
+    --border: #343a40;
     --border-highlight: rgba(255, 255, 255, 0.08);
     --border-glow: rgba(255, 59, 74, 0.25);
     --fg: #eeeeee;
-    --fg-muted: #9c9cb4;
-    --fg-subtle: #6d6d84;
-    --red: #ff3b4a;
+    --fg-muted: #b5bcc2;
+    --fg-subtle: #969fa8;
+    --red: #f47c71;
     --red-glow: rgba(255, 59, 74, 0.15);
-    --gold: #ffd166;
+    --gold: #e2bd79;
     --gold-glow: rgba(255, 209, 102, 0.12);
     --emerald: #10b981;
     --emerald-glow: rgba(16, 185, 129, 0.15);
     --blue: #3b82f6;
-    --font-heading: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-heading: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
@@ -73,7 +73,8 @@
   /* Accessibility skip link */
   .skip-link {
     position: absolute;
-    top: -40px;
+    top: 0;
+    transform: translateY(-110%);
     left: 20px;
     background: var(--gold);
     color: #000;
@@ -83,13 +84,14 @@
     border-radius: 4px;
     transition: top 0.2s ease;
   }
-  .skip-link:focus { top: 12px; }
+  .skip-link:focus { top: 12px; transform: translateY(0); }
 
   a { color: var(--gold); text-decoration: none; transition: color 0.15s ease; }
   a:hover { color: #ffe399; text-decoration: none; }
   :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 
   .wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+  section[id] { scroll-margin-top: 84px; }
 
   /* Header */
   header.top {
@@ -125,7 +127,7 @@
     display: flex;
     align-items: center;
     gap: 22px;
-    font-size: 14.5px;
+    font-size: 16px;
     font-weight: 500;
   }
   nav.main-nav a { color: var(--fg-muted); }
@@ -159,28 +161,6 @@
     padding: 72px 0 54px;
     position: relative;
     overflow: hidden;
-  }
-  .hero::before {
-    content: "";
-    position: absolute;
-    top: -240px;
-    left: -10%;
-    width: 1000px;
-    height: 640px;
-    background: radial-gradient(closest-side, rgba(255, 59, 74, 0.14), transparent 75%);
-    pointer-events: none;
-    z-index: 0;
-  }
-  .hero::after {
-    content: "";
-    position: absolute;
-    top: -150px;
-    right: -10%;
-    width: 800px;
-    height: 500px;
-    background: radial-gradient(closest-side, rgba(255, 209, 102, 0.08), transparent 70%);
-    pointer-events: none;
-    z-index: 0;
   }
   .hero-cols {
     position: relative;
@@ -224,7 +204,7 @@
     margin: 0 0 20px;
     text-wrap: balance;
   }
-  h1 .accent-red { color: var(--red); text-shadow: 0 0 24px rgba(255, 59, 74, 0.35); }
+  h1 .accent-red { color: var(--gold); }
   h1 .accent-gold { color: var(--gold); }
 
   .lede {
@@ -415,7 +395,7 @@
     background: rgba(0, 0, 0, 0.15);
   }
   .sim-label {
-    font-size: 11.5px;
+    font-size: 12px;
     font-family: var(--font-mono);
     color: var(--fg-subtle);
     text-transform: uppercase;
@@ -469,14 +449,14 @@
   .gate-item .gate-name::before {
     content: counter(gate-counter);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--gold);
     min-width: 16px;
   }
   .gate-badge {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     padding: 2px 7px;
     border-radius: 4px;
@@ -549,7 +529,7 @@
     gap: 8px;
   }
   .feature-card h3::before { content: "▸"; color: var(--red); font-size: 16px; }
-  .feature-card p { margin: 0; color: var(--fg-muted); font-size: 14.5px; line-height: 1.6; }
+  .feature-card p { margin: 0; color: var(--fg-muted); font-size: 16px; line-height: 1.6; }
 
   /* Yes / No comparison block */
   .cols2 {
@@ -568,7 +548,7 @@
   .no-box { border-top: 3px solid var(--red); }
   .yes-box h3 { color: var(--emerald); margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono); }
   .no-box h3 { color: var(--red); margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--font-mono); }
-  .yes-box ul, .no-box ul { margin: 0; padding-left: 18px; color: var(--fg-muted); font-size: 14.5px; }
+  .yes-box ul, .no-box ul { margin: 0; padding-left: 18px; color: var(--fg-muted); font-size: 16px; }
   .yes-box li, .no-box li { margin: 6px 0; }
 
   /* Comparison Table */
@@ -645,7 +625,7 @@
     box-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
   }
   .step-node h3 { font-family: var(--font-heading); font-size: 17px; margin: 0 0 6px; }
-  .step-node p { margin: 0; color: var(--fg-muted); font-size: 14.5px; }
+  .step-node p { margin: 0; color: var(--fg-muted); font-size: 16px; }
   pre.code-block {
     background: #050508;
     border: 1px solid var(--border);
@@ -657,7 +637,7 @@
     overflow-x: auto;
     margin: 12px 0 0;
   }
-  pre.code-block .token-comment { color: #6d6d84; }
+  pre.code-block .token-comment { color: var(--fg-subtle); }
   pre.code-block .token-fn { color: var(--red); font-weight: 600; }
   pre.code-block .token-key { color: var(--gold); }
   pre.code-block .token-val { color: #98c379; }
@@ -730,7 +710,7 @@
   }
   .playbook-category {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--gold);
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -758,7 +738,7 @@
   }
   .article-meta {
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--gold);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -826,7 +806,7 @@
     padding: 3px 8px;
     border-radius: 4px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     background: rgba(255, 255, 255, 0.05);
     color: var(--fg-muted);
   }
@@ -861,7 +841,7 @@
     font-weight: 700;
   }
   details[open] summary.faq-question::after { content: "–"; color: var(--red); }
-  details p { margin: 0; color: var(--fg-muted); font-size: 14.5px; line-height: 1.65; }
+  details p { margin: 0; color: var(--fg-muted); font-size: 16px; line-height: 1.65; }
 
   /* Notice Callouts */
   .notice-callout {
@@ -871,7 +851,7 @@
     border-radius: 10px;
     padding: 18px 20px;
     color: var(--fg-muted);
-    font-size: 14.5px;
+    font-size: 16px;
     line-height: 1.6;
     margin-top: 24px;
   }
@@ -910,26 +890,285 @@
     padding: 24px;
     flex-direction: column;
     gap: 18px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
   .mobile-drawer.open { display: flex; }
   .mobile-drawer a {
     font-size: 18px;
     font-weight: 600;
     color: var(--fg);
-    padding: 8px 0;
+    padding: 10px 0;
     border-bottom: 1px solid var(--border);
+    min-height: 44px;
   }
 
   /* Responsive Media Queries */
   @media (max-width: 980px) {
     .hero-cols { grid-template-columns: 1fr; gap: 40px; }
     .cols2 { grid-template-columns: 1fr; }
+    .hero { padding-top: 56px; }
   }
   @media (max-width: 820px) {
     nav.main-nav { display: none; }
-    .mobile-menu-btn { display: block; }
+    .mobile-menu-btn {
+      display: block;
+      min-height: 44px;
+      min-width: 88px;
+    }
     h1 { font-size: 38px; }
+    section { padding: 56px 0; }
   }
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .wrap { padding: 0 16px; }
+    section[id] { scroll-margin-top: 72px; }
+
+    header.top .wrap { height: 60px; }
+    .brand { gap: 10px; }
+    .brand img { width: 30px; height: 30px; }
+    .mobile-menu-btn { padding: 8px 10px; min-width: 82px; }
+    .mobile-drawer {
+      top: 60px;
+      padding: 16px 20px 32px;
+      gap: 8px;
+    }
+    .mobile-drawer a { font-size: 16px; padding: 12px 0; }
+
+    .hero { padding: 40px 0 36px; }
+    .hero-cols { gap: 28px; }
+    .hero::before { width: 680px; height: 460px; left: -65%; top: -220px; }
+    .hero::after { width: 520px; height: 360px; right: -55%; top: -100px; }
+    .badge-kicker {
+      align-items: flex-start;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      padding: 7px 10px;
+      margin-bottom: 16px;
+    }
+    .badge-kicker .pulse { margin-top: 4px; flex: 0 0 auto; }
+    h1 { font-size: clamp(2rem, 10vw, 2.35rem); margin-bottom: 16px; }
+    .lede { font-size: 16.5px; line-height: 1.55; margin-bottom: 22px; }
+
+    .install-card { border-radius: 12px; margin-bottom: 18px; }
+    .tab-header {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      overflow: visible;
+    }
+    .tab-btn {
+      min-height: 48px;
+      padding: 9px 10px;
+      white-space: normal;
+      text-align: left;
+      line-height: 1.35;
+      border-bottom-width: 1px;
+    }
+    .tab-btn:nth-child(odd) { border-right: 1px solid var(--border); }
+    .tab-body {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: start;
+      padding: 12px;
+      gap: 8px 10px;
+      overflow: visible;
+      font-size: 12px;
+    }
+    .tab-body code {
+      min-width: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .copy-btn {
+      grid-column: 1 / -1;
+      width: 100%;
+      min-height: 44px;
+      justify-content: center;
+      margin-top: 2px;
+    }
+
+    .cta-row { flex-direction: column; align-items: stretch; gap: 10px; }
+    .btn-primary, .btn-secondary {
+      width: 100%;
+      min-height: 46px;
+      justify-content: center;
+      text-align: center;
+      padding-inline: 16px;
+    }
+    .meta-chips { gap: 6px; font-size: 12px; }
+    .meta-pill { white-space: normal; }
+
+    .simulator-card { border-radius: 12px; }
+    .sim-header {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 8px;
+      padding: 13px 14px;
+    }
+    .sim-scenarios { padding: 12px 14px; }
+    .scenario-btns { grid-template-columns: 1fr; gap: 8px; }
+    .scenario-btn {
+      min-height: 44px;
+      padding: 9px 10px;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+    .sim-body { padding: 14px; }
+    .gate-item { gap: 12px; align-items: flex-start; }
+    .gate-item .gate-name { min-width: 0; line-height: 1.4; }
+    .gate-badge { flex: 0 0 auto; margin-top: 1px; }
+    .sim-terminal {
+      max-height: 280px;
+      padding: 11px;
+      font-size: 12px;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    section { padding: 46px 0; }
+    h2 { font-size: 28px; line-height: 1.16; }
+    .section-sub { font-size: 16px; margin-bottom: 24px; }
+    .grid-cards, .articles-grid, .playbooks-grid { grid-template-columns: 1fr; gap: 12px; }
+    .feature-card, .article-card { padding: 18px; }
+    .yes-box, .no-box { padding: 18px; }
+
+    .table-container, .tools-table-wrap {
+      margin-inline: -16px;
+      border-left: 0;
+      border-right: 0;
+      border-radius: 0;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-inline: contain;
+      scrollbar-width: thin;
+    }
+    table.comparison-table { min-width: 680px; font-size: 13px; }
+    table.tools-table { min-width: 620px; font-size: 13px; }
+    .comparison-table th, .comparison-table td,
+    .tools-table th, .tools-table td { padding: 11px 12px; }
+
+    .step-node { padding: 0 0 28px 40px; margin-left: 13px; }
+    .step-node::before { width: 30px; height: 30px; left: -16px; font-size: 12px; line-height: 26px; }
+    pre.code-block {
+      padding: 13px;
+      font-size: 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .filter-bar { gap: 7px; }
+    .search-input {
+      order: -1;
+      flex: 1 0 100%;
+      min-width: 0;
+      min-height: 44px;
+    }
+    .filter-pill { min-height: 40px; padding: 8px 12px; }
+
+    details.faq-item { padding: 0 16px; }
+    summary.faq-question { min-height: 52px; gap: 16px; line-height: 1.35; }
+    .notice-callout { padding: 16px; }
+
+    footer { padding: 36px 0 44px; }
+    footer .wrap { align-items: flex-start; flex-direction: column; }
+    footer nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 12px 16px; }
+    footer nav a { min-height: 40px; display: flex; align-items: center; }
+  }
+  @media (max-width: 380px) {
+    .tab-header { grid-template-columns: 1fr; }
+    .tab-btn:nth-child(odd) { border-right: 0; }
+    footer nav { grid-template-columns: 1fr; }
+    h1 { font-size: 2rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    .feature-card:hover, .article-card:hover, .btn-primary:hover { transform: none; }
+  }
+
+  /* Violin's technical editorial system. */
+  [hidden] { display: none !important; }
+  .wrap { max-width: 1240px; padding-inline: 32px; }
+  header.top { background: #101214f5; }
+  .hero { padding: 88px 0 72px; }
+  .hero-cols { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 64px; }
+  .hero-copy { min-width: 0; }
+  h1 { font-size: clamp(2.5rem, 4.1vw, 3.65rem); line-height: 1.12; font-weight: 600; letter-spacing: -.045em; }
+  h2 { line-height: 1.2; font-weight: 600; }
+  .badge-kicker { border: 0; border-radius: 0; background: none; padding: 0; font-size: .75rem; letter-spacing: .1em; margin-bottom: 28px; }
+  .lede { font-size: 1.125rem; line-height: 1.7; max-width: 48ch; }
+  .btn-primary, .btn-secondary, nav.main-nav a.nav-highlight { border-radius: 4px; box-shadow: none; }
+  .btn-primary { color: #101214; background: var(--gold); }
+  .btn-primary:hover { color: #101214; background: #efd3a1; box-shadow: none; transform: none; }
+  .btn-secondary { background: transparent; }
+  .cta-row { gap: 10px; }
+  .cta-row a { min-height: 44px; }
+  .meta-chips { gap: 6px 16px; font-size: .75rem; }
+  .meta-pill { padding: 0; border: 0; background: none; }
+  .install-card { border-radius: 4px; box-shadow: none; }
+  .tab-header { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .tab-btn { font-size: .875rem; padding: 10px 14px; white-space: normal; text-align: left; min-height: 44px; }
+  .tab-body { display: grid; grid-template-columns: auto minmax(0,1fr) auto; font-size: .8125rem; padding: 16px 14px; align-items: start; overflow: visible; }
+  .tab-body code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .copy-btn { min-height: 44px; padding-inline: 12px; border-radius: 4px; }
+  .simulator-card { border-radius: 4px; box-shadow: none; border-top: 2px solid var(--gold); scroll-margin-top: 88px; }
+  .sim-header { background: transparent; flex-wrap: wrap; gap: 12px; }
+  .sim-title { color: var(--fg); }
+  .sim-status { border-radius: 3px; }
+  .demo-note { margin: 0; padding: 12px 18px 0; color: var(--fg-muted); font-size: .75rem; }
+  .sim-label, .gate-badge, .sim-status, .playbook-category, .article-meta { font-size: .75rem; }
+  .scenario-btn { font-size: .875rem; min-height: 44px; white-space: normal; border-radius: 3px; }
+  .gate-item { font-size: .875rem; gap: 14px; }
+  .gate-item .gate-name { flex-wrap: wrap; gap: 4px; }
+  .sim-terminal { font-size: .8125rem; border-radius: 3px; max-height: 240px; word-break: normal; overflow-wrap: anywhere; }
+  section { padding: 80px 0; }
+  .grid-cards { gap: 0 32px; }
+  .feature-card { padding: 24px 0; background: none; border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  .feature-card:hover { background: none; transform: none; }
+  .feature-card h3::before { content: none; }
+  .feature-card h3 { font-size: 1.125rem; }
+  .feature-card p, .article-card p, .step-node p, details p, .yes-box ul, .no-box ul { font-size: 1rem; }
+  .yes-box, .no-box, .table-container, .tools-table-wrap, .faq-item, .notice-callout { border-radius: 4px; box-shadow: none; }
+  .articles-grid { grid-template-columns: 1fr; gap: 0; }
+  .article-card { display: grid; grid-template-columns: 1fr 1.2fr; column-gap: 48px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none; padding: 28px 0; }
+  .article-card:hover { transform: none; background: none; }
+  .article-meta { grid-column: 1; }
+  .article-card h3 { grid-column: 1; font-size: 1.4rem; }
+  .article-card p { grid-column: 2; grid-row: 1 / 3; }
+  .read-link { grid-column: 2; font-size: .875rem; min-height: 32px; }
+  .filter-pill { border-radius: 4px; min-height: 44px; font-size: .875rem; }
+  .search-input { font-size: 1rem; border-radius: 4px; }
+  .results-count { color: var(--fg-muted); font-size: .875rem; margin: 12px 0 20px; }
+  .playbook-card { border-radius: 3px; min-width: 0; }
+  .playbook-name { font-size: .875rem; overflow-wrap: anywhere; }
+  .mobile-drawer { position: static; background: var(--panel); padding: 20px 32px; max-height: none; }
+  @media (min-width: 821px) { .mobile-drawer.open { display: none; } }
+  @media (max-width: 980px) {
+    .hero-cols { grid-template-columns: 1fr; gap: 40px; }
+    .hero-copy { max-width: 680px; }
+    .hero { padding-top: 56px; }
+    h1 { font-size: 3.4rem; }
+  }
+  @media (max-width: 640px) {
+    .wrap { padding-inline: 20px; }
+    .hero { padding: 40px 0 48px; }
+    h1 { font-size: clamp(2.15rem, 9vw, 3rem); }
+    .badge-kicker { margin-bottom: 22px; }
+    .lede { font-size: 1rem; }
+    section { padding: 48px 0; }
+    .tab-body { grid-template-columns: auto minmax(0,1fr); font-size: .8125rem; }
+    .tab-body .copy-btn { grid-column: 1 / -1; }
+    .grid-cards, .playbooks-grid { grid-template-columns: 1fr; }
+    .article-card { grid-template-columns: 1fr; gap: 0; }
+    .article-card p, .read-link { grid-column: 1; grid-row: auto; }
+    .feature-card { padding: 22px 0; }
+    .table-container, .tools-table-wrap { margin-inline: 0; border: 1px solid var(--border); border-radius: 4px; }
+    .sim-header { flex-direction: column; }
+    .scenario-btns { grid-template-columns: 1fr; }
+    .meta-chips { font-size: .75rem; }
+  }
+
 </style>
 </head>
 <body>
@@ -942,36 +1181,32 @@
       <img src="assets/logo.png" alt="Violin logo"/>
       <b>Violin</b>
     </a>
-    <nav class="main-nav" aria-label="Main Navigation">
-      <a href="#for">Practitioners</a>
-      <a href="#how">Guards &amp; Proof</a>
-      <a href="#compare">Compare</a>
-      <a href="#engagement">Engagement</a>
-      <a href="#playbooks">Coverage (35)</a>
-      <a href="#tools">Tools (12)</a>
-      <a href="#articles">Whitepapers</a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="#how">The guard</a>
+      <a href="#playbooks">Playbooks</a>
+      <a href="#articles">Engineering</a>
       <a href="#limits">Limits</a>
-      <a href="#start" class="nav-highlight">Quick Start</a>
+      <a href="#start" class="nav-highlight">Get started</a>
       <a href="https://github.com/Strategic-Automation/violin" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
-    <button class="mobile-menu-btn" id="mobile-toggle" aria-expanded="false" aria-label="Toggle Menu">☰ Menu</button>
+    <button class="mobile-menu-btn" id="mobile-toggle" aria-expanded="false" aria-label="Toggle navigation" aria-controls="mobile-drawer">☰ Menu</button>
   </div>
 </header>
 
-<div class="mobile-drawer" id="mobile-drawer">
+<nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile navigation">
   <a href="#for" class="drawer-link">Practitioners</a>
   <a href="#how" class="drawer-link">Guards &amp; Proof</a>
   <a href="#compare" class="drawer-link">Compare</a>
   <a href="#engagement" class="drawer-link">Engagement Flow</a>
   <a href="#playbooks" class="drawer-link">Coverage (35 Playbooks)</a>
   <a href="#tools" class="drawer-link">Registered Tools (12)</a>
-  <a href="#articles" class="drawer-link">Engineering Whitepapers</a>
+  <a href="#articles" class="drawer-link">Engineering notes</a>
   <a href="#limits" class="drawer-link">Honest Limits</a>
   <a href="#start" class="drawer-link">Quick Start</a>
   <a href="https://github.com/Strategic-Automation/violin" target="_blank" rel="noopener">GitHub Repo ↗</a>
-</div>
+</nav>
 
-<main id="main-content">
+<main id="main-content" tabindex="-1">
 
 <!-- Hero Section -->
 <div class="hero">
@@ -979,34 +1214,33 @@
     <div class="hero-cols">
       <div class="hero-copy">
         <div class="badge-kicker">
-          <span class="pulse"></span>
-          Open Source · MIT · Kali / Parrot · Hermes Agent Profile
+          Violin / Supervised security testing
         </div>
-        <h1>Supervised agentic pentesting that produces <span class="accent-red">proof</span>, not prose.</h1>
+        <h1>Agentic pentesting.<br/><span class="accent-red">Every command accountable.</span></h1>
         <p class="lede">
-          Violin runs authorization-scoped penetration tests where every target-touching command passes a required execution guard, gets a signed receipt, and feeds evidence-backed findings. You keep the engagement state, the coverage disposition, and the final call.
+          A pentest profile for Hermes Agent. Scope checks before execution. Signed receipts after it. Evidence you can inspect, with the final judgment in your hands.
         </p>
 
         <!-- Interactive Install Switcher -->
         <div class="install-card">
-          <div class="tab-header" role="tablist">
-            <button class="tab-btn active" role="tab" aria-selected="true" data-cmd="hermes profile install https://github.com/Strategic-Automation/violin">Hermes Profile</button>
-            <button class="tab-btn" role="tab" aria-selected="false" data-cmd="git clone https://github.com/Strategic-Automation/violin && cd violin && uv sync">Local Python / uv</button>
-            <button class="tab-btn" role="tab" aria-selected="false" data-cmd="docker run -it --rm ghcr.io/strategic-automation/violin:latest">Docker Run</button>
-            <button class="tab-btn" role="tab" aria-selected="false" data-cmd="uv run python scripts/violin_guard.py check-release">Verification Check</button>
+          <div class="tab-header" role="tablist" aria-label="Installation method">
+            <button class="tab-btn active" role="tab" id="install-tab-1" aria-controls="install-panel" tabindex="0" aria-selected="true" data-cmd="hermes profile install https://github.com/Strategic-Automation/violin">Hermes Profile</button>
+            <button class="tab-btn" role="tab" id="install-tab-2" aria-controls="install-panel" tabindex="-1" aria-selected="false" data-cmd="git clone https://github.com/Strategic-Automation/violin && cd violin && uv sync">Local Python / uv</button>
+            <button class="tab-btn" role="tab" id="install-tab-3" aria-controls="install-panel" tabindex="-1" aria-selected="false" data-cmd="git clone https://github.com/Strategic-Automation/violin && cd violin && docker build -t violin . && docker run -it --rm violin hermes -p violin">Docker build</button>
+            <button class="tab-btn" role="tab" id="install-tab-4" aria-controls="install-panel" tabindex="-1" aria-selected="false" data-cmd="uv run python scripts/violin_guard.py check-release">Verification Check</button>
           </div>
-          <div class="tab-body">
+          <div class="tab-body" id="install-panel" role="tabpanel" aria-labelledby="install-tab-1" tabindex="0">
             <span class="prompt">$</span>
             <code id="install-code">hermes profile install https://github.com/Strategic-Automation/violin</code>
             <button class="copy-btn" id="copy-install-btn" aria-label="Copy Command">
-              <span id="copy-text">Copy</span>
+              <span id="copy-text" role="status">Copy</span>
             </button>
           </div>
         </div>
 
         <div class="cta-row">
-          <a class="btn-primary" href="https://github.com/Strategic-Automation/violin" target="_blank" rel="noopener">★ Star on GitHub</a>
-          <a class="btn-secondary" href="#how">Interactive Guard Demo ↓</a>
+          <a class="btn-primary" href="https://github.com/Strategic-Automation/violin" target="_blank" rel="noopener">Explore the source ↗</a>
+          <a class="btn-secondary" href="#how">Try the guard demo</a>
           <a class="btn-secondary" href="https://github.com/Strategic-Automation/violin/blob/master/docs/BENCHMARKS.md" target="_blank" rel="noopener">Benchmark Methodology</a>
         </div>
 
@@ -1021,12 +1255,13 @@
       </div>
 
       <!-- Live Execution Guard Simulator -->
-      <aside class="simulator-card" aria-label="Interactive Execution Guard Simulator">
+      <aside class="simulator-card" id="how" aria-label="Interactive execution guard simulation">
         <div class="sim-header">
-          <div class="sim-title"><span>🛡️</span> Execution Boundary</div>
-          <div class="sim-status pass" id="sim-overall-status">PASSED · SIGNED</div>
+          <div class="sim-title">Execution boundary</div>
+          <div class="sim-status pass" id="sim-overall-status" role="status">PASSED · SIGNED</div>
         </div>
 
+        <p class="demo-note">Illustrative simulation · no commands are executed.</p>
         <div class="sim-scenarios">
           <div class="sim-label">Select Test Scenario:</div>
           <div class="scenario-btns">
@@ -1069,7 +1304,7 @@
             </li>
           </ol>
 
-          <div class="sim-terminal" id="sim-output">// Terminal Output:
+          <div class="sim-terminal" id="sim-output" tabindex="0" aria-label="Illustrative command output">// Terminal Output:
 violin_exec(
   phase   = "RECON",
   target  = "app.example.com",
@@ -1094,7 +1329,7 @@ violin_exec(
   <div class="wrap">
     <h2>Built for the way engagements actually run</h2>
     <p class="section-sub">
-      Not a toy agent that pops one flag in an artificial CTF box. A disciplined harness for scoped, multi-day client work where every finding must survive client and audit scrutiny.
+      For scoped assessments that run across sessions: keep target authorization, working hypotheses, and the evidence behind each finding together.
     </p>
 
     <div class="grid-cards">
@@ -1130,7 +1365,7 @@ violin_exec(
         <ul>
           <li>Scoped web, API, identity, business-logic, and LLM-security testing</li>
           <li>Consultants who need per-finding evidence and a defensible coverage story</li>
-          <li>Teams that want agent leverage without losing the chain of custody</li>
+          <li>Teams that need to inspect how an agent reached each finding</li>
           <li>Authorized lab, CTF-style, and internal assessment work</li>
         </ul>
       </div>
@@ -1152,10 +1387,10 @@ violin_exec(
   <div class="wrap">
     <h2>How the approaches differ</h2>
     <p class="section-sub">
-      Agentic security tools differ less in what they can find and more in what they can <em>answer</em> afterwards. This compares design centres, not named products.
+      A comparison of architectural patterns, not a product ranking. Implementations vary; verify these capabilities in any tool you evaluate.
     </p>
 
-    <div class="table-container">
+    <div class="table-container" tabindex="0" role="region" aria-label="Architecture comparison, scroll horizontally">
       <table class="comparison-table">
         <thead>
           <tr>
@@ -1168,25 +1403,25 @@ violin_exec(
         <tbody>
           <tr>
             <td><b>Scope Enforcement</b></td>
-            <td>Configured per run; the run is the boundary</td>
+            <td>Implementation-dependent scope controls</td>
             <td>Whatever the prompt instructed</td>
             <td class="col-violin">Every command validated against an approved scope file, fail-closed</td>
           </tr>
           <tr>
             <td><b>Evidence Model</b></td>
-            <td>Internal proprietary report output</td>
+            <td>Implementation-dependent report and evidence output</td>
             <td>Markdown prose generated by the model</td>
             <td class="col-violin">Signed execution receipts; findings must cite receipts that prove them</td>
           </tr>
           <tr>
             <td><b>Coverage Accounting</b></td>
             <td>Whatever built-in checks were executed</td>
-            <td>Usually unrecorded or forgotten</td>
+            <td>Requires explicit coverage tracking</td>
             <td class="col-violin">Coverage matrix with disposition gates closed out at reporting</td>
           </tr>
           <tr>
             <td><b>Specialist Methodology</b></td>
-            <td>Fixed proprietary check set</td>
+            <td>Product-specific checks and integrations</td>
             <td>Generic reasoning per prompt</td>
             <td class="col-violin">35 routed playbooks across 7 skills, chosen per active PTT task</td>
           </tr>
@@ -1204,9 +1439,9 @@ violin_exec(
           </tr>
           <tr>
             <td><b>Deployment Model</b></td>
-            <td>Hosted SaaS service</td>
+            <td>Hosted or local, depending on implementation</td>
             <td>Local machine</td>
-            <td class="col-violin">Local environment, your model config, zero hosted dependencies</td>
+            <td class="col-violin">Local environment, your model config, inherits your configured model backend</td>
           </tr>
         </tbody>
       </table>
@@ -1224,15 +1459,15 @@ violin_exec(
 
     <ol class="steps-list">
       <li class="step-node">
-        <h3>1. Scope First</h3>
+        <h3>Scope First</h3>
         <p>Bootstrap the engagement and approve <code>scope/scope.yaml</code>. Nothing touches a target before this exists, and the coverage matrix is generated from its obligations.</p>
       </li>
       <li class="step-node">
-        <h3>2. Activate Exactly One Task</h3>
+        <h3>Activate Exactly One Task</h3>
         <p>Create and start a PTT task under the current phase, naming the routed specialist skill and concrete technique. Work cannot jump ahead without a registered task.</p>
       </li>
       <li class="step-node">
-        <h3>3. Run Guarded Commands</h3>
+        <h3>Run Guarded Commands</h3>
         <p>Recon through the exact same boundary as exploitation. A typical command invocation through the registered tool:</p>
         <pre class="code-block"><span class="token-comment">// Single guarded command invocation, AST-resolved against scope</span>
 <span class="token-fn">violin_exec</span>(
@@ -1245,19 +1480,19 @@ violin_exec(
 <span class="token-comment">// Gates validated → status: ok, signed execution receipt written to disk</span></pre>
       </li>
       <li class="step-node">
-        <h3>4. Keep Hypotheses Honest</h3>
+        <h3>Keep Hypotheses Honest</h3>
         <p>Hypotheses carry status, confidence, a cheapest test, and kill criteria. Evidence updates status; a hypothesis that survives without proof never becomes a finding.</p>
       </li>
       <li class="step-node">
-        <h3>5. Review the Batch</h3>
+        <h3>Review the Batch</h3>
         <p>Bounded command bursts are reviewed and settled so engagement state reflects what actually ran, including partial stdout and failures.</p>
       </li>
       <li class="step-node">
-        <h3>6. Submit Findings that Cite Receipts</h3>
+        <h3>Submit Findings that Cite Receipts</h3>
         <p>Severity, summary, and decisive evidence. <code>violin_submit_finding</code> enforces that every vulnerability is bound to the signed receipts authenticating the request and response.</p>
       </li>
       <li class="step-node">
-        <h3>7. Close Out Coverage, then Report</h3>
+        <h3>Close Out Coverage, then Report</h3>
         <p>In-scope routes and required testing categories receive an explicit disposition: tested, negative evidence, or justified exclusion. Then the closeout report.</p>
       </li>
     </ol>
@@ -1284,6 +1519,7 @@ violin_exec(
       <input type="text" class="search-input" id="playbook-search" placeholder="Search playbooks (e.g. sqli, jwt, ssrf, llm)..." aria-label="Search playbooks"/>
     </div>
 
+    <p id="playbook-results" class="results-count" role="status"></p>
     <div class="playbooks-grid" id="playbooks-container">
       <!-- Injection -->
       <div class="playbook-card" data-cat="injection"><span class="playbook-category">Injection</span><span class="playbook-name">sqli</span></div>
@@ -1336,10 +1572,10 @@ violin_exec(
   <div class="wrap">
     <h2>Twelve Registered Tools</h2>
     <p class="section-sub">
-      One typed Hermes registry. No tool-specific execution adapters, no target allowlists. The <code>violin_exec</code> boundary is identical for every non-interactive binary.
+      One typed Hermes registry. No tool-specific execution adapters or binary allowlists. Every target command passes through the <code>violin_exec</code> boundary.
     </p>
 
-    <div class="tools-table-wrap">
+    <div class="tools-table-wrap" tabindex="0" role="region" aria-label="Registered tools, scroll horizontally">
       <table class="tools-table">
         <thead>
           <tr>
@@ -1415,10 +1651,10 @@ violin_exec(
   </div>
 </section>
 
-<!-- Featured Engineering Whitepapers -->
+<!-- Featured Engineering notes -->
 <section id="articles">
   <div class="wrap">
-    <h2>Engineering Whitepapers</h2>
+    <h2>Engineering notes</h2>
     <p class="section-sub">
       Deep-dive architectural essays exploring why prompt guardrails fail, how evidence is disciplined, and how to rigorously evaluate agentic security systems.
     </p>
@@ -1428,21 +1664,21 @@ violin_exec(
         <div class="article-meta">Architecture · Tool Layer Enforcement</div>
         <h3>Guardrails for Agentic Pentesting</h3>
         <p>Why prompt-level guardrails consistently fail at the tool boundary, the required-guard architecture, AST-based command parsing, and how findings bind to signed receipts.</p>
-        <a class="read-link" href="https://github.com/Strategic-Automation/violin/blob/master/docs/articles/guardrails-for-agentic-pentesting.md" target="_blank" rel="noopener">Read Full Whitepaper ↗</a>
+        <a class="read-link" href="https://github.com/Strategic-Automation/violin/blob/master/docs/articles/guardrails-for-agentic-pentesting.md" target="_blank" rel="noopener">Read the article ↗</a>
       </div>
 
       <div class="article-card">
         <div class="article-meta">Methodology · Verification</div>
         <h3>Coverage Discipline for Agent-Assisted Pentests</h3>
         <p>How to turn an ad-hoc LLM testing session into a systematic assessment with auditable coverage dispositions, negative evidence tracking, and closeout gates.</p>
-        <a class="read-link" href="https://github.com/Strategic-Automation/violin/blob/master/docs/articles/coverage-discipline-for-agent-assisted-pentests.md" target="_blank" rel="noopener">Read Full Whitepaper ↗</a>
+        <a class="read-link" href="https://github.com/Strategic-Automation/violin/blob/master/docs/articles/coverage-discipline-for-agent-assisted-pentests.md" target="_blank" rel="noopener">Read the article ↗</a>
       </div>
 
       <div class="article-card">
         <div class="article-meta">Evaluation · Benchmarking</div>
         <h3>How to Evaluate an Agentic Pentest Tool</h3>
         <p>A practitioner checklist for cutting through agentic marketing hype: non-determinism distributions, proof rules, and why report prose must receive zero credit without receipts.</p>
-        <a class="read-link" href="https://github.com/Strategic-Automation/violin/blob/master/docs/articles/how-to-evaluate-an-agentic-pentest-tool.md" target="_blank" rel="noopener">Read Full Whitepaper ↗</a>
+        <a class="read-link" href="https://github.com/Strategic-Automation/violin/blob/master/docs/articles/how-to-evaluate-an-agentic-pentest-tool.md" target="_blank" rel="noopener">Read the article ↗</a>
       </div>
     </div>
   </div>
@@ -1453,7 +1689,7 @@ violin_exec(
   <div class="wrap">
     <h2>Honest Limits</h2>
     <p class="section-sub">
-      Most tool pages skip this. The project's own documentation does not, so neither does this page.
+      Understand what the guard verifies, what benchmarks measure, and where your judgment remains essential.
     </p>
 
     <div class="grid-cards">
@@ -1480,8 +1716,8 @@ violin_exec(
 <!-- FAQ -->
 <section id="faq">
   <div class="wrap">
-    <h2>Questions Testers Actually Ask</h2>
-    <p class="section-sub">Direct answers to the most common architectural and operational inquiries.</p>
+    <h2>Before your first engagement</h2>
+    <p class="section-sub">Installation, scope, tooling, and finding verification.</p>
 
     <details class="faq-item">
       <summary class="faq-question">Does this replace Burp, nmap, or nuclei?</summary>
@@ -1557,56 +1793,82 @@ Run an authorized penetration test against example.com.</pre>
 </footer>
 
 <script>
-  // Mobile Drawer Toggle
+  // Navigation is a disclosure: opening it moves content down, never obscures it.
   const mobileToggle = document.getElementById('mobile-toggle');
   const mobileDrawer = document.getElementById('mobile-drawer');
-  if (mobileToggle && mobileDrawer) {
-    mobileToggle.addEventListener('click', () => {
-      const isOpen = mobileDrawer.classList.toggle('open');
-      mobileToggle.setAttribute('aria-expanded', isOpen);
-      mobileToggle.textContent = isOpen ? '✕ Close' : '☰ Menu';
-    });
-    document.querySelectorAll('.drawer-link').forEach(link => {
-      link.addEventListener('click', () => {
-        mobileDrawer.classList.remove('open');
-        mobileToggle.setAttribute('aria-expanded', 'false');
-        mobileToggle.textContent = '☰ Menu';
-      });
-    });
+  function closeNavigation() {
+    mobileDrawer.classList.remove('open');
+    mobileToggle.setAttribute('aria-expanded', 'false');
+    mobileToggle.textContent = '☰ Menu';
   }
+  mobileToggle.addEventListener('click', () => {
+    const open = mobileDrawer.classList.toggle('open');
+    mobileToggle.setAttribute('aria-expanded', String(open));
+    mobileToggle.textContent = open ? '✕ Close' : '☰ Menu';
+  });
+  mobileDrawer.querySelectorAll('a').forEach(link => link.addEventListener('click', closeNavigation));
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && mobileDrawer.classList.contains('open')) {
+      closeNavigation();
+      mobileToggle.focus();
+    }
+  });
+  matchMedia('(min-width: 821px)').addEventListener('change', closeNavigation);
 
-  // Install Tabs & 1-Click Copy
-  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabBtns = [...document.querySelectorAll('.tab-btn')];
   const installCode = document.getElementById('install-code');
+  const installPanel = document.getElementById('install-panel');
   const copyBtn = document.getElementById('copy-install-btn');
   const copyText = document.getElementById('copy-text');
-
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      tabBtns.forEach(b => {
-        b.classList.remove('active');
-        b.setAttribute('aria-selected', 'false');
-      });
-      btn.classList.add('active');
-      btn.setAttribute('aria-selected', 'true');
-      const cmd = btn.getAttribute('data-cmd');
-      if (installCode) installCode.textContent = cmd;
+  let copyTimer;
+  function selectInstallTab(selected) {
+    clearTimeout(copyTimer);
+    copyText.textContent = 'Copy';
+    copyBtn.classList.remove('copied');
+    tabBtns.forEach(button => {
+      const active = button === selected;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    installCode.textContent = selected.dataset.cmd;
+    installPanel.setAttribute('aria-labelledby', selected.id);
+  }
+  tabBtns.forEach((button, index) => {
+    button.addEventListener('click', () => selectInstallTab(button));
+    button.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight') next = (index + 1) % tabBtns.length;
+      else if (event.key === 'ArrowLeft') next = (index - 1 + tabBtns.length) % tabBtns.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabBtns.length - 1;
+      else return;
+      event.preventDefault();
+      selectInstallTab(tabBtns[next]);
+      tabBtns[next].focus();
     });
   });
-
-  if (copyBtn && installCode) {
-    copyBtn.addEventListener('click', () => {
-      const textToCopy = installCode.textContent.trim();
-      navigator.clipboard.writeText(textToCopy).then(() => {
-        copyBtn.classList.add('copied');
-        copyText.textContent = '✓ Copied!';
-        setTimeout(() => {
-          copyBtn.classList.remove('copied');
-          copyText.textContent = 'Copy';
-        }, 2000);
-      });
-    });
-  }
+  copyBtn.addEventListener('click', async () => {
+    const selectedCommand = installCode.textContent.trim();
+    clearTimeout(copyTimer);
+    try {
+      await navigator.clipboard.writeText(selectedCommand);
+      if (installCode.textContent.trim() !== selectedCommand) return;
+      copyBtn.classList.add('copied');
+      copyText.textContent = 'Copied';
+    } catch {
+      copyText.textContent = 'Select command to copy';
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(installCode);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    copyTimer = setTimeout(() => {
+      copyBtn.classList.remove('copied');
+      copyText.textContent = 'Copy';
+    }, 3000);
+  });
 
   // Live Execution Guard Simulator Logic
   const scenarioBtns = document.querySelectorAll('.scenario-btn');
@@ -1657,7 +1919,7 @@ violin_exec(
 → SCOPE GATE: target resolution failed
 → Target 'internal.corp' not in scope.yaml targets: ['app.example.com']
 → Execution BLOCKED at boundary (fail-closed)
-→ Hint: Update scope.yaml or execute against authorized target.`
+→ Return to an authorized target. Scope changes require renewed written approval.`
     },
     destructive_deny: {
       statusClass: 'fail',
@@ -1671,7 +1933,7 @@ violin_exec(
 )
 → COMMAND GATE: destructive pattern matched
 → Destructive filesystem payload pattern matched: 'rm -rf'
-→ Hard block enforced. No operator bypass allowed.`
+→ Execution blocked in this illustrative scenario.`
     },
     phase_deny: {
       statusClass: 'fail',
@@ -1690,9 +1952,11 @@ violin_exec(
   };
 
   scenarioBtns.forEach(btn => {
+    btn.setAttribute('aria-pressed', String(btn.classList.contains('active')));
     btn.addEventListener('click', () => {
-      scenarioBtns.forEach(b => b.classList.remove('active'));
+      scenarioBtns.forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
       btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
       const scKey = btn.getAttribute('data-scenario');
       const sc = scenarios[scKey];
       if (!sc) return;
@@ -1725,6 +1989,7 @@ violin_exec(
     const filterCat = activePill ? activePill.getAttribute('data-filter') : 'all';
     const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
 
+    let count = 0;
     playbookCards.forEach(card => {
       const cat = card.getAttribute('data-cat');
       const name = card.querySelector('.playbook-name').textContent.toLowerCase();
@@ -1732,17 +1997,23 @@ violin_exec(
       const matchesQuery = (!query || name.includes(query) || cat.includes(query));
 
       if (matchesCat && matchesQuery) {
-        card.style.display = 'flex';
+        card.hidden = false;
+        count++;
       } else {
-        card.style.display = 'none';
+        card.hidden = true;
       }
     });
+    document.getElementById('playbook-results').textContent = count
+      ? `${count} of ${playbookCards.length} playbooks`
+      : 'No matching playbooks. Try another search or select All.';
   }
 
   filterPills.forEach(pill => {
+    pill.setAttribute('aria-pressed', String(pill.classList.contains('active')));
     pill.addEventListener('click', () => {
-      filterPills.forEach(p => p.classList.remove('active'));
+      filterPills.forEach(p => { p.classList.remove('active'); p.setAttribute('aria-pressed', 'false'); });
       pill.classList.add('active');
+      pill.setAttribute('aria-pressed', 'true');
       updatePlaybooks();
     });
   });
@@ -1751,7 +2022,7 @@ violin_exec(
     searchInput.addEventListener('input', updatePlaybooks);
   }
 
-  // Cards ship hidden in CSS so the grid can be filtered; render the initial state.
+  // Keep cards readable without JavaScript; initialize the enhanced result count.
   updatePlaybooks();
 </script>
 
