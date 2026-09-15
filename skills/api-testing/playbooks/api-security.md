@@ -110,8 +110,8 @@ curl -s -X POST -H "Content-Type: application/json" \
 
 A missing rate limit is proven by **absence**, not by a single response. To
 demonstrate it, fire a burst of identical requests and capture every status
-line; the decisive evidence is that full run — a dozen identical status codes
-with **no counter-signal** (`429`, `throttle`, `rate-limit`, `lockout`)
+line; the decisive evidence is that full run — a burst of identical status
+codes with **no counter-signal** (`429`, `throttle`, `rate-limit`, `lockout`)
 anywhere. It lives in the command output, not the finding prose.
 
 **A prose note is not evidence.** Writing a file that says "rate limiting not
@@ -126,16 +126,19 @@ write a placeholder and move on.
   every status line, e.g.:
 
 ```bash
-for i in $(seq 1 10); do
-  curl -sS -o /dev/null -w "%{http_code}\n" \
+for attempt in $(seq 1 10); do
+  curl -sS -o /dev/null -w "rapid attempt ${attempt} -> %{http_code}\n" \
     -X POST "$TARGET/api/v1/auth/login" \
     -H 'Content-Type: application/json' \
     -d '{"email":"nonexistent@x.com","password":"wrong"}'
 done | tee $ENG_DIR/evidence/vuln-research/no_rate_limit_login.txt
 ```
 
-- Do NOT truncate to a single status and do NOT suppress the per-request
-  codes: the bundle must show the full run (e.g. ten `401` lines).
+- Preserve every per-request status line in order — do not aggregate the burst
+  down to a single count. A count alone hides the response *pattern* over the
+  sequence (e.g. whether throttling kicked in mid-burst), which is what a
+  reviewer needs to see that no rate-limit signal (`429`, throttle, lockout)
+  appeared across repeated attempts.
 - If every request returns the same code and **no** `429`/`throttle` appears,
   the rate limit is absent — record the file as the decisive evidence and
   note "10 identical 401s, zero 429" in the finding.

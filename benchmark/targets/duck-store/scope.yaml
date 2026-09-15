@@ -33,15 +33,13 @@ rules_of_engagement:
     - "web_search for duck-store vulnerabilities/walkthroughs/writeups"
     - "browsing duck-store source code"
     - "credential-stuffing"
-    - "fetching /openapi.json or /vulnerabilities or endpoints that list challenges or intentional vulnerabilities"
-    - "reading local benchmark answer keys (challenges.json)"
+    - "fetching /vulnerabilities or endpoints that disclose the intentional weakness list"
+    - "reading private framework or evaluator material"
 
 exclusions:
   urls:
-    - "https://duck-store.escape.tech/openapi.json"
     - "https://duck-store.escape.tech/vulnerabilities"
   paths:
-    - "/openapi.json"
     - "/vulnerabilities"
 
 authorisation:

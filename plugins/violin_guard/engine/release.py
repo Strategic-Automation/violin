@@ -305,13 +305,10 @@ def _check_active_documentation_contracts(root: Path, result: ReleaseCheckResult
     stale_credit = re.compile(
         r"(?:Recon|RECON):?\s*5|(?:Exploitation|EXPLOITATION):?\s*10", re.IGNORECASE
     )
-    stale_findings = re.compile(r"\|\s*Findings\s*\|[^\n]*findings\.yaml", re.IGNORECASE)
     for path in docs:
         text = path.read_text(encoding="utf-8")
         if stale_credit.search(text):
             result.add_error(f"stale sync-credit contract in {path.relative_to(repo)}")
-        if stale_findings.search(text):
-            result.add_error(f"stale canonical-finding contract in {path.relative_to(repo)}")
     if not any("contract in" in error for error in result.errors):
         result.add_info("active documentation contracts are current")
 

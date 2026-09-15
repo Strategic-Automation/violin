@@ -57,8 +57,17 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
     result = _check_command_internal(args)
     exit_code = result.exit_code()
     status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
+    is_pure_hint = bool(
+        result.warnings
+        and all(
+            "hint" in w.lower()
+            or "execution still allowed" in w.lower()
+            or "execution may proceed" in w.lower()
+            for w in result.warnings
+        )
+    )
     if status_name not in ("ok",) and not (
-        status_name == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
+        status_name == "review" and (os.environ.get("HERMES_YOLO_MODE") == "1" or is_pure_hint)
     ):
         sync_status = (
             "sync_required"
@@ -81,6 +90,7 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             timeout_seconds=args.get("timeout_seconds", 180),
             cwd=args.get("cwd", ""),
             label=args.get("label", ""),
+            evidence_outputs=args.get("evidence_outputs", []),
             ptt_task_id=active_task.id if active_task else "",
             argv=_internal_argv,
             background=(
@@ -99,8 +109,7 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             )
         hint = (
             "record this result on the hypothesis board now (violin_record_hypothesis: "
-            "status, Test Response, Runtime Evidence path) and link a canonical "
-            "FIND-NNN.md before the next command"
+            "status, Test Response, Runtime Evidence path) before the next command"
             if active_task
             else ""
         )
@@ -156,6 +165,7 @@ def handle_exec_burst(args: dict, **kwargs):
             "scope": scope,
             "session_id": session_id,
             "target": args.get("target"),
+            "is_burst": True,
         }
         cmd_result = _check_command_internal(cmd_args)
         exit_code = cmd_result.exit_code()

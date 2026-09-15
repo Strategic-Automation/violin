@@ -93,6 +93,7 @@ def _check_command_internal(args: dict[str, Any]) -> cmd_module.CheckResult:
             target=args.get("target"),
             session_id=args.get("session_id"),
             hypothesis_id=args.get("hypothesis_id"),
+            is_burst=bool(args.get("is_burst", False)),
         )
     )
     try:

@@ -165,10 +165,28 @@ def test_target_host_ip(eng):
     assert r.stdout.strip() == "10.10.10.10"
 
 
-def test_target_rejects_unknown_host(eng):
+def test_target_rejects_unauthorized_ip(eng):
     r = _run("target", "--eng-dir", str(eng), "--host", "10.99.99.99")
     assert r.returncode == 1
     assert "not present in scope.yaml" in r.stdout
+    assert "targets.hostnames" not in r.stdout
+
+
+def test_target_rejects_unknown_hostname_with_actionable_diagnostic(eng):
+    r = _run("target", "--eng-dir", str(eng), "--host", "outside.example")
+
+    assert r.returncode == 1
+    canonical_scope = (eng / "scope" / "scope.yaml").resolve()
+    assert "outside.example" in r.stdout
+    assert str(canonical_scope) in r.stdout
+    assert "targets.hostnames" in r.stdout
+    assert "targets.in_scope_urls" in r.stdout
+    assert (
+        f'uv run python scripts/violin_guard.py validate-scope --scope "{canonical_scope}"'
+        in r.stdout
+    )
+    assert "confirm authorization before editing scope.yaml" in r.stdout.lower()
+    assert "never edits scope.yaml automatically" in r.stdout
 
 
 def test_target_requires_eng_dir():
@@ -484,6 +502,7 @@ def test_plugin_exposes_new_tools():
     assert "violin_exec_burst" in tool_names
     assert "violin_target" in tool_names
     assert "violin_review_batch" in tool_names
+    assert "violin_submit_finding" in tool_names
     assert (
         not {
             "violin_sync_done",
@@ -530,9 +549,9 @@ def test_removed_cli_commands_are_absent(removed):
     assert "invalid choice" in result.stderr
 
 
-def test_review_batch_cli_exposes_lifecycle_and_optional_finding_fields():
+def test_review_batch_cli_exposes_only_batch_lifecycle_fields():
     result = _run("review-batch", "--help")
     assert result.returncode == 0
     assert "--status" in result.stdout
     assert "--note" in result.stdout
-    assert "--finding-title" in result.stdout
+    assert "--finding-title" not in result.stdout

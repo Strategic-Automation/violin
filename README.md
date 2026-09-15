@@ -7,13 +7,15 @@
 <p align="center">
   <a href="https://github.com/Strategic-Automation/violin"><img src="https://img.shields.io/badge/Status-Release%20Ready-2ea44f?style=for-the-badge" alt="Release Ready"></a>
   <a href="https://github.com/Strategic-Automation/violin/blob/master/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.18.0-FFD700?style=for-the-badge" alt="Hermes >= 0.18.0"></a>
+  <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.18.0-FFD700?style=for-the-badge" alt="Hermes >=0.18.0"></a>
   <a href="https://www.kali.org/"><img src="https://img.shields.io/badge/Kali%20Linux-557C94?style=for-the-badge&logo=kali-linux&logoColor=white" alt="Kali Linux"></a>
   <a href="https://www.parrotsec.org/"><img src="https://img.shields.io/badge/Parrot%20OS-2E8B57?style=for-the-badge" alt="Parrot OS"></a>
+  <a href="https://strategic-automation.github.io/violin/"><img src="https://img.shields.io/badge/Site-Landing%20page-FF3B4A?style=for-the-badge" alt="Landing page"></a>
+  <a href="https://github.com/Strategic-Automation/violin/stargazers"><img src="https://img.shields.io/github/stars/Strategic-Automation/violin?style=for-the-badge&color=FFD166" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
-  <b>35 playbooks · 17 references · 13 templates · required execution guard · Hermes-native</b>
+  <b>35 playbooks · 19 references · 14 templates · required execution guard · Hermes-native</b>
 </p>
 
 Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, seven routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
@@ -23,6 +25,8 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
   <a href="#engagement-lifecycle">Workflow</a> ·
   <a href="#guard-tools">Guard tools</a> ·
   <a href="#benchmarks">Benchmarks</a> ·
+  <a href="https://strategic-automation.github.io/violin/">Landing page</a> ·
+  <a href="https://github.com/Strategic-Automation/violin/discussions">Discussions</a> ·
   <a href="#development">Development</a>
 </p>
 
@@ -31,7 +35,7 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
 <table>
 <tr><td width="240"><strong>Guarded target execution</strong></td><td>Scope, phase, PTT, skill, hypothesis, history, and synchronization checks run before a target command starts.</td></tr>
 <tr><td><strong>Persistent engagement state</strong></td><td>PTT tasks, hypotheses, command history, checkpoints, evidence, and reports survive context compression.</td></tr>
-<tr><td><strong>Evidence-backed findings</strong></td><td>Validated findings require reproducible proof and canonical <code>FIND-NNN.md</code> artifacts.</td></tr>
+<tr><td><strong>Evidence-backed findings</strong></td><td>A typed submission binds each validated finding to authenticated execution receipts.</td></tr>
 <tr><td><strong>Routed methodology</strong></td><td>A pentest orchestrator selects focused web, identity, API, business-logic, LLM-security, and misconfiguration playbooks.</td></tr>
 <tr><td><strong>Bounded execution</strong></td><td>Single commands, command bursts, background processes, batch review, heartbeat checks, and cancellation share one state model.</td></tr>
 <tr><td><strong>Verifiable releases</strong></td><td>Plugin registration, schemas, skill snapshots, documentation contracts, lint, formatting, and the full test suite are release-gated.</td></tr>
@@ -85,7 +89,7 @@ flowchart LR
 3. Run target commands with `violin_exec` or `violin_exec_burst`.
 4. Update hypotheses as evidence changes their status.
 5. Review each bounded command batch with `violin_review_batch`.
-6. Generate canonical findings and the final report.
+6. Submit validated findings and generate the final report.
 7. Complete the retrospective.
 
 The complete phase model is:
@@ -101,12 +105,13 @@ tasks are not moved between phase sections.
 
 ## Guard tools
 
-The plugin registers eleven Hermes tools from one typed registry:
+The plugin registers twelve Hermes tools from one typed registry:
 
 | Tool | Purpose |
 |---|---|
 | `violin_record_ptt` | Create, start, refresh, close, or cancel a PTT task |
 | `violin_record_hypothesis` | Create or update a scoped hypothesis |
+| `violin_submit_finding` | Submit a validated finding bound to its signed execution receipts |
 | `violin_exec` | Execute one guarded command |
 | `violin_exec_burst` | Execute a bounded command file |
 | `violin_exec_status` | Read background execution status |
@@ -231,13 +236,18 @@ fixtures; it does not establish live-agent recall, workflow completion, or
 report quality.
 
 ```bash
-uv run python benchmark/score.py --calibrate known-good
-uv run python benchmark/score.py --calibrate known-bad
-uv run python -m benchmark.run --target https://duck-store.escape.tech
+uv run python -m benchmark.score --calibrate known-good
+uv run python -m benchmark.score --calibrate known-bad
+uv run python -m benchmark.run \
+  --target http://localhost:<published-port> \
+  --provider <provider> \
+  --api-base <openai-compatible-base-url> \
+  --model <model-id> \
+  --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
 ```
 
 Read the [benchmark methodology](docs/BENCHMARKS.md) before publishing a score.
-It defines the proof, reproducibility, formalization, and disclosure
+It defines the proof, reproducibility, private evaluation, and disclosure
 requirements for a credible result.
 
 ## Development
@@ -267,6 +277,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution rules and
 
 Violin is for authorized security assessment. Operators are responsible for
 scope, approvals, target ownership, data handling, and local law.
+
+## Support Violin
+
+Violin is an open-source project maintained by Strategic Automation Ltd.
+If Violin is useful to you or your organisation, you can
+[sponsor its continued development](https://github.com/sponsors/Strategic-Automation).
+
+Sponsorship supports continued development, testing, documentation,
+compatibility work, and releases.
+
+Violin remains available under the MIT licence. Sponsorship does not include
+guaranteed support, feature priority, or influence over security policy.
 
 ## License
 

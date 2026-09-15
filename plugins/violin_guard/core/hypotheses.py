@@ -60,7 +60,6 @@ _FIELD_NAMES = {
     "cheapest test": "cheapest_test",
     "kill criteria": "kill_criteria",
     "next step": "next_step",
-    "linked findings": "linked_findings",
 }
 
 
@@ -87,7 +86,6 @@ class Hypothesis:
     kill_criteria: str = ""
     rejection_reason: str = ""
     next_step: str = ""
-    linked_findings: str = ""
     candidate_source: str = ""
     entry_point: str = ""
     data_flow: str = ""
@@ -143,8 +141,6 @@ class Hypothesis:
             lines.append(f"- **Rejection Reason:** {self.rejection_reason}")
         if self.next_step:
             lines.append(f"- **Next step:** {self.next_step}")
-        if self.linked_findings:
-            lines.append(f"- **Linked findings:** {self.linked_findings}")
         for label, value in (
             ("Candidate Source", self.candidate_source),
             ("Entry Point", self.entry_point),

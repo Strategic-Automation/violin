@@ -1,360 +1,284 @@
-"""Structured finding creation from guarded execution receipts."""
+"""Receipt-backed structured findings and deterministic report rendering."""
 
 from __future__ import annotations
 
+import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from . import hypotheses, state
+from . import receipt_integrity, schemas, state
 
-_FINDING_ID_RE = re.compile(r"FIND-(\d{3,})$")
-_SEVERITIES = {"critical", "high", "medium", "low", "info"}
-
-
-def _next_finding_id(directory: Path) -> str:
-    numbers = []
-    for path in directory.glob("FIND-*.md"):
-        match = _FINDING_ID_RE.fullmatch(path.stem)
-        if match:
-            numbers.append(int(match.group(1)))
-    return f"FIND-{max(numbers, default=0) + 1:03d}"
-
-
-def _batch_evidence(eng_dir: Path, pending: dict[str, Any]) -> list[str]:
-    unmatched = {str(item.get("command") or "") for item in pending.get("commands") or []}
-    evidence: list[str] = []
-    manifests = sorted(
-        (eng_dir / "evidence" / "executions").glob("*.json"),
-        key=lambda path: path.stat().st_mtime_ns,
-        reverse=True,
-    )
-    for manifest in manifests:
-        receipt = state.read_json(manifest)
-        command = str(receipt.get("command") or "")
-        if command not in unmatched:
-            continue
-        unmatched.remove(command)
-        for value in (receipt.get("evidence_paths") or {}).values():
-            relative = str(value or "").strip()
-            if relative and (eng_dir / relative).is_file() and relative not in evidence:
-                evidence.append(relative)
-    return evidence
-
-
-def _existing_batch_finding(directory: Path, batch_id: str) -> Path | None:
-    marker = f"- **Batch:** {batch_id}"
-    for path in sorted(directory.glob("FIND-*.md")):
-        try:
-            if marker in path.read_text(encoding="utf-8").splitlines():
-                return path
-        except OSError:
-            continue
-    return None
-
-
-def _validate_from_pending_batch(
-    eng_dir: str | Path,
-    pending: dict[str, Any],
-    *,
-    title: str,
-    severity: str,
-    description: str,
-    impact: str,
-    remediation: str,
-    finding_id: str = "",
-    hypothesis_id: str = "",
-) -> dict[str, Any]:
-    engagement = state.resolve_eng_dir(eng_dir)
-    values = {
-        "title": title.strip(),
-        "description": description.strip(),
-        "impact": impact.strip(),
-        "remediation": remediation.strip(),
-    }
-    severity_key = severity.strip().lower()
-    if not all(values.values()):
-        raise ValueError("title, description, impact, and remediation must be non-empty")
-    if severity_key not in _SEVERITIES:
-        raise ValueError("severity must be one of Critical, High, Medium, Low, or Info")
-    identifier = finding_id.strip().upper()
-    if identifier and not _FINDING_ID_RE.fullmatch(identifier):
-        raise ValueError("finding_id must use FIND-NNN format")
-    if not identifier:
-        identifier = _next_finding_id(engagement / "evidence" / "findings")
-    evidence = _batch_evidence(engagement, pending)
-    if not evidence:
-        raise ValueError("the current batch has no completed execution receipts to cite")
-    normalized_hypothesis = hypothesis_id.strip().upper().removeprefix("H-").zfill(3)
-    hypothesis = next(
-        (
-            item
-            for item in hypotheses.parse_hypotheses(engagement / "hypotheses.md")
-            if item.id == normalized_hypothesis
-        ),
-        None,
-    )
-    if (
-        not hypothesis
-        or hypothesis.canonical_status() != "Validated"
-        or not hypothesis.runtime_evidence
-    ):
-        # Auto-validate the hypothesis with the batch's runtime evidence instead of
-        # requiring a manual pre-step. This removes the two-step round-trip where the
-        # agent must first call violin_record_hypothesis to set Validated+runtime_evidence
-        # and then retry the finding creation. The batch already has decisive evidence
-        # (checked above), so we can promote the hypothesis atomically here.
-        if hypothesis and evidence:
-            hypotheses.update_hypothesis(
-                engagement / "hypotheses.md",
-                id=hypothesis.id,
-                status="Validated",
-                runtime_evidence=", ".join(sorted(set(evidence))),
-            )
-            # Re-fetch the updated hypothesis
-            hypothesis = next(
-                (
-                    item
-                    for item in hypotheses.parse_hypotheses(engagement / "hypotheses.md")
-                    if item.id == normalized_hypothesis
-                ),
-                None,
-            )
-        else:
-            raise ValueError(
-                "a finding requires a linked Validated hypothesis with runtime_evidence"
-            )
-    return {
-        **values,
-        "severity": severity_key,
-        "finding_id": identifier,
-        "evidence_paths": evidence,
-        "hypothesis_id": f"H-{hypothesis.id}",
-    }
-
-
-def _create_from_pending_batch(
-    eng_dir: str | Path,
-    *,
-    title: str,
-    severity: str,
-    description: str,
-    impact: str,
-    remediation: str,
-    finding_id: str = "",
-    hypothesis_id: str = "",
-    pending: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    engagement = state.resolve_eng_dir(eng_dir)
-    pending = pending or state.get_pending_sync(engagement)
-    if not pending:
-        raise ValueError("no current execution batch; run guarded validation commands first")
-    draft = _validate_from_pending_batch(
-        engagement,
-        pending,
-        title=title,
-        severity=severity,
-        description=description,
-        impact=impact,
-        remediation=remediation,
-        finding_id=finding_id,
-        hypothesis_id=hypothesis_id,
-    )
-
-    directory = engagement / "evidence" / "findings"
-    state.ensure_dir(directory)
-    batch_id = str(pending.get("batch_id") or "")
-    existing = _existing_batch_finding(directory, batch_id)
-    if existing:
-        if draft["finding_id"] and draft["finding_id"] != existing.stem:
-            raise ValueError(
-                f"batch {batch_id} already has finding {existing.stem}; "
-                f"refusing requested {draft['finding_id']}"
-            )
-        return {
-            "finding_id": existing.stem,
-            "path": existing.relative_to(engagement).as_posix(),
-            "evidence_paths": draft["evidence_paths"],
-            "batch_id": batch_id,
-            "reused": True,
-        }
-
-    identifier = draft["finding_id"] or _next_finding_id(directory)
-    output = directory / f"{identifier}.md"
-    if output.exists():
-        raise ValueError(f"finding already exists: {output}")
-
-    commands = [str(item.get("command") or "") for item in pending.get("commands") or []]
-    lines = [
-        f"# {identifier}: {draft['title']}",
-        "",
-        f"- **Severity:** {draft['severity'].title()}",
-        f"- **Batch:** {batch_id or 'unknown'}",
-        f"- **PTT task:** {pending.get('ptt_task_id') or 'unknown'}",
-        f"- **Phase:** {pending.get('phase') or 'unknown'}",
-        f"- **Hypothesis:** {draft['hypothesis_id']}",
-        "",
-        "## Description",
-        "",
-        draft["description"],
-        "",
-        "## Impact",
-        "",
-        draft["impact"],
-        "",
-        "## Evidence",
-        "",
-        *[f"- `{path}`" for path in draft["evidence_paths"]],
-        "",
-        "## Reproduction commands",
-        "",
-        "```text",
-        *commands,
-        "```",
-        "",
-        "## Remediation",
-        "",
-        draft["remediation"],
-        "",
-    ]
-    temporary = output.with_suffix(output.suffix + ".tmp")
-    temporary.write_text("\n".join(lines), encoding="utf-8")
-    temporary.replace(output)
-    return {
-        "finding_id": identifier,
-        "path": output.relative_to(engagement).as_posix(),
-        "evidence_paths": draft["evidence_paths"],
-        "batch_id": batch_id,
-        "reused": False,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Closeout artifact generation (FIND parsing + derived exports)
-# ---------------------------------------------------------------------------
-_HEADING_RE = re.compile(r"^# (FIND-\d{3,}):\s*(?P<title>.+)$")
-_BULLET_RE = re.compile(r"^- \*\*(?P<key>[^:*]+):\*\*\s*(?P<value>.*)$")
-_SECTION_RE = re.compile(r"^## (?P<name>.+)$")
-_EVIDENCE_ITEM_RE = re.compile(r"^- `(?P<path>[^`]+)`\s*$")
-
-_FIELD_KEYS = {
-    "severity": "severity",
-    "hypothesis": "hypothesis",
-    "phase": "phase",
-    "ptt task": "ptt_task",
-    "batch": "batch",
-}
-
-_SECTION_FIELDS = {
-    "Description": "description",
-    "Impact": "impact",
-    "Remediation": "remediation",
-}
-
+FINDINGS_PATH = Path("evidence/findings.jsonl")
 _SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")
 
 
-def parse_finding_file(path: Path) -> dict[str, Any]:
-    """Parse a canonical FIND-NNN.md into a flat record dict."""
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    heading = _HEADING_RE.match(lines[0].strip()) if lines else None
-    if not heading:
-        raise ValueError(f"{path.name}: first line must be '# FIND-NNN: <title>'")
-    record: dict[str, Any] = {
-        "id": heading.group(1),
-        "title": heading.group("title").strip(),
-        "severity": "",
-        "hypothesis": "",
-        "phase": "",
-        "ptt_task": "",
-        "batch": "",
-        "description": "",
-        "impact": "",
-        "evidence": [],
-        "remediation": "",
-    }
-    section = ""
-    section_buf: list[str] = []
+def _store_path(engagement: Path) -> Path:
+    return engagement / FINDINGS_PATH
 
-    def flush() -> None:
-        key = _SECTION_FIELDS.get(section)
-        if key:
-            record[key] = "\n".join(section_buf).strip()
 
-    for raw in lines[1:]:
-        line = raw.strip()
-        sec = _SECTION_RE.match(line)
-        if sec:
-            flush()
-            section = sec.group("name").strip()
-            section_buf = []
+def load_findings(eng_dir: str | Path) -> list[dict[str, Any]]:
+    """Load the canonical append-only finding records for an engagement."""
+    engagement = state.resolve_eng_dir(eng_dir)
+    path = _store_path(engagement)
+    if not path.is_file():
+        return []
+    records: list[dict[str, Any]] = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
             continue
-        bullet = _BULLET_RE.match(line)
-        if bullet and not section:
-            key = _FIELD_KEYS.get(bullet.group("key").strip().lower())
-            if key:
-                record[key] = bullet.group("value").strip()
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{FINDINGS_PATH}:{line_number}: invalid JSON") from exc
+        try:
+            records.append(schemas.FindingRecordModel.model_validate(value).model_dump())
+        except ValueError as exc:
+            raise ValueError(f"{FINDINGS_PATH}:{line_number}: invalid finding record") from exc
+    return records
+
+
+def _next_finding_id(records: list[dict[str, Any]]) -> str:
+    numbers = [
+        int(value.removeprefix("FIND-"))
+        for record in records
+        if (value := str(record.get("finding_id") or "")).startswith("FIND-")
+        and value.removeprefix("FIND-").isdigit()
+    ]
+    return f"FIND-{max(numbers, default=0) + 1:03d}"
+
+
+def _verified_receipt(
+    engagement: Path, receipt_path: str
+) -> tuple[dict[str, Any], tuple[Path, ...]]:
+    relative = Path(receipt_path)
+    expected_root = (engagement / "evidence" / "executions").resolve()
+    candidate = (engagement / relative).resolve()
+    if (
+        relative.is_absolute()
+        or not candidate.is_relative_to(expected_root)
+        or candidate.suffix.lower() != ".json"
+        or not candidate.is_file()
+        or candidate.is_symlink()
+    ):
+        raise ValueError("receipt_paths must name execution JSON files beneath evidence/executions")
+    receipt = state.read_json(candidate)
+    verified = receipt_integrity.verify_runtime_receipt(receipt, engagement)
+    if verified is None:
+        raise ValueError(f"receipt is unsigned, foreign, or has changed evidence: {receipt_path}")
+    if receipt.get("status") not in {"completed", "timed_out", "output_limited"}:
+        raise ValueError(f"receipt did not execute to a reviewable result: {receipt_path}")
+    if receipt.get("exit_code") is None:
+        raise ValueError(f"receipt has no exit status: {receipt_path}")
+    if not verified:
+        raise ValueError(f"receipt contains no authenticated evidence: {receipt_path}")
+    return receipt, verified
+
+
+def _verified_evidence_files(
+    engagement: Path,
+    evidence_paths: list[str],
+    authenticated_paths: set[str],
+) -> list[str]:
+    """Resolve decisive-evidence files authenticated by the cited receipts."""
+    valid: list[str] = []
+    evidence_root = (engagement / "evidence").resolve()
+    for value in dict.fromkeys(evidence_paths):
+        relative = Path(str(value).strip())
+        candidate = (engagement / relative).resolve()
+        if (
+            not str(value).strip()
+            or relative.is_absolute()
+            or not candidate.is_relative_to(evidence_root)
+            or candidate.is_symlink()
+            or candidate.suffix.lower() == ".json"
+            or not candidate.is_file()
+            or candidate.stat().st_size == 0
+        ):
+            raise ValueError("evidence_paths must name non-empty, non-JSON files beneath evidence/")
+        normalized = candidate.relative_to(engagement).as_posix()
+        if normalized not in authenticated_paths:
+            raise ValueError(
+                "evidence_paths must be authenticated by a cited execution receipt; "
+                "declare each saved file through violin_exec evidence_outputs"
+            )
+        valid.append(normalized)
+    return valid
+
+
+_STATUS_LINE_RE = re.compile(rb"HTTP/\d[\x20-\x7e]*", re.I)
+_HEADER_LINE_RE = re.compile(rb"[A-Za-z][A-Za-z0-9-]*:[ \t]*\S")
+_LABEL_LINE_RE = re.compile(rb"^\s*={2,}.*={2,}\s*$", re.M)
+
+
+def _head_has_http_bytes(head: bytes) -> bool:
+    """True when decisive HTTP response bytes follow the last status line.
+
+    Status-only captures (e.g. a probe closed with ``grep '^HTTP'``) prove the
+    request happened but carry no response content: after the last status line
+    there are only further status lines, ``=== label ===`` echo markers, and
+    whitespace. Real proof shows a header line (``name: value``) or body bytes.
+    """
+    matches = list(_STATUS_LINE_RE.finditer(head))
+    if not matches:
+        return False
+    tail = head[matches[-1].end() :]
+    if _HEADER_LINE_RE.search(tail):
+        return True
+    cleaned = _LABEL_LINE_RE.sub(b"", tail)
+    cleaned = _STATUS_LINE_RE.sub(b"", cleaned)
+    return bool(re.sub(rb"[\s\x00-\x1f]+", b"", cleaned))
+
+
+def _proof_byte_warnings(
+    engagement: Path,
+    verified_paths: list[str],
+    saved_evidence: list[str],
+) -> list[str]:
+    """Warn (never block) when a finding's proof chain lacks HTTP response bytes.
+
+    A receipt whose stdout shows only status lines proves the request happened
+    but carries no response content. Attaching the saved probe file via
+    ``evidence_paths`` restores the decisive bytes to the proof chain.
+    """
+    for relative in [*verified_paths, *saved_evidence]:
+        path = engagement / relative
+        try:
+            with path.open("rb") as handle:
+                head = handle.read(4096)
+        except OSError:
             continue
-        if section == "Evidence":
-            item = _EVIDENCE_ITEM_RE.match(line)
-            if item:
-                record["evidence"].append(item.group("path").strip())
-        else:
-            section_buf.append(raw)
-    flush()
-    return record
+        if _head_has_http_bytes(head):
+            return []
+    return [
+        "finding proof carries no literal HTTP response bytes; attach the decisive "
+        "evidence file(s) via evidence_paths or echo a body excerpt in the probe "
+        "command so receipts capture it"
+    ]
+
+
+def submit_finding(
+    eng_dir: str | Path,
+    *,
+    title: str,
+    severity: str,
+    summary: str,
+    receipt_paths: list[str],
+    evidence_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    """Persist one generic finding without exposing evaluator challenge metadata."""
+    engagement = state.resolve_eng_dir(eng_dir)
+    normalized_receipts = list(
+        dict.fromkeys(value.strip() for value in receipt_paths if value.strip())
+    )
+    verified_paths: list[str] = []
+    execution_ids: list[str] = []
+    for receipt_path in normalized_receipts:
+        receipt, verified = _verified_receipt(engagement, receipt_path)
+        execution_ids.append(str(receipt.get("execution_id") or ""))
+        verified_paths.extend(path.relative_to(engagement).as_posix() for path in verified)
+
+    evidence_paths = evidence_paths or []
+    saved_evidence = _verified_evidence_files(
+        engagement,
+        evidence_paths,
+        set(verified_paths),
+    )
+
+    warnings = _proof_byte_warnings(engagement, verified_paths, saved_evidence)
+
+    store = _store_path(engagement)
+    with state.workflow_lock(engagement), state.lock_file(store.with_suffix(".lock")):
+        records = load_findings(engagement)
+        signature = {
+            "title": title.strip().casefold(),
+            "receipt_paths": normalized_receipts,
+        }
+        existing = next(
+            (
+                record
+                for record in records
+                if {
+                    "title": str(record.get("title") or "").strip().casefold(),
+                    "receipt_paths": record.get("receipt_paths"),
+                }
+                == signature
+            ),
+            None,
+        )
+        if existing:
+            return {
+                **existing,
+                "duplicate": True,
+                "receipt_validation": "verified",
+                "warnings": _proof_byte_warnings(
+                    engagement, [], existing.get("evidence_paths") or []
+                ),
+            }
+
+        record = {
+            "schema_version": 1,
+            "finding_id": _next_finding_id(records),
+            "title": title.strip(),
+            "severity": severity,
+            "summary": summary.strip(),
+            "status": "validated",
+            "receipt_paths": normalized_receipts,
+            "evidence_paths": saved_evidence,
+            "execution_ids": execution_ids,
+            "created_at": datetime.now(UTC).isoformat(),
+            "engagement_id": engagement.name,
+        }
+        state.ensure_dir(store.parent)
+        with store.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        return {
+            **record,
+            "duplicate": False,
+            "receipt_validation": "verified",
+            "warnings": warnings,
+        }
+
+
+def _validated_records(engagement: Path) -> list[dict[str, Any]]:
+    return load_findings(engagement)
 
 
 def generate_findings_yaml(eng_dir: str | Path, *, force: bool = False) -> Path:
-    """Write evidence/reporting/findings.yaml derived from FIND-*.md files."""
-    engagement = Path(eng_dir)
-    finding_files = sorted((engagement / "evidence" / "findings").glob("FIND-*.md"))
-    if not finding_files:
-        raise ValueError("no FIND-*.md files under evidence/findings/")
-    out = engagement / "evidence" / "reporting" / "findings.yaml"
-    if out.exists() and not force:
+    """Render a machine-readable finding summary from the canonical JSONL store."""
+    engagement = state.resolve_eng_dir(eng_dir)
+    records = _validated_records(engagement)
+    if not records:
+        raise ValueError("no validated findings in evidence/findings.jsonl")
+    output = engagement / "evidence" / "reporting" / "findings.yaml"
+    if output.exists() and not force:
         raise ValueError("findings.yaml exists; pass force=True to regenerate")
-    records = [parse_finding_file(path) for path in finding_files]
-    payload = {
-        "engagement": engagement.name,
-        "generated_from": ", ".join(path.name for path in finding_files),
-        "note": (
-            "Derived export generated by violin_guard generate-closeout. "
-            "The canonical records are the per-finding Markdown files; "
-            "this YAML is a machine-readable summary."
+    state.ensure_dir(output.parent)
+    output.write_text(
+        yaml.safe_dump(
+            {"engagement": engagement.name, "findings": records},
+            sort_keys=False,
+            allow_unicode=True,
         ),
-        "findings": [
-            {
-                "id": rec["id"],
-                "title": rec["title"],
-                "severity": rec["severity"],
-                "hypothesis": rec["hypothesis"],
-                "phase": rec["phase"],
-                "evidence": rec["evidence"],
-            }
-            for rec in records
-        ],
-    }
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    return out
+        encoding="utf-8",
+    )
+    return output
 
 
 def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False) -> Path:
-    """Write reporting/report.md assembled from FIND-*.md records."""
-    engagement = Path(eng_dir)
-    out = engagement / "reporting" / "report.md"
-    if out.exists() and not force:
+    """Render the human report from canonical structured finding records."""
+    engagement = state.resolve_eng_dir(eng_dir)
+    records = _validated_records(engagement)
+    if not records:
+        raise ValueError("no validated findings in evidence/findings.jsonl")
+    output = engagement / "reporting" / "report.md"
+    if output.exists() and not force:
         raise ValueError("report.md exists; pass force=True to regenerate")
-    finding_files = sorted((engagement / "evidence" / "findings").glob("FIND-*.md"))
-    if not finding_files:
-        raise ValueError("no FIND-*.md files under evidence/findings/")
-    records = [parse_finding_file(path) for path in finding_files]
     counts = {
-        severity: sum(1 for rec in records if rec["severity"].lower() == severity.lower())
+        severity: sum(1 for record in records if record["severity"] == severity)
         for severity in _SEVERITY_ORDER
     }
     lines = [
@@ -366,43 +290,41 @@ def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False)
         "",
         "## Executive Summary",
         "",
-        "<!-- Write 3-6 sentences: overall posture, worst findings, key themes. -->",
+        "<!-- Narrative placeholder: describe engagement posture, threat context, "
+        "and overall risk in free-form prose here. -->",
+        "",
+        "",
+        "## Severity Summary",
         "",
         "| Severity | Count |",
         "|----------|-------|",
+        *[f"| {severity} | {counts[severity]} |" for severity in _SEVERITY_ORDER],
+        "",
     ]
-    for severity in _SEVERITY_ORDER:
-        lines.append(f"| {severity} | {counts[severity]} |")
-    lines.append("")
-    for rec in records:
-        lines += [
-            f"## {rec['id']}: {rec['title']}",
-            "",
-            f"- **Severity:** {rec['severity']}",
-        ]
-        if rec["hypothesis"]:
-            lines.append(f"- **Hypothesis:** {rec['hypothesis']}")
-        if rec["phase"]:
-            lines.append(f"- **Phase:** {rec['phase']}")
-        lines += [
-            "",
-            "### Description",
-            "",
-            rec["description"],
-            "",
-            "### Impact",
-            "",
-            rec["impact"],
-            "",
-            "### Evidence",
-            "",
-            *[f"- `{item}`" for item in rec["evidence"]],
-            "",
-            "### Remediation",
-            "",
-            rec["remediation"],
-            "",
-        ]
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    return out
+    for record in records:
+        lines.extend(
+            [
+                f"## {record['finding_id']}: {record['title']}",
+                "",
+                f"- **Severity:** {record['severity']}",
+                "",
+                record["summary"],
+                "",
+                "### Evidence",
+                "",
+                *[f"- `{path}`" for path in record["receipt_paths"]],
+                "",
+            ]
+        )
+    state.ensure_dir(output.parent)
+    output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return output
+
+
+__all__ = [
+    "FINDINGS_PATH",
+    "generate_findings_yaml",
+    "generate_report_md",
+    "load_findings",
+    "submit_finding",
+]

@@ -86,7 +86,9 @@ def _validate_record_ptt_inputs(
             "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
         )
     selected = next((item for item in doc if item.id == task), None)
-    selected_phase = selected.phase if selected else str(args.get("phase") or "RECON")
+    selected_phase = selected.phase if selected else str(args.get("phase") or "")
+    if not selected_phase:
+        raise ValueError(f"phase is required when creating PTT task {task!r}")
     try:
         phase = ptt.normalize_phase(selected_phase)
     except ValueError as exc:
@@ -182,7 +184,7 @@ def _apply_ptt_task_transition(
             ptt_file,
             task,
             title or task,
-            raw_phase or "RECON",
+            raw_phase or "",
             note,
         )
         if status == "[ ]":
