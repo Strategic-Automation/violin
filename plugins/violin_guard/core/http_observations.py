@@ -19,6 +19,11 @@ from yarl import URL
 
 HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
 
+# A response header line (`Name: value`) — the header name is a token that ends
+# at the colon with no space in between, which distinguishes it from the
+# labeled probe output forms (`req 1 401`, `statuses: {401: 15}`).
+_HEADER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:")
+
 
 @dataclass(frozen=True)
 class HTTPObservation:
@@ -104,6 +109,12 @@ def parse_http_statuses(content: str) -> tuple[int, ...]:
                 r"(\d{3})\s*:\s*(\d+)", dict_match.group(1)
             ):
                 statuses.extend([int(status_token)] * int(count_token))
+            continue
+        # HTTP response header lines carry 3-digit values too (`Content-Length:
+        # 200`, `Retry-After: 429`). The guard adds `-i` to curl probes, so
+        # header lines are normal in saved evidence; their values are response
+        # metadata and must never be read as observed statuses.
+        if _HEADER_LINE.match(line.strip()):
             continue
         # Bare form: a line of only 3-digit HTTP status codes (100-599),
         # e.g. `-w '%{http_code} '` on a rapid burst probe: "401 401 401 ...".
