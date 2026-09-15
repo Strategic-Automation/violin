@@ -7,15 +7,29 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
-from scripts.cli_environment import _format_command
+from scripts.cli_environment import _DEPENDENCY_MODULES, _format_command
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "violin_guard.py"
 SMOKE_SCRIPT = ROOT / "scripts" / "smoke-test.sh"
+
+
+def test_cli_dependency_modules_match_project_dependencies() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    import_aliases = {"pyyaml": "yaml"}
+    expected_modules = set()
+    for dependency in project["dependencies"]:
+        package_name = canonicalize_name(Requirement(dependency).name)
+        expected_modules.add(import_aliases.get(package_name, package_name.replace("-", "_")))
+
+    assert expected_modules == _DEPENDENCY_MODULES
 
 
 @pytest.mark.parametrize("script_name", ["violin_guard.py", "generate-closeout.py"])
