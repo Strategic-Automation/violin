@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Get started — Violin</title>
+    <meta
+      name="description"
+      content="Install Violin, approve a scope, and work through your first supervised engagement."
+    />
+    <link
+      rel="canonical"
+      href="https://strategic-automation.github.io/violin/guide.html"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Get started — Violin" />
+    <meta
+      property="og:description"
+      content="Install Violin, approve a scope, and work through your first supervised engagement."
+    />
+    <meta
+      property="og:url"
+      content="https://strategic-automation.github.io/violin/guide.html"
+    />
+    <meta
+      property="og:image"
+      content="https://strategic-automation.github.io/violin/assets/social-preview.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script type="module" src="assets/site.js"></script>
+  </head>
+  <body class="documentation">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Violin home"
+          ><img src="assets/logo.png" alt="" width="32" height="32" /><span
+            >VIOLIN</span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <a href="index.html">Overview</a><a href="guide.html">Docs</a
+          ><a href="engineering.html">Engineering</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </nav>
+        <details class="site-menu">
+          <summary>Menu</summary>
+          <nav aria-label="Mobile navigation">
+            <a href="index.html">Overview</a><a href="guide.html">Docs</a
+            ><a href="engineering.html">Engineering</a
+            ><a
+              href="https://github.com/Strategic-Automation/violin"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </nav>
+        </details>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1">
+      <div class="shell docs-layout">
+        <aside class="docs-sidebar">
+          <p class="nav-label">Documentation</p>
+          <nav aria-label="Documentation">
+            <a href="guide.html" aria-current="page">Get started</a
+            ><a href="guard.html">Guard &amp; evidence</a
+            ><a href="coverage.html">Playbooks</a
+            ><a href="tools.html">Tool reference</a
+            ><a href="engineering.html">Engineering notes</a>
+          </nav>
+          <a
+            class="sidebar-source"
+            href="https://github.com/Strategic-Automation/violin"
+            >View source ↗</a
+          >
+        </aside>
+        <div class="docs-content">
+          <details class="docs-mobile">
+            <summary>In the docs <span>Get started</span></summary>
+            <nav aria-label="Documentation pages">
+              <a href="guide.html" aria-current="page">Get started</a
+              ><a href="guard.html">Guard &amp; evidence</a
+              ><a href="coverage.html">Playbooks</a
+              ><a href="tools.html">Tool reference</a
+              ><a href="engineering.html">Engineering notes</a>
+            </nav>
+          </details>
+          <div class="page-heading">
+            <p class="eyebrow">Violin / Documentation</p>
+            <h1>Get started</h1>
+            <p class="intro">
+              Install Violin, approve a scope, and work through your first
+              supervised engagement.
+            </p>
+          </div>
+          <section id="start" class="doc-section">
+            <h2>Install the profile</h2>
+            <p>
+              You need
+              <a href="https://hermes-agent.nousresearch.com/docs"
+                >Hermes Agent 0.18.0+</a
+              >
+              configured with a model provider. Kali or Parrot supplies the
+              expected security tools.
+            </p>
+            <div class="command-box">
+              <!-- prettier-ignore -->
+              <code id="install-code">hermes profile install https://github.com/Strategic-Automation/violin</code
+              ><button
+                class="copy-btn"
+                data-copy-target="install-code"
+                aria-label="Copy installation command"
+              >
+                Copy
+              </button>
+            </div>
+            <p class="copy-status" role="status" aria-live="polite"></p>
+            <p>Then launch the profile:</p>
+            <pre class="code-block">hermes -p violin</pre>
+            <div class="notice-callout">
+              <strong>Before testing:</strong> obtain written authorization and
+              approve the target scope. Violin does not provide network
+              containment.
+            </div>
+          </section>
+          <details class="disclosure" id="install-alternatives">
+            <summary>Local development, Docker &amp; release checks</summary>
+            <div class="disclosure-body">
+              <p>
+                Local development requires Python 3.11 and uv. Docker builds
+                from the repository’s Dockerfile.
+              </p>
+              <div class="install-card">
+                <div
+                  class="tab-header"
+                  role="tablist"
+                  aria-label="Installation method"
+                >
+                  <button
+                    class="tab-btn active"
+                    role="tab"
+                    id="install-tab-1"
+                    aria-controls="alternative-panel"
+                    tabindex="0"
+                    aria-selected="true"
+                    data-cmd="hermes profile install https://github.com/Strategic-Automation/violin"
+                  >
+                    Hermes Profile
+                  </button>
+                  <button
+                    class="tab-btn"
+                    role="tab"
+                    id="install-tab-2"
+                    aria-controls="alternative-panel"
+                    tabindex="-1"
+                    aria-selected="false"
+                    data-cmd="git clone https://github.com/Strategic-Automation/violin &amp;&amp; cd violin &amp;&amp; uv sync"
+                  >
+                    Local Python / uv
+                  </button>
+                  <button
+                    class="tab-btn"
+                    role="tab"
+                    id="install-tab-3"
+                    aria-controls="alternative-panel"
+                    tabindex="-1"
+                    aria-selected="false"
+                    data-cmd="git clone https://github.com/Strategic-Automation/violin &amp;&amp; cd violin &amp;&amp; docker build -t violin . &amp;&amp; docker run -it --rm violin hermes -p violin"
+                  >
+                    Docker build
+                  </button>
+                  <button
+                    class="tab-btn"
+                    role="tab"
+                    id="install-tab-4"
+                    aria-controls="alternative-panel"
+                    tabindex="-1"
+                    aria-selected="false"
+                    data-cmd="uv run python scripts/violin_guard.py check-release"
+                  >
+                    Verification Check
+                  </button>
+                </div>
+                <div
+                  class="tab-body"
+                  id="alternative-panel"
+                  role="tabpanel"
+                  aria-labelledby="install-tab-1"
+                  tabindex="0"
+                >
+                  <span class="prompt">$</span>
+                  <!-- prettier-ignore -->
+                  <code id="alternative-code">hermes profile install https://github.com/Strategic-Automation/violin</code>
+                  <button
+                    class="copy-btn"
+                    id="copy-install-btn"
+                    aria-label="Copy alternative command"
+                    data-copy-target="alternative-code"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <p class="copy-status" role="status" aria-live="polite"></p>
+            </div>
+          </details>
+          <section class="doc-section" id="engagement">
+            <h2>Your first engagement</h2>
+            <p>
+              Start with an authorized target. Violin collects scope before any
+              target interaction.
+            </p>
+            <pre class="code-block">
+Run an authorized penetration test against example.com.</pre
+            >
+            <p class="muted">
+              Open a step for the commands and evidence it needs.
+            </p>
+            <details class="disclosure">
+              <summary><span class="step-number">01</span>Scope First</summary>
+              <div class="disclosure-body">
+                <p>
+                  Bootstrap the engagement and approve
+                  <code>scope/scope.yaml</code>. Nothing touches a target before
+                  this exists, and the coverage matrix is generated from its
+                  obligations.
+                </p>
+              </div>
+            </details>
+            <details class="disclosure">
+              <summary>
+                <span class="step-number">02</span>Activate Exactly One Task
+              </summary>
+              <div class="disclosure-body">
+                <p>
+                  Create and start a PTT task under the current phase, naming
+                  the routed specialist skill and concrete technique. Work
+                  cannot jump ahead without a registered task.
+                </p>
+              </div>
+            </details>
+            <details class="disclosure">
+              <summary>
+                <span class="step-number">03</span>Run Guarded Commands
+              </summary>
+              <div class="disclosure-body">
+                <p>
+                  Recon through the exact same boundary as exploitation. A
+                  typical command invocation through the registered tool:
+                </p>
+                <pre
+                  class="code-block"
+                ><span class="token-comment">// Single guarded command invocation, AST-resolved against scope</span>
+<span class="token-fn">violin_exec</span>(
+  <span class="token-key">eng_dir</span>  = <span class="token-val">"engagements/acme-web"</span>,
+  <span class="token-key">phase</span>    = <span class="token-val">"RECON"</span>,
+  <span class="token-key">target</span>   = <span class="token-val">"app.example.com"</span>,
+  <span class="token-key">command</span>  = <span class="token-val">"nmap -sV -sC -T4 app.example.com -oA quick_app"</span>,
+  <span class="token-key">label</span>    = <span class="token-val">"service-discovery"</span>
+)
+<span class="token-comment">// Gates validated → status: ok, signed execution receipt written to disk</span></pre>
+              </div>
+            </details>
+            <details class="disclosure">
+              <summary>
+                <span class="step-number">04</span>Keep Hypotheses Honest
+              </summary>
+              <div class="disclosure-body">
+                <p>
+                  Hypotheses carry status, confidence, a cheapest test, and kill
+                  criteria. Evidence updates status; a hypothesis that survives
+                  without proof never becomes a finding.
+                </p>
+              </div>
+            </details>
+            <details class="disclosure">
+              <summary>
+                <span class="step-number">05</span>Review the Batch
+              </summary>
+              <div class="disclosure-body">
+                <p>
+                  Bounded command bursts are reviewed and settled so engagement
+                  state reflects what actually ran, including partial stdout and
+                  failures.
+                </p>
+              </div>
+            </details>
+            <details class="disclosure">
+              <summary>
+                <span class="step-number">06</span>Submit Findings that Cite
+                Receipts
+              </summary>
+              <div class="disclosure-body">
+                <p>
+                  Severity, summary, and decisive evidence.
+                  <code>violin_submit_finding</code> enforces that every
+                  vulnerability is bound to the signed receipts authenticating
+                  the request and response.
+                </p>
+              </div>
+            </details>
+            <details class="disclosure">
+              <summary>
+                <span class="step-number">07</span>Close Out Coverage, then
+                Report
+              </summary>
+              <div class="disclosure-body">
+                <p>
+                  In-scope routes and required testing categories receive an
+                  explicit disposition: tested, negative evidence, or justified
+                  exclusion. Then the closeout report.
+                </p>
+              </div>
+            </details>
+          </section>
+          <section class="doc-section" id="faq">
+            <h2>Common questions</h2>
+            <details class="faq-item">
+              <summary class="faq-question">
+                Does this replace Burp, nmap, or nuclei?
+              </summary>
+              <p>
+                No. It gates and drives the non-interactive tooling already
+                installed in your Kali/Parrot environment, while maintaining the
+                evidence trail and coverage matrix. Interactive proxies and your
+                own manual verification remain essential.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary class="faq-question">
+                Can it wander out of scope?
+              </summary>
+              <p>
+                The guard denies commands whose resolved target is not in the
+                approved scope. AST parsing handles compound commands,
+                pipelines, and subshells, and path-scoped URL exclusions are
+                strictly honored. The raw-terminal hook is a safety net; run in
+                an isolated lab environment.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary class="faq-question">Which model should I use?</summary>
+              <p>
+                Whatever your Hermes Agent configuration provides. Violin
+                selects no provider and ships no hardcoded API keys. A capable
+                frontier model is recommended for complex hypothesis
+                formulation.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary class="faq-question">
+                Can I run it on a live client engagement?
+              </summary>
+              <p>
+                Only with explicit written authorization and an approved scope
+                file. You remain solely responsible for target authorization,
+                legal compliance, and operational safety. Violin is for
+                authorized assessment only.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary class="faq-question">
+                How does a finding get accepted?
+              </summary>
+              <p>
+                <code>violin_submit_finding</code> validates that the finding is
+                bound to signed execution receipts authenticating the decisive
+                request and response bytes. A claim without receipts is a
+                hypothesis, not a finding.
+              </p>
+            </details>
+            <details class="faq-item">
+              <summary class="faq-question">
+                Where are the benchmark numbers?
+              </summary>
+              <p>
+                In the methodology documentation (<a
+                  href="https://github.com/Strategic-Automation/violin/blob/master/docs/BENCHMARKS.md"
+                  target="_blank"
+                  rel="noopener"
+                  >docs/BENCHMARKS.md</a
+                >), not in marketing headlines. The project explicitly rejects
+                single-run score claims.
+              </p>
+            </details>
+          </section>
+          <a class="next-page" href="guard.html"
+            ><span>Next</span>Understand the guard →</a
+          >
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>Violin · Open source · MIT</span>
+        <nav aria-label="Footer">
+          <a
+            href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+            >Security</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md"
+            >Contribute</a
+          ><a href="https://hermes-agent.nousresearch.com/"
+            >Built on Hermes ↗</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

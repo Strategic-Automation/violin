@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tool reference — Violin</title>
+    <meta
+      name="description"
+      content="Twelve registered Hermes tools share one guarded execution boundary. Select a tool to see its purpose and context."
+    />
+    <link
+      rel="canonical"
+      href="https://strategic-automation.github.io/violin/tools.html"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Tool reference — Violin" />
+    <meta
+      property="og:description"
+      content="Twelve registered Hermes tools share one guarded execution boundary. Select a tool to see its purpose and context."
+    />
+    <meta
+      property="og:url"
+      content="https://strategic-automation.github.io/violin/tools.html"
+    />
+    <meta
+      property="og:image"
+      content="https://strategic-automation.github.io/violin/assets/social-preview.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script type="module" src="assets/site.js"></script>
+  </head>
+  <body class="documentation">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Violin home"
+          ><img src="assets/logo.png" alt="" width="32" height="32" /><span
+            >VIOLIN</span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <a href="index.html">Overview</a><a href="guide.html">Docs</a
+          ><a href="engineering.html">Engineering</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </nav>
+        <details class="site-menu">
+          <summary>Menu</summary>
+          <nav aria-label="Mobile navigation">
+            <a href="index.html">Overview</a><a href="guide.html">Docs</a
+            ><a href="engineering.html">Engineering</a
+            ><a
+              href="https://github.com/Strategic-Automation/violin"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </nav>
+        </details>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1">
+      <div class="shell docs-layout">
+        <aside class="docs-sidebar">
+          <p class="nav-label">Documentation</p>
+          <nav aria-label="Documentation">
+            <a href="guide.html">Get started</a
+            ><a href="guard.html">Guard & evidence</a
+            ><a href="coverage.html">Playbooks</a
+            ><a href="tools.html" aria-current="page">Tool reference</a
+            ><a href="engineering.html">Engineering notes</a>
+          </nav>
+          <a
+            class="sidebar-source"
+            href="https://github.com/Strategic-Automation/violin"
+            >View source ↗</a
+          >
+        </aside>
+        <div class="docs-content">
+          <details class="docs-mobile">
+            <summary>In the docs <span>Tool reference</span></summary>
+            <nav aria-label="Documentation pages">
+              <a href="guide.html">Get started</a
+              ><a href="guard.html">Guard & evidence</a
+              ><a href="coverage.html">Playbooks</a
+              ><a href="tools.html" aria-current="page">Tool reference</a
+              ><a href="engineering.html">Engineering notes</a>
+            </nav>
+          </details>
+          <div class="page-heading">
+            <p class="eyebrow">Violin / Documentation</p>
+            <h1>Tool reference</h1>
+            <p class="intro">
+              Twelve registered Hermes tools share one guarded execution
+              boundary. Select a tool to see its purpose and context.
+            </p>
+          </div>
+          <section id="tools" class="doc-section first-section">
+            <details class="disclosure tool">
+              <summary><code>violin_exec</code></summary>
+              <div class="disclosure-body">
+                <p>Execute one guarded command against approved scope</p>
+                <p class="muted">Context: All Phases</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_submit_finding</code></summary>
+              <div class="disclosure-body">
+                <p>
+                  Submit validated vulnerability bound to signed execution
+                  receipts
+                </p>
+                <p class="muted">Context: Validation / Reporting</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_record_ptt</code></summary>
+              <div class="disclosure-body">
+                <p>
+                  Create, start, refresh, close, or cancel an engagement task
+                </p>
+                <p class="muted">Context: Workflow State</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_record_hypothesis</code></summary>
+              <div class="disclosure-body">
+                <p>
+                  Create or update scoped hypothesis with cheapest test and kill
+                  criteria
+                </p>
+                <p class="muted">Context: Planning</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_review_batch</code></summary>
+              <div class="disclosure-body">
+                <p>
+                  Review completed command burst and settle engagement state
+                </p>
+                <p class="muted">Context: Synchronization</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_exec_burst</code></summary>
+              <div class="disclosure-body">
+                <p>
+                  Execute bounded batch of commands with batch review
+                  requirements
+                </p>
+                <p class="muted">Context: Execution</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_rebind_pending_batch</code></summary>
+              <div class="disclosure-body">
+                <p>Rebind pending batch after operator confirmation</p>
+                <p class="muted">Context: Review Flow</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_target</code></summary>
+              <div class="disclosure-body">
+                <p>
+                  Resolve approved target and scope authorization parameters
+                </p>
+                <p class="muted">Context: Discovery</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_status</code></summary>
+              <div class="disclosure-body">
+                <p>Inspect active tasks, routed skills, and current blockers</p>
+                <p class="muted">Context: Diagnostics</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_heartbeat_done</code></summary>
+              <div class="disclosure-body">
+                <p>Clear completed operator review heartbeat</p>
+                <p class="muted">Context: Safety</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_exec_status</code></summary>
+              <div class="disclosure-body">
+                <p>Query background process execution and stream logs</p>
+                <p class="muted">Context: Monitoring</p>
+              </div>
+            </details>
+            <details class="disclosure tool">
+              <summary><code>violin_exec_cancel</code></summary>
+              <div class="disclosure-body">
+                <p>Cancel tracked background execution process</p>
+                <p class="muted">Context: Safety</p>
+              </div>
+            </details>
+          </section>
+          <p class="reference-note">
+            For parameter schemas, see the
+            <a
+              href="https://github.com/Strategic-Automation/violin/blob/master/plugins/violin_guard/registry.py"
+              >typed registry on GitHub ↗</a
+            >.
+          </p>
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>Violin · Open source · MIT</span>
+        <nav aria-label="Footer">
+          <a
+            href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+            >Security</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md"
+            >Contribute</a
+          ><a href="https://hermes-agent.nousresearch.com/"
+            >Built on Hermes ↗</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
