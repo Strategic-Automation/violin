@@ -51,9 +51,10 @@ def test_generate_closeout_requires_validated_findings(tmp_path: Path) -> None:
 
 def test_generate_report_md_contents(tmp_path: Path) -> None:
     _write_finding(tmp_path)
-    output = generate_report_md(tmp_path, target="https://example.test")
+    target = "https://example.test"
+    output = generate_report_md(tmp_path, target=target)
     text = output.read_text(encoding="utf-8")
-    assert "https://example.test" in text
+    assert f"- **Target:** {target}" in text
     assert "FIND-001: Arbitrary order read" in text
     assert "| High | 1 |" in text
     assert "evidence/executions/order.json" in text
