@@ -186,3 +186,15 @@ def test_generate_closeout_script_surface() -> None:
     assert result.returncode == 0, result.stderr
     assert "--eng-dir" in result.stdout
     assert "--target" in result.stdout
+
+
+def test_cli_entry_points_share_one_venv_bootstrap() -> None:
+    """Venv discovery lives in cli_environment, not in each entry point."""
+    environment = (ROOT / "scripts" / "cli_environment.py").read_text(encoding="utf-8")
+    assert "def ensure_venv(" in environment
+
+    for name in ("violin_guard.py", "generate-closeout.py"):
+        source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+        assert "ensure_venv" in source, f"{name} does not use the shared bootstrap"
+        assert "def _ensure_venv" not in source, f"{name} still carries its own copy"
+        assert "site-packages" not in source, f"{name} still walks site-packages itself"
