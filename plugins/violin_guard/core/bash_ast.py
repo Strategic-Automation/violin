@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
 import bashlex
+import bashlex.ast
 import bashlex.errors
 
 # bashlex raises these on input it cannot parse. Callers deliberately fall back to a
@@ -17,12 +19,12 @@ _BASH_PARSE_ERRORS: tuple[type[BaseException], ...] = (bashlex.errors.ParsingErr
 
 # Interpreters whose -c / -e argument is a nested script whose tokens are
 # executed and therefore ARE connection targets (unlike quoted text labels).
-_INTERPRETER_CODE_FLAGS = {
-    "bash": "-c",
-    "sh": "-c",
-    "zsh": "-c",
-    "dash": "-c",
-    "ksh": "-c",
+_INTERPRETER_CODE_FLAGS: dict[str, tuple[str, ...]] = {
+    "bash": ("-c",),
+    "sh": ("-c",),
+    "zsh": ("-c",),
+    "dash": ("-c",),
+    "ksh": ("-c",),
     "python": ("-c", "-e"),
     "python3": ("-c", "-e"),
     "python2": ("-c", "-e"),
@@ -81,7 +83,21 @@ def split_heredoc_body(command: str) -> tuple[str, str | None]:
     return head.strip("\n"), body_text
 
 
-class _CommandVisitor:
+class _WordCollector(bashlex.ast.nodevisitor):
+    """Collect word and redirect target tokens from an AST subtree."""
+
+    def __init__(self) -> None:
+        self.words: list[str] = []
+
+    def visitword(self, n: Any, word: str) -> None:
+        self.words.append(word)
+
+    def visitredirect(self, n: Any, input: Any, type: str, output: Any, heredoc: Any) -> None:
+        if hasattr(output, "word"):
+            self.words.append(output.word)
+
+
+class _CommandVisitor(bashlex.ast.nodevisitor):
     """Traverse bashlex AST nodes to extract command segments and word tokens."""
 
     def __init__(self, command: str):
@@ -89,92 +105,50 @@ class _CommandVisitor:
         self.segments: list[CommandSegment] = []
         self.words: list[str] = []
 
-    def visit(self, node: Any) -> None:
-        kind = getattr(node, "kind", None)
-        if kind == "command":
-            start, end = node.pos
-            segment_text = self.command[start:end]
-            words = self._collect_words(node)
-            executable = self._extract_executable(words)
-            redirects = [
-                str(getattr(getattr(part, "output", None), "word", ""))
-                for part in getattr(node, "parts", [])
-                if getattr(part, "kind", None) == "redirect"
-                and getattr(getattr(part, "output", None), "word", None)
-            ]
-            self.segments.append(
-                CommandSegment(
-                    raw_text=segment_text,
-                    words=words,
-                    executable=executable,
-                    redirects=redirects,
-                )
-            )
-            self._visit_interpreter_code(words, executable)
+    def visitcommand(self, node: Any, parts: list[Any]) -> None:
+        start, end = node.pos
+        segment_text = self.command[start:end]
 
-        if hasattr(node, "parts"):
-            for child in node.parts:
-                self.visit(child)
-        if hasattr(node, "command") and getattr(node, "command", None):
-            self.visit(node.command)
-        if hasattr(node, "list") and getattr(node, "list", None):
-            for item in getattr(node, "list", []):
-                self.visit(item)
+        collector = _WordCollector()
+        for part in parts:
+            collector.visit(part)
+        words = collector.words
+        self.words.extend(words)
+
+        executable = self._extract_executable(words)
+        redirects = [
+            str(part.output.word)
+            for part in parts
+            if getattr(part, "kind", None) == "redirect"
+            and hasattr(getattr(part, "output", None), "word")
+        ]
+        self.segments.append(
+            CommandSegment(
+                raw_text=segment_text,
+                words=words,
+                executable=executable,
+                redirects=redirects,
+            )
+        )
+        self._visit_interpreter_code(words, executable)
 
     def _visit_interpreter_code(self, words: list[str], executable: str) -> None:
         """Recurse into interpreter -c / -e arguments so their executed
         tokens (e.g. /dev/tcp/...) are still treated as connection targets,
         while quoted text labels (echo '=== SSRF 1.2.3.4 ===') stay atomic.
         Only words are collected — no nested CommandSegments are appended."""
-        flags = _INTERPRETER_CODE_FLAGS.get(executable)
-        if not flags:
-            return
-        if isinstance(flags, str):
-            candidates = [flags] if flags in words else []
-        else:
-            candidates = [flag for flag in flags if flag in words]
-        if not candidates:
-            return
-        flag = candidates[0]
-        try:
-            code = words[words.index(flag) + 1]
-        except (IndexError, ValueError):
-            return
-
-        if not code.strip():
-            return
-        try:
-            nested = bashlex.parse(code)
-        except _BASH_PARSE_ERRORS:
-            return
-
-        for child in nested:
-            self._collect_words(child)
-
-    def _collect_words(self, node: Any) -> list[str]:
-        words: list[str] = []
-
-        def collect(ast_node):
-            kind = getattr(ast_node, "kind", None)
-            if kind == "word" and hasattr(ast_node, "word"):
-                words.append(ast_node.word)
-                self.words.append(ast_node.word)
-            elif kind == "redirect":
-                output = getattr(ast_node, "output", None)
-                if output is not None and hasattr(output, "word"):
-                    words.append(output.word)
-                    self.words.append(output.word)
-            if hasattr(ast_node, "parts"):
-                for child in ast_node.parts:
-                    collect(child)
-            if hasattr(ast_node, "command") and getattr(ast_node, "command", None):
-                collect(ast_node.command)
-            if hasattr(ast_node, "list") and getattr(ast_node, "list", None):
-                for item in getattr(ast_node, "list", []):
-                    collect(item)
-
-        collect(node)
-        return words
+        for flag in _INTERPRETER_CODE_FLAGS.get(executable, ()):
+            if flag in words:
+                idx = words.index(flag)
+                if idx + 1 < len(words):
+                    code = words[idx + 1].strip()
+                    if code:
+                        with contextlib.suppress(_BASH_PARSE_ERRORS):
+                            collector = _WordCollector()
+                            for child in bashlex.parse(code):
+                                collector.visit(child)
+                            self.words.extend(collector.words)
+                break
 
     @staticmethod
     def _extract_executable(words: list[str]) -> str:
@@ -183,8 +157,7 @@ class _CommandVisitor:
                 continue
             if word.lower() in {"command", "env", "exec", "nice", "sudo", "timeout"}:
                 continue
-            base = word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
-            return base
+            return word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
         return ""
 
 
@@ -200,16 +173,14 @@ def parse_bash_segments(command: str) -> list[CommandSegment]:
         return []
     if _HEREDOC_RE.search(command):
         command, _body = split_heredoc_body(command)
-    try:
+
+    with contextlib.suppress(_BASH_PARSE_ERRORS):
         nodes = bashlex.parse(command)
         visitor = _CommandVisitor(command)
         for node in nodes:
             visitor.visit(node)
         if visitor.segments:
             return visitor.segments
-    except _BASH_PARSE_ERRORS:
-        # Fall through to the naive word split below; see _BASH_PARSE_ERRORS.
-        pass
 
     words = command.split()
     exec_name = _CommandVisitor._extract_executable(words)
@@ -222,7 +193,8 @@ def extract_all_command_words(command: str) -> list[str]:
         return []
     if _HEREDOC_RE.search(command):
         command, _body = split_heredoc_body(command)
-    try:
+
+    with contextlib.suppress(_BASH_PARSE_ERRORS):
         nodes = bashlex.parse(command)
         visitor = _CommandVisitor(command)
         for node in nodes:
@@ -243,9 +215,6 @@ def extract_all_command_words(command: str) -> list[str]:
                             if sub_clean:
                                 all_words.append(sub_clean)
             return list(dict.fromkeys(all_words))
-    except _BASH_PARSE_ERRORS:
-        # Fall through to the naive word split below; see _BASH_PARSE_ERRORS.
-        pass
 
     try:
         return list(dict.fromkeys(shlex.split(command, posix=True)))
