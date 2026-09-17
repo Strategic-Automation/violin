@@ -8,10 +8,10 @@ Pure functions — no subprocess.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Phase(str, Enum):
+class Phase(StrEnum):
     SCOPING = "SCOPING"
     RECON = "RECON"
     VULN_RESEARCH = "VULN_RESEARCH"

