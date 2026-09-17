@@ -58,10 +58,15 @@ def _eng_root() -> Path:
 
 def resolve_eng_dir(eng_dir: str | Path) -> Path:
     """Resolve an engagement directory path (absolute or relative to profile root)."""
+    env_root = (
+        Path(os.environ.get("ENG_DIR", "").strip()).expanduser().resolve()
+        if os.environ.get("ENG_DIR", "").strip()
+        else None
+    )
+
     if not str(eng_dir).strip() or str(eng_dir).strip() == ".":
-        env_eng = os.environ.get("ENG_DIR", "").strip()
-        if env_eng:
-            return Path(env_eng).expanduser().resolve()
+        if env_root is not None:
+            return env_root
         cwd = Path.cwd().resolve()
         if (cwd / "scope" / "scope.yaml").exists() or (cwd / "hypotheses.md").exists():
             return cwd
@@ -73,8 +78,11 @@ def resolve_eng_dir(eng_dir: str | Path) -> Path:
         cwd_candidate = (Path.cwd() / path).resolve()
         if not profile_candidate.exists() and cwd_candidate.exists():
             return cwd_candidate
-        return profile_candidate
-    return path.resolve()
+        resolved = profile_candidate
+    else:
+        resolved = path.resolve()
+
+    return resolved
 
 
 def resolve_session_id(eng_dir: str | Path, session_id: str | None = None) -> str:
@@ -433,7 +441,7 @@ def record_semantic_review(
     key = "|".join((task_id, hypothesis_id, skill, technique.strip().lower()))
     clean_evidence_paths = [path_item for path_item in evidence_paths if path_item]
     has_evidence = bool(clean_evidence_paths)
-    positive = outcome in {"progress", "validated", "rejected"} and has_evidence
+    positive = has_evidence or outcome.strip().lower() in {"validated", "rejected"}
     pivoted = bool(
         next_technique.strip().lower()
         and next_technique.strip().lower() != technique.strip().lower()
@@ -459,11 +467,11 @@ def record_semantic_review(
         entries[key] = entry
         lock = data.get("lock") or {}
         # Whole-engagement stuck signal: total no-progress reviews across all
-        # keys.  Pivots and evidence reset it, so a busy CTF loop stays open.
+        # keys. Pivots and evidence reset it, so a busy CTF loop stays open.
         total_stuck = sum(
             int(item.get("count") or 0) for item in entries.values() if not item.get("pivoted")
         )
-        if lock and (has_evidence or (data.get("research_attempts") and pivoted)):
+        if has_evidence or (lock and data.get("research_attempts") and pivoted):
             data.pop("lock", None)
         elif total_stuck >= 5 and not pivoted and not has_evidence:
             data["lock"] = {

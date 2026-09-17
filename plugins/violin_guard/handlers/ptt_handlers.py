@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from ..core import hypotheses, ptt, state
 from ..core.phases import requires_hypothesis
-from ..core.skill_policy import skill_spec
 from ..core.skill_receipts import (
     HermesSkillViewAdapter,
     bind_task,
-    complete_delivery,
-    prepare_delivery,
 )
 from .base import (
     _eng_path,
     _json,
+    _prepare_skill_reservation_payload,
     _serialize_errors,
 )
 from .ptt_gates import (
@@ -48,8 +45,11 @@ def _start_ptt_task(
     selected = next((item for item in tasks if item.id == task_id), None)
     if selected is None:
         raise ValueError(f"PTT task {task_id!r} not found")
-    if selected.status not in {"[ ]", "[~]"}:
-        raise ValueError(f"PTT task {task_id!r} must be [ ] or [~] before it can be started")
+    if selected.status not in {"[ ]", "[~]", "[x]", "[-]"}:
+        raise ValueError(
+            f"PTT task {task_id!r} has status {selected.status!r}; "
+            "it must be [ ], [~], [x], or [-] before it can be started"
+        )
     try:
         phase = ptt.normalize_phase(selected.phase)
     except ValueError as exc:
@@ -61,7 +61,6 @@ def _start_ptt_task(
         resolved_dir = ptt_path.parent.parent if eng_dir is None else Path(eng_dir)
         if state.has_pending_sync(resolved_dir):
             raise ValueError("an active PTT task already exists; review its pending batch first")
-        _validate_phase_exit(resolved_dir, active.id, "[x]")
         superseded_note = f"{active.note} [superseded-by:{task_id}]".strip()
         updates[active.id] = ("[x]", superseded_note)
     ptt.update_tasks(ptt_path, updates)
@@ -86,7 +85,9 @@ def _validate_record_ptt_inputs(
             "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
         )
     selected = next((item for item in doc if item.id == task), None)
-    selected_phase = selected.phase if selected else str(args.get("phase") or "RECON")
+    selected_phase = selected.phase if selected else str(args.get("phase") or "")
+    if not selected_phase:
+        raise ValueError(f"phase is required when creating PTT task {task!r}")
     try:
         phase = ptt.normalize_phase(selected_phase)
     except ValueError as exc:
@@ -125,41 +126,16 @@ def _prepare_record_ptt_delivery(
     candidate_source: str,
 ):
     """Prepare skill delivery reservation and return (reservation, digest, early_response_or_None)."""
-    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
-    reservation = prepare_delivery(
+    return _prepare_skill_reservation_payload(
         eng_dir,
-        session_id=state.resolve_session_id(eng_dir) or "ptt",
         skill=skill,
-        bundle_digest=digest,
         phase=phase.value,
+        task_id=task,
+        session_fallback="ptt",
         vulnerability_class=vulnerability_class or None,
         candidate_source=candidate_source or None,
+        adapter_cls=HermesSkillViewAdapter,
     )
-    if reservation.owner:
-        viewed = HermesSkillViewAdapter().view(skill, task_id=task)
-        completed = complete_delivery(eng_dir, reservation, viewed)
-        spec = skill_spec(skill)
-        early_resp = _json(
-            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
-            transition_applied=False,
-            skill={
-                "name": skill,
-                "digest": digest,
-                "content": viewed.content,
-                "error": viewed.error,
-                "delivery_id": reservation.id,
-                "source": spec.source if spec else None,
-                "install_hint": spec.install_hint if spec else None,
-                "trust": spec.trust if spec else None,
-            },
-        )
-        return reservation, digest, early_resp
-    if reservation.status == "preparing":
-        early_resp = _json(
-            "skill_preparing", transition_applied=False, skill={"name": skill, "digest": digest}
-        )
-        return reservation, digest, early_resp
-    return reservation, digest, None
 
 
 def _apply_ptt_task_transition(
@@ -182,7 +158,7 @@ def _apply_ptt_task_transition(
             ptt_file,
             task,
             title or task,
-            raw_phase or "RECON",
+            raw_phase or "",
             note,
         )
         if status == "[ ]":

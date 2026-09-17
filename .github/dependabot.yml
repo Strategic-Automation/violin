@@ -1,0 +1,34 @@
+# Dependabot version and security updates.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      python-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"

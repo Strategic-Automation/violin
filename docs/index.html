@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Supervised agentic pentesting — Violin</title>
+    <meta
+      name="description"
+      content="Violin is an open-source pentest profile for Hermes Agent. Scope-checked execution, signed receipts, and evidence you can inspect."
+    />
+    <link
+      rel="canonical"
+      href="https://strategic-automation.github.io/violin/"
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="Supervised agentic pentesting — Violin"
+    />
+    <meta
+      property="og:description"
+      content="Violin is an open-source pentest profile for Hermes Agent. Scope-checked execution, signed receipts, and evidence you can inspect."
+    />
+    <meta
+      property="og:url"
+      content="https://strategic-automation.github.io/violin/"
+    />
+    <meta
+      property="og:image"
+      content="https://strategic-automation.github.io/violin/assets/social-preview.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script type="module" src="assets/site.js"></script>
+    <script type="module" src="assets/home.js"></script>
+  </head>
+  <body class="home">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Violin home"
+          ><img src="assets/logo.png" alt="" width="32" height="32" /><span
+            >VIOLIN</span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <a href="index.html" aria-current="page">Overview</a
+          ><a href="guide.html">Docs</a
+          ><a href="engineering.html">Engineering</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </nav>
+        <details class="site-menu">
+          <summary>Menu</summary>
+          <nav aria-label="Mobile navigation">
+            <a href="index.html" aria-current="page">Overview</a
+            ><a href="guide.html">Docs</a
+            ><a href="engineering.html">Engineering</a
+            ><a
+              href="https://github.com/Strategic-Automation/violin"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </nav>
+        </details>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1">
+      <section class="home-hero">
+        <div class="shell hero-layout">
+          <div class="hero-copy">
+            <p class="eyebrow">The supervised pentest profile for Hermes</p>
+            <h1>Agentic pentesting.<br /><span>You stay in command.</span></h1>
+            <p class="hero-intro">
+              Scope-checked execution. Signed evidence. Your tools, with a human
+              making the final call.
+            </p>
+            <div class="actions">
+              <a class="button primary" href="guide.html">Get started</a
+              ><a class="button secondary" href="guard.html"
+                >See how the guard works ↗</a
+              >
+            </div>
+            <div class="hero-install">
+              <p class="nav-label">Already using Hermes?</p>
+              <div class="command-box">
+                <!-- prettier-ignore -->
+                <code id="install-code">hermes profile install https://github.com/Strategic-Automation/violin</code
+                ><button
+                  class="copy-btn"
+                  data-copy-target="install-code"
+                  aria-label="Copy installation command"
+                >
+                  Copy
+                </button>
+              </div>
+              <p class="copy-status" role="status" aria-live="polite"></p>
+            </div>
+            <p class="hero-meta">
+              MIT licensed · Kali / Parrot · Hermes 0.18.0+
+            </p>
+          </div>
+          <img
+            class="hero-mark"
+            src="assets/logo.png"
+            alt="Violin, the Hermes pentest profile"
+            width="256"
+            height="256"
+          />
+        </div>
+      </section>
+      <section class="home-overview" id="overview">
+        <div class="shell">
+          <div class="section-heading">
+            <p class="eyebrow">From scope to evidence</p>
+            <h2>A clear chain of accountability.</h2>
+          </div>
+          <div class="benefits">
+            <a href="guard.html"
+              ><span class="benefit-number">01 / Scope</span>
+              <h3>Check before execution.</h3>
+              <p>
+                Target commands pass through the guard against your approved
+                scope.
+              </p>
+              <span class="text-link">Explore the guard ↗</span></a
+            ><a href="coverage.html"
+              ><span class="benefit-number">02 / Coverage</span>
+              <h3>Keep the work organized.</h3>
+              <p>
+                35 playbooks guide testing. Tasks and hypotheses persist across
+                sessions.
+              </p>
+              <span class="text-link">Browse playbooks ↗</span></a
+            ><a href="guard.html#limits"
+              ><span class="benefit-number">03 / Evidence</span>
+              <h3>Inspect every finding.</h3>
+              <p>
+                Signed receipts support findings. You assess the impact and
+                write the final verdict.
+              </p>
+              <span class="text-link">Evidence and limits ↗</span></a
+            >
+          </div>
+          <div class="home-bottom">
+            <p>
+              For authorized assessments, with written scope and human
+              supervision.
+            </p>
+            <a href="guide.html">Start your first engagement →</a>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>Violin · Open source · MIT</span>
+        <nav aria-label="Footer">
+          <a
+            href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+            >Security</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md"
+            >Contribute</a
+          ><a href="https://hermes-agent.nousresearch.com/"
+            >Built on Hermes ↗</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

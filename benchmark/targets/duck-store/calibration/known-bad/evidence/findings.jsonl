@@ -1,0 +1,3 @@
+{"finding_id":"FIND-001","title":"Rejected default credentials","severity":"High","summary":"A rejected login must not earn credit from a numeric response header.","status":"validated","receipt_paths":["evidence/rejected-login.md"]}
+{"finding_id":"FIND-002","title":"Normal shipping charge","severity":"Medium","summary":"An ordinary paid checkout does not demonstrate a shipping bypass.","status":"validated","receipt_paths":["evidence/normal-shipping.md"]}
+{"finding_id":"FIND-003","title":"Regular user login","severity":"High","summary":"A successful regular login does not demonstrate default administrator credentials.","status":"validated","receipt_paths":["evidence/regular-login.md"]}

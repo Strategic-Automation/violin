@@ -1,25 +1,22 @@
-"""Batch review handlers, validation, and finding integration."""
+"""Batch review handlers and validation."""
 
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 from typing import Any
 
-from ..core import findings, hypotheses, ptt, state
+from ..core import ptt, state
 from ..core.history import history_contains
 from ..core.phases import requires_hypothesis
-from ..core.skill_policy import skill_spec
 from ..core.skill_receipts import (
     HermesSkillViewAdapter,
-    complete_delivery,
     get_binding,
-    prepare_delivery,
 )
 from .base import (
     _eng_path,
     _json,
+    _prepare_skill_reservation_payload,
     _running_background_command,
     _serialize_errors,
 )
@@ -109,25 +106,6 @@ def _validate_review_history(eng_dir: str, pending: dict[str, Any]) -> None:
             )
 
 
-def _validate_review_finding(eng_dir: str, pending: dict[str, Any], finding: Any) -> None:
-    """Validate an optional finding payload against the pending batch."""
-    if finding is None:
-        return
-    if not isinstance(finding, dict):
-        raise ValueError("finding must be an object when supplied")
-    findings._validate_from_pending_batch(
-        eng_dir,
-        pending,
-        title=str(finding.get("title") or ""),
-        severity=str(finding.get("severity") or ""),
-        description=str(finding.get("description") or ""),
-        impact=str(finding.get("impact") or ""),
-        remediation=str(finding.get("remediation") or ""),
-        finding_id=str(finding.get("finding_id") or ""),
-        hypothesis_id=str(finding.get("hypothesis_id") or ""),
-    )
-
-
 def _validate_review_batch(args: dict[str, Any], pending: dict[str, Any]) -> dict[str, Any]:
     """Validate all preconditions for a batch review."""
     eng_dir, task_id, note, status, batch_id, _ = _validate_review_identity(args, pending)
@@ -135,7 +113,6 @@ def _validate_review_batch(args: dict[str, Any], pending: dict[str, Any]) -> dic
         eng_dir, task_id, status, batch_id, pending
     )
     _validate_review_history(eng_dir, pending)
-    _validate_review_finding(eng_dir, pending, args.get("finding"))
     return {
         "batch_id": batch_id,
         "task_id": task_id,
@@ -144,7 +121,6 @@ def _validate_review_batch(args: dict[str, Any], pending: dict[str, Any]) -> dic
         "marker": marker,
         "already_recorded": already_recorded,
         "ptt_path": ptt_path,
-        "finding": args.get("finding"),
     }
 
 
@@ -164,35 +140,17 @@ def _handle_review_batch_skill_reservation(
     phase = ptt.normalize_phase(task.phase)
     if requires_hypothesis(phase) and not hypothesis_id:
         raise ValueError(f"hypothesis_id is required for {phase.value} batch review")
-    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
-    reservation = prepare_delivery(
+    _, digest, early_resp = _prepare_skill_reservation_payload(
         engagement,
-        session_id=state.resolve_session_id(engagement) or "review",
         skill=skill,
-        bundle_digest=digest,
         phase="RETROSPECTIVE" if skill == "fp-check" else phase.value,
+        task_id=task_id,
+        session_fallback="review",
+        extra_fields={"released": False},
+        adapter_cls=HermesSkillViewAdapter,
     )
-    if reservation.owner:
-        viewed = HermesSkillViewAdapter().view(skill, task_id=task_id)
-        completed = complete_delivery(engagement, reservation, viewed)
-        spec = skill_spec(skill)
-        return args, _json(
-            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
-            transition_applied=False,
-            released=False,
-            skill={
-                "name": skill,
-                "digest": digest,
-                "content": viewed.content,
-                "error": viewed.error,
-                "delivery_id": reservation.id,
-                "source": spec.source if spec else None,
-                "install_hint": spec.install_hint if spec else None,
-                "trust": spec.trust if spec else None,
-            },
-        )
-    if reservation.status == "preparing":
-        return args, _json("skill_preparing", transition_applied=False, released=False)
+    if early_resp is not None:
+        return args, early_resp
     updated_args = {**args, "note": _with_skill_token(str(args.get("note") or ""), skill, digest)}
     return updated_args, None
 
@@ -206,53 +164,18 @@ def _execute_batch_review(
     """Validate and execute the core batch review transition."""
     context = _validate_review_batch(args, pending)
     _validate_phase_exit(engagement, context["task_id"], context["status"])
-    finding_result = None
-    finding = context["finding"]
-    if finding is not None:
-        finding_result = findings._create_from_pending_batch(
-            engagement,
-            pending=pending,
-            title=str(finding.get("title") or ""),
-            severity=str(finding.get("severity") or ""),
-            description=str(finding.get("description") or ""),
-            impact=str(finding.get("impact") or ""),
-            remediation=str(finding.get("remediation") or ""),
-            finding_id=str(finding.get("finding_id") or ""),
-            hypothesis_id=str(finding.get("hypothesis_id") or ""),
-        )
-        hypothesis_id = str(finding.get("hypothesis_id") or "").upper().removeprefix("H-")
-        existing = next(
-            (
-                item
-                for item in hypotheses.parse_hypotheses(engagement / "hypotheses.md")
-                if item.id.lstrip("0") == (hypothesis_id.lstrip("0") or "0")
-            ),
-            None,
-        )
-        if existing is not None:
-            linked = [
-                value.strip() for value in existing.linked_findings.split(",") if value.strip()
-            ]
-            if finding_result["finding_id"] not in linked:
-                linked.append(finding_result["finding_id"])
-            hypotheses.update_hypothesis(
-                engagement / "hypotheses.md",
-                id=existing.id,
-                linked_findings=", ".join(linked),
-            )
     if not context["already_recorded"]:
         review_note = f"{context['note']} {context['marker']}"
         ptt.update_task(context["ptt_path"], context["task_id"], context["status"], review_note)
-    batch_evidence = findings._batch_evidence(engagement, pending)
     supplied_evidence = [str(item) for item in (args.get("evidence_paths") or [])]
-    evidence_paths = sorted(set(supplied_evidence) | set(batch_evidence))
+    evidence_paths = sorted(set(supplied_evidence))
     semantic = state.record_semantic_review(
         engagement,
         task_id=context["task_id"],
         hypothesis_id=str(args.get("hypothesis_id") or ""),
         skill=skill or "review",
         technique=str(args.get("technique") or "batch-review"),
-        outcome=str(args.get("outcome") or "progress"),
+        outcome=str(args.get("outcome") or ""),
         evidence_paths=evidence_paths,
         next_action=str(args.get("next_action") or "review evidence"),
         next_technique=str(args.get("next_technique") or ""),
@@ -265,8 +188,6 @@ def _execute_batch_review(
         task_id=context["task_id"],
         task_status=context["status"],
         released=True,
-        finding=finding_result,
-        finding_path=finding_result.get("path") if finding_result else None,
         binding_task_id=None,
         semantic_progress=semantic,
     )
@@ -274,7 +195,7 @@ def _execute_batch_review(
 
 @_serialize_errors
 def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
-    """Review one completed batch, optionally record a finding, and release its lock."""
+    """Review one completed batch and release its lock."""
     eng_dir = str(args.get("eng_dir") or "").strip()
     if not eng_dir:
         raise ValueError("eng_dir is required")
@@ -290,8 +211,6 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
                     task_id=None,
                     task_status=None,
                     released=True,
-                    finding=None,
-                    finding_path=None,
                     message="nothing pending",
                 )
             task_id = str(pending.get("ptt_task_id") or "").strip()
@@ -306,8 +225,7 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
             if skill and skill != "fp-check" and skill != binding_skill:
                 # The delivered skill binding is the task-specific source of truth and
                 # always wins over an explicitly passed skill (which may be the phase
-                # default, e.g. 'pentest'). Don't hard-reject into a deadlock — bind to
-                # the binding skill and hint at the resolution.
+                # default, e.g. 'pentest'). Default to the delivered binding skill.
                 skill = ""
             review_skill = skill or binding_skill
             args = {
@@ -332,7 +250,7 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
             "blocked",
             released=False,
             error=str(exc),
-            next_action="Resolve the reported batch, PTT, history, or finding issue and retry violin_review_batch",
+            next_action="Resolve the reported batch, PTT, or history issue and retry violin_review_batch",
         )
 
 
@@ -340,7 +258,6 @@ __all__ = [
     "_execute_batch_review",
     "_handle_review_batch_skill_reservation",
     "_validate_review_batch",
-    "_validate_review_finding",
     "_validate_review_history",
     "_validate_review_identity",
     "_validate_review_ptt_state",

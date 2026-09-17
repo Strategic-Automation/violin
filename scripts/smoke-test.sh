@@ -351,7 +351,6 @@ cat > "$SMOKE_FRESH/hypotheses.md" <<'MD'
 - **Rationale:** testing
 - **Evidence:** evidence/recon/active/
 - **Next step:** confirm
-- **Linked findings:** none
 - **Updated:** $(date '+%Y-%m-%d %H:%M')
 MD
 echo "# Command History — fresh" > "$SMOKE_FRESH/state/history.md"
@@ -429,7 +428,6 @@ cat > "$SMOKE_STALEPTT/hypotheses.md" <<'MD'
 - **Rationale:** test
 - **Evidence:** x
 - **Next step:** confirm
-- **Linked findings:** none
 - **Updated:** 2026-07-08 00:00
 MD
 echo "# Command History" > "$SMOKE_STALEPTT/state/history.md"
@@ -484,7 +482,6 @@ cat > "$SMOKE_STALEHYP/hypotheses.md" <<'MD'
 - **Rationale:** test
 - **Evidence:** x
 - **Next step:** promote
-- **Linked findings:** FIND-001
 - **Updated:** 2026-07-08 00:00
 MD
 echo "# Command History" > "$SMOKE_STALEHYP/state/history.md"
@@ -547,7 +544,6 @@ cat > "$GATES_DIR/hypotheses.md" <<'MD'
 - **Rationale:** establishing baseline
 - **Evidence:** evidence/recon/active/
 - **Next step:** confirm
-- **Linked findings:** none
 - **Updated:** $(date '+%Y-%m-%d %H:%M')
 MD
 echo "# Command History" > "$GATES_DIR/state/history.md"

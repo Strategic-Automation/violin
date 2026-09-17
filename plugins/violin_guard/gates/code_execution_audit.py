@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import re
 import uuid
 from datetime import UTC, datetime
@@ -18,40 +19,24 @@ from typing import Any
 
 from ..core import history, state
 from ..core.ptt import find_active_task, parse_ptt
-from ..core.targets import extract_target_candidates, normalize_target
-from ..engine.execution import _commit_guard_state
+from ..core.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
+from ..core.targets import (
+    KNOWN_FILE_EXTENSIONS,
+    extract_target_candidates,
+    normalize_target,
+)
+from ..engine.execution import PREVIEW_BYTES, _commit_guard_state
 from . import command
 
 _HEADER = re.compile(r"^\s*#\s*violin:\s*(\{.*\})\s*$")
 _REQUIRED_FIELDS = frozenset({"eng_dir", "phase", "target", "session_id"})
 
-_LOCAL_PATH_EXTENSIONS = frozenset(
-    {
-        ".md",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".txt",
-        ".log",
-        ".py",
-        ".sh",
-        ".env",
-        ".csv",
-        ".xml",
-        ".html",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".wav",
-        ".mp3",
-        ".zip",
-        ".tar",
-        ".gz",
-        ".tokens.env",
-    }
-)
-_LOCAL_PATH_RE = re.compile(r"(?i)FIND-\d+\.md|evidence/|state/|scope/|\./|\.\./|/tmp/|\.creds/")
+# Match the executor's 32 KiB preview budget so result manifests remain useful
+# without becoming an unbounded second copy of tool output.
+MAX_STORED_RESULT_BYTES = PREVIEW_BYTES
+
+_LOCAL_PATH_EXTENSIONS = KNOWN_FILE_EXTENSIONS
+_LOCAL_PATH_RE = re.compile(r"(?i)evidence/|state/|scope/|\./|\.\./|/tmp/|\.creds/")
 _LOCAL_ANALYSIS_IMPORTS = frozenset(
     {
         "ast",
@@ -237,7 +222,7 @@ def validate_source(source: object) -> tuple[dict[str, str] | None, str | None]:
             continue
         value = node.value
         if _is_local_path_literal(value):
-            continue  # filename/path strings (FIND-*.md, evidence/..., *.json) are not targets
+            continue  # Local filename and path strings are not network targets.
         for candidate in extract_target_candidates(f"probe {value}"):
             normalized = normalize_target(candidate)
             if normalized not in {declared, "localhost", "127.0.0.1", "0.0.0.0", "::1"}:
@@ -254,8 +239,7 @@ def _is_local_path_literal(value: str) -> bool:
     """True when a string literal is clearly a local file path, not a network target.
 
     Guards the execute_code target-literal scanner against false positives on
-    canonical finding filenames (FIND-NNN.md), evidence paths, and temp paths that
-    appear inside code payloads.
+    evidence paths and temp paths that appear inside code payloads.
     """
     stripped = value.strip()
     if not stripped:
@@ -339,79 +323,162 @@ def record_completion(
     eng_dir = state.resolve_eng_dir(metadata["eng_dir"])
     digest = source_digest(source)
     receipt_file = Path(receipt_path)
-    receipt = state.read_json(receipt_file)
-    if receipt.get("source_digest") != digest:
-        raise ValueError("execute_code completion does not match its intent receipt")
+    with state.lock_file(receipt_file):
+        receipt = state.read_json(receipt_file)
+        if receipt.get("source_digest") != digest:
+            raise ValueError("execute_code completion does not match its intent receipt")
+        if receipt.get("status") != "starting":
+            raise ValueError(
+                f"execute_code intent receipt is already finalized as {receipt.get('status')}"
+            )
 
-    summary = _result_summary(result, duration_ms)
-    # Command identity is created before dispatch and is also stored in the
-    # pending sync batch.  Keep it byte-for-byte stable so review/rebind can
-    # reconcile the completed execution against that batch.  Outcome metadata
-    # belongs in the receipt and dedicated history fields, not in command=.
-    command_text = str(receipt.get("command") or "").strip()
-    if not command_text:
-        raise ValueError("execute_code intent receipt has no command identity")
-    completed_receipt = {
-        **receipt,
-        "status": "completed" if summary["status"] == "ok" else "completed_with_error",
-        "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "duration_ms": summary["duration_ms"],
-        "exit_code": summary["exit_code"],
-    }
-    if not history.history_contains(eng_dir, command_text):
-        history.append_history(
-            eng_dir,
-            command_text,
-            metadata["phase"],
-            summary["exit_code"],
-            receipt_file.relative_to(eng_dir).as_posix(),
-            status=str(completed_receipt["status"]),
-        )
-    state.atomic_json(receipt_file, completed_receipt)
+        # Command identity is created before dispatch and is also stored in the
+        # pending sync batch.  Keep it byte-for-byte stable so review/rebind can
+        # reconcile the completed execution against that batch.  Outcome metadata
+        # belongs in the receipt and dedicated history fields, not in command=.
+        command_text = str(receipt.get("command") or "").strip()
+        if not command_text:
+            raise ValueError("execute_code intent receipt has no command identity")
+        summary = _result_summary(result, duration_ms)
+        completed_receipt = {
+            **receipt,
+            "status": "completed" if summary["status"] == "ok" else "completed_with_error",
+            "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "duration_ms": summary["duration_ms"],
+            "exit_code": summary["exit_code"],
+            "result": summary["result"],
+        }
+        if not history.history_contains(eng_dir, command_text):
+            history.append_history(
+                eng_dir,
+                command_text,
+                metadata["phase"],
+                summary["exit_code"],
+                receipt_file.relative_to(eng_dir).as_posix(),
+                status=str(completed_receipt["status"]),
+            )
+        state.atomic_json(receipt_file, completed_receipt)
     return receipt_file
 
 
 def abandon_execution(receipt_path: str | Path, reason: str) -> None:
     """Close a prepared intent that cannot receive a post-tool completion."""
     receipt_file = Path(receipt_path)
-    receipt = state.read_json(receipt_file)
-    if receipt.get("status") != "starting":
-        return
-    eng_dir = receipt_file.resolve().parents[2]
-    command_text = str(receipt.get("command") or "").strip()
-    abandoned = {
-        **receipt,
-        "status": "abandoned",
-        "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        "exit_code": -1,
-        "error": reason,
-    }
-    if command_text and not history.history_contains(eng_dir, command_text):
-        history.append_history(
-            eng_dir,
-            command_text,
-            str(receipt.get("phase") or "RECON"),
-            -1,
-            receipt_file.relative_to(eng_dir).as_posix(),
-            status="abandoned",
-        )
-    state.atomic_json(receipt_file, abandoned)
+    with state.lock_file(receipt_file):
+        receipt = state.read_json(receipt_file)
+        if receipt.get("status") != "starting":
+            return
+        eng_dir = receipt_file.resolve().parents[2]
+        command_text = str(receipt.get("command") or "").strip()
+        abandoned = {
+            **receipt,
+            "status": "abandoned",
+            "completed_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "exit_code": -1,
+            "error": reason,
+        }
+        if command_text and not history.history_contains(eng_dir, command_text):
+            history.append_history(
+                eng_dir,
+                command_text,
+                str(receipt.get("phase") or "RECON"),
+                -1,
+                receipt_file.relative_to(eng_dir).as_posix(),
+                status="abandoned",
+            )
+        state.atomic_json(receipt_file, abandoned)
 
 
-def _result_summary(result: object, duration_ms: object) -> dict[str, int | str]:
-    try:
-        parsed: Any = json.loads(result) if isinstance(result, str) else result
-    except json.JSONDecodeError:
-        parsed = {"error": "non-JSON tool result"}
+def _normalized_result_key(key: object) -> str:
+    return re.sub(r"[-\s]+", "_", str(key).strip().casefold())
+
+
+def _normalize_result_value(value: object, *, redact: bool) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key)
+            if redact and _normalized_result_key(key) in SENSITIVE_FIELD_KEYS:
+                normalized[normalized_key] = REDACTED
+            else:
+                normalized[normalized_key] = _normalize_result_value(item, redact=redact)
+        return normalized
+    if isinstance(value, list | tuple):
+        return [_normalize_result_value(item, redact=redact) for item in value]
+    if isinstance(value, str):
+        return redact_text(value) if redact else value
+    if value is None or isinstance(value, bool | int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    rendered = str(value)
+    return redact_text(rendered) if redact else rendered
+
+
+def _canonical_result_json(value: object) -> str:
+    # ASCII escapes make every normalized JSON value UTF-8 encodable, including
+    # JSON strings containing unpaired surrogate escapes from arbitrary tools.
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _bounded_result(result: object) -> tuple[dict[str, Any], object]:
+    if isinstance(result, str):
+        original_text = result
+        try:
+            parsed = json.loads(result)
+        except json.JSONDecodeError:
+            parsed = {"error": "non-JSON tool result"}
+            stored_text = redact_text(result)
+            parsed_as_json = False
+            representation_type = "text"
+        else:
+            stored_text = _canonical_result_json(_normalize_result_value(parsed, redact=True))
+            parsed_as_json = True
+            representation_type = "json"
+    else:
+        parsed = result
+        original_text = _canonical_result_json(_normalize_result_value(result, redact=False))
+        stored_text = _canonical_result_json(_normalize_result_value(result, redact=True))
+        parsed_as_json = True
+        representation_type = "json"
+
+    original_size = len(original_text.encode("utf-8"))
+    stored_bytes = stored_text.encode("utf-8")
+    truncated = len(stored_bytes) > MAX_STORED_RESULT_BYTES
+    if truncated:
+        stored_text = stored_bytes[:MAX_STORED_RESULT_BYTES].decode("utf-8", errors="ignore")
+        stored_bytes = stored_text.encode("utf-8")
+    return (
+        {
+            "parsed_as_json": parsed_as_json,
+            "representation_type": representation_type,
+            "original_size_bytes": original_size,
+            "stored_size_bytes": len(stored_bytes),
+            "max_stored_size_bytes": MAX_STORED_RESULT_BYTES,
+            "truncated": truncated,
+            "value": stored_text,
+        },
+        parsed,
+    )
+
+
+def _result_summary(result: object, duration_ms: object) -> dict[str, Any]:
+    bounded_result, parsed = _bounded_result(result)
     failed = isinstance(parsed, dict) and bool(parsed.get("error"))
     try:
         elapsed = max(0, int(duration_ms))
     except (TypeError, ValueError):
         elapsed = 0
-    return {"status": "error" if failed else "ok", "exit_code": int(failed), "duration_ms": elapsed}
+    return {
+        "status": "error" if failed else "ok",
+        "exit_code": int(failed),
+        "duration_ms": elapsed,
+        "result": bounded_result,
+    }
 
 
 __all__ = [
+    "MAX_STORED_RESULT_BYTES",
     "abandon_execution",
     "execution_class",
     "parse_metadata",

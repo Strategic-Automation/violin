@@ -54,14 +54,16 @@ Exploiting the discount system beyond intended usage.
 The referral/registration flow may grant credit for a `referrer`/`referral`
 field and trust it. This is a business-logic credit-achieving vector (unchecked
 self-referral = free credit), NOT social engineering. Probe it on the
-registration endpoint. When canonizing a confirmed referral grant, the
-canonical `FIND-NNN.md` MUST quote the raw JSON field that proves the grant
-— e.g. `"account_credit": 10.0` or `"credit": 10` (a non-zero value), exactly
+registration endpoint. When submitting a confirmed referral grant, the signed
+receipt MUST contain the raw JSON field that proves the grant
+— e.g. a non-zero balance/credit value, exactly
 as the server returned it — and the concrete field that changed
 (`referral_count`). Capture the full credit-bearing response body (e.g. the
-referrer's balance after the referral), not just the `201` status line. A
-finding that says only `balance grew` without the raw JSON field is
-unverifiable even with decisive evidence.
+referrer's balance after the referral), not just the `201` status line. Attach
+the `POST /auth/register` receipt itself — the one whose response body carries
+the credit/balance field — not a follow-up `GET /auth/me` or login receipt that
+only shows `HTTP 200`. A finding that says only `balance grew` without the raw
+JSON field is unverifiable even with decisive evidence.
 
 ```bash
 # 1. Register a throwaway account and read its profile to find a
@@ -124,6 +126,16 @@ curl -X POST "https://target.com/api/orders" \
   -d '{"items":[{"productId":1,"quantity":1,"price":-100}],"total":-100}'
 ```
 
+**The proof is the server's echo of the negative number, not the request you
+sent.** Send the negative value (`-1`, `-100`, `-0.01`) through the endpoint's
+*actual* field name and capture the response body: the decisive signal is the
+server echoing the negative number back (e.g. `"quantity":-1` or a negative
+`total`/`subtotal` in the response JSON). A probe that sends a positive value,
+or sends `-1` through a field name the request model ignores, returns a normal
+response and proves nothing. If the first field name is rejected, discover the
+real one from the client JS bundle or a validation error before re-sending the
+negative value.
+
 **Related:** negative quantities, amounts, counts; integer overflow/underflow (e.g. price total wrapping, balance underflow, counter past max). See §Detection for the full field list and PoC payloads.
 
 ## Detection
@@ -151,6 +163,12 @@ Content-Type: application/json
 - Send `"price": 0` for free checkout
 - Set currency to a weaker one without adjusting the price
 - Change `"discount": 100` (expecting percentage)
+- Set the shipping/freight cost field to `0` (or omit it) inside the
+  shipping-info object and confirm the checkout response echoes a zero
+  shipping cost while still confirming the order. Send the field under the
+  endpoint's *actual* name (discovered from the JS bundle or a validation
+  error) and capture the response body — the decisive proof is the server
+  echoing the zero cost back, not the request you sent.
 
 ### Race Condition Testing
 

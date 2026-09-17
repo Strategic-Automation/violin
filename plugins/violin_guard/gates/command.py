@@ -48,6 +48,7 @@ class CheckCommandArgs:
     session_id: str | None = None
     account_sync: bool = True
     hypothesis_id: str | None = None
+    is_burst: bool = False
 
 
 @dataclass
@@ -151,6 +152,7 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     ptt_validation = ptt.validate_ptt(ptt.parse_ptt(ptt_path))
     result.errors.extend(ptt_validation.errors)
     result.warnings.extend(ptt_validation.warnings)
+    active_task = None
     active_task_hyp_id = None
     if ptt_validation.active_task:
         result.infos.append(f"active PTT task: {ptt_validation.active_task}")
@@ -171,16 +173,16 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
             result.errors.extend(binding_result.errors)
             result.warnings.extend(binding_result.warnings)
             result.infos.extend(binding_result.infos)
+            result.hints.extend(binding_result.hints)
 
     semantic_lock = state.semantic_lock(eng_dir)
     if semantic_lock:
-        result.add_error(
-            "semantic anti-stuck lock: five evidence-poor reviews require a recorded research "
-            "attempt plus a meaningful next_technique pivot before target execution. "
-            "Unlock by calling violin_record_hypothesis (or the batch review tool) with "
-            "research_attempted='true' and a next_technique that differs from the current one, "
-            "or by completing an evidence-backed review batch (evidence_paths pointing at saved "
-            "output). A new technique OR fresh evidence releases the lock."
+        result.add_hint(
+            "semantic anti-stuck lock active: five evidence-poor reviews suggest the "
+            "current technique is not yielding fresh evidence. Next action: record a "
+            "research attempt (violin_record_hypothesis ... research_attempted='true') "
+            "with a next_technique that differs from the current one, or attach fresh "
+            "evidence. This is a hint — execution still allowed."
         )
 
     # 5. History staleness (duplicate detection)
@@ -201,10 +203,13 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
         args.target,
         hypothesis_id=args.hypothesis_id or active_task_hyp_id,
         match_command_target=not research_primary,
+        is_burst=args.is_burst or bool(pending),
+        task_id=active_task.id if active_task else None,
     )
     result.errors.extend(hyp_result.errors)
     result.warnings.extend(hyp_result.warnings)
     result.infos.extend(hyp_result.infos)
+    result.hints.extend(hyp_result.hints)
 
     # 7-8. Target execution accounting.
     if args.account_sync:

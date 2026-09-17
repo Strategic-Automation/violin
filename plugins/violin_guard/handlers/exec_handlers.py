@@ -81,6 +81,7 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             timeout_seconds=args.get("timeout_seconds", 180),
             cwd=args.get("cwd", ""),
             label=args.get("label", ""),
+            evidence_outputs=args.get("evidence_outputs", []),
             ptt_task_id=active_task.id if active_task else "",
             argv=_internal_argv,
             background=(
@@ -99,12 +100,13 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             )
         hint = (
             "record this result on the hypothesis board now (violin_record_hypothesis: "
-            "status, Test Response, Runtime Evidence path) and link a canonical "
-            "FIND-NNN.md before the next command"
+            "status, Test Response, Runtime Evidence path) before the next command"
             if active_task
             else ""
         )
-        return _json("ok", execution_status=execution_status, next_action=hint, **res)
+        return _json(
+            "ok", execution_status=execution_status, next_action=hint, hints=result.hints, **res
+        )
     except Exception as exc:
         return _json("execution_failed", error=str(exc), executed=False)
 
@@ -156,6 +158,7 @@ def handle_exec_burst(args: dict, **kwargs):
             "scope": scope,
             "session_id": session_id,
             "target": args.get("target"),
+            "is_burst": True,
         }
         cmd_result = _check_command_internal(cmd_args)
         exit_code = cmd_result.exit_code()

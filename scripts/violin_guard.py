@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,10 +15,58 @@ _PROFILE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROFILE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROFILE_ROOT))
 
-from plugins.violin_guard import handlers
-from plugins.violin_guard.core import bootstrap, findings, state
-from plugins.violin_guard.engine import release
-from plugins.violin_guard.gates import command
+from scripts.cli_environment import project_imports
+
+
+def _ensure_venv() -> None:
+    try:
+        import pydantic  # noqa: F401
+
+        return
+    except ImportError:
+        pass
+
+    candidates: list[Path] = []
+    if os.getenv("VIRTUAL_ENV"):
+        candidates.append(Path(os.environ["VIRTUAL_ENV"]))
+    candidates.extend(
+        [
+            _PROFILE_ROOT / ".venv",
+            _PROFILE_ROOT.parent / ".venv",
+            Path("/violin/.venv"),
+        ]
+    )
+
+    for venv in candidates:
+        if not venv.is_dir():
+            continue
+        site_packages = list(venv.glob("lib/python*/site-packages")) + list(
+            venv.glob("Lib/site-packages")
+        )
+        for sp in site_packages:
+            if sp.is_dir() and str(sp) not in sys.path:
+                sys.path.insert(0, str(sp))
+        try:
+            import pydantic  # noqa: F401
+
+            return
+        except ImportError:
+            pass
+
+        for exe_name in ("bin/python", "bin/python3", "Scripts/python.exe", "Scripts/python"):
+            exe = venv / exe_name
+            if exe.is_file() and Path(sys.executable).resolve() != exe.resolve():
+                res = subprocess.run([str(exe), *sys.argv], check=False)
+                sys.exit(res.returncode)
+
+
+with project_imports(_PROFILE_ROOT):
+    _ensure_venv()
+
+    from plugins.violin_guard import handlers
+    from plugins.violin_guard.core import bootstrap, findings, state
+    from plugins.violin_guard.engine import release
+    from plugins.violin_guard.gates import command
 
 
 def _print_result(result) -> int:
@@ -92,17 +142,6 @@ def cmd_record_ptt(args: argparse.Namespace) -> int:
 
 
 def cmd_review_batch(args: argparse.Namespace) -> int:
-    finding = None
-    finding_values = {
-        "finding_id": args.finding_id,
-        "title": args.finding_title,
-        "severity": args.finding_severity,
-        "description": args.finding_description,
-        "impact": args.finding_impact,
-        "remediation": args.finding_remediation,
-    }
-    if any(str(value or "").strip() for value in finding_values.values()):
-        finding = finding_values
     out = json.loads(
         handlers.handle_review_batch(
             {
@@ -113,7 +152,6 @@ def cmd_review_batch(args: argparse.Namespace) -> int:
                 "skill": args.skill,
                 "hypothesis_id": args.hypothesis_id,
                 "technique": args.technique,
-                "finding": finding,
             }
         )
     )
@@ -259,9 +297,7 @@ def main() -> int:
     p.add_argument("--phase", default="")
     p.set_defaults(func=cmd_record_ptt)
 
-    p = sub.add_parser(
-        "review-batch", help="Review a completed batch, optionally record a finding, and unlock"
-    )
+    p = sub.add_parser("review-batch", help="Review a completed batch and unlock")
     p.add_argument("--eng-dir", required=True)
     p.add_argument("--id", required=True)
     p.add_argument("--status", required=True, choices=["[~]", "[x]", "[!]", "[-]"])
@@ -269,14 +305,6 @@ def main() -> int:
     p.add_argument("--skill", default="")
     p.add_argument("--hypothesis-id", default="")
     p.add_argument("--technique", default="")
-    p.add_argument("--finding-id", default="")
-    p.add_argument("--finding-title", default="")
-    p.add_argument(
-        "--finding-severity", default="", choices=["", "Critical", "High", "Medium", "Low", "Info"]
-    )
-    p.add_argument("--finding-description", default="")
-    p.add_argument("--finding-impact", default="")
-    p.add_argument("--finding-remediation", default="")
     p.set_defaults(func=cmd_review_batch)
 
     p = sub.add_parser("rebind-pending-batch", help="Explicitly rebind a completed pending batch")
@@ -313,7 +341,7 @@ def main() -> int:
 
     p = sub.add_parser(
         "generate-closeout",
-        help="Derive findings.yaml and report.md from canonical FIND-*.md files",
+        help="Render findings.yaml and report.md from evidence/findings.jsonl",
     )
     p.add_argument("--eng-dir", required=True)
     p.add_argument("--target", required=True)

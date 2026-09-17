@@ -53,14 +53,10 @@ the exact username/password that produced the admin-level token. Also probe
 JSON login bodies with the trivial `"password":"password"` form — some
 frameworks only accept defaults via their typed request model.
 
-**Canonizing the win:** when a default/weak credential pair succeeds, the
-canonical `FIND-NNN.md` MUST quote the raw JSON field that proves the
-escalation — e.g. `"role":"admin"` or `role=admin`, exactly as the server
-returned it — and state the exact pair (`admin:password` style), the
-session-issuing response (e.g. `HTTP/1.1 200` with `token`/`role` in the
-body), and the concrete field that changed (`role`). A finding that says only
-`admin login works` without the raw JSON role field is unverifiable even with
-decisive evidence.
+**Submitting the win:** the receipt attached to `violin_submit_finding` must
+contain the exact credential pair, session-issuing status, and raw JSON field
+that proves the granted role. `admin login works` without the returned role
+field is not decisive evidence.
 
 ### Auth Parameter Manipulation
 
@@ -192,6 +188,28 @@ curl -s -X POST 'http://target.com/rest/2fa/verify' \
   -H 'Content-Type: application/json' \
   -d '{"tmpToken":"...","otp":"000000"}'
 ```
+
+**Discover the exact 2FA request schema first.** 2FA verification
+endpoints are strongly typed: a guessed field name (`tmpToken`/`otp`) that
+the framework's request model does not declare is rejected before any
+bypass logic runs, so the decisive confirmation signal never appears.
+Before probing, pull the actual field names from the client JS bundle, an
+OpenAPI spec, or a validation error (send an empty/absent body and read
+the field names the server echoes back). Then test, in order:
+
+1. **Empty OTP** — submit the OTP field with an empty string (`""`); some
+   typed models accept an empty second factor as "verified".
+2. **Empty secret** — include the TOTP secret field with an empty value
+   alongside the login; a missing secret is sometimes treated as 2FA
+   already satisfied.
+3. **Bypass flag** — add a boolean bypass/skip field to the 2FA
+   verification body; some models honour it.
+4. **Replay the password step** — after step 1 succeeds, call the
+   step-2-protected endpoint directly with the step-1 token and no OTP.
+
+Capture the full response body for each — the proof is the server's own
+signal (a second-factor confirmation field, or an issued session token
+without a completed second factor), not the request you sent.
 
 ---
 

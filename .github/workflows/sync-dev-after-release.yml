@@ -1,0 +1,32 @@
+name: Sync dev after release
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-dev-after-release
+  cancel-in-progress: false
+
+jobs:
+  fast-forward-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Fast-forward dev to master
+        shell: bash
+        run: |
+          git fetch origin master dev
+          if ! git merge-base --is-ancestor origin/dev origin/master; then
+            echo "::error::dev is not an ancestor of master. Merge master into dev manually; refusing to rewrite dev."
+            exit 1
+          fi
+          git push origin origin/master:refs/heads/dev

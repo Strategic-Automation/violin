@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Playbooks — Violin</title>
+    <meta
+      name="description"
+      content="Find a technique across 35 playbooks and seven routed skills. Open a playbook to read its methodology."
+    />
+    <link
+      rel="canonical"
+      href="https://strategic-automation.github.io/violin/coverage.html"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Playbooks — Violin" />
+    <meta
+      property="og:description"
+      content="Find a technique across 35 playbooks and seven routed skills. Open a playbook to read its methodology."
+    />
+    <meta
+      property="og:url"
+      content="https://strategic-automation.github.io/violin/coverage.html"
+    />
+    <meta
+      property="og:image"
+      content="https://strategic-automation.github.io/violin/assets/social-preview.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script type="module" src="assets/site.js"></script>
+    <script type="module" src="assets/coverage.js"></script>
+  </head>
+  <body class="documentation">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Violin home"
+          ><img src="assets/logo.png" alt="" width="32" height="32" /><span
+            >VIOLIN</span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <a href="index.html">Overview</a><a href="guide.html">Docs</a
+          ><a href="engineering.html">Engineering</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </nav>
+        <details class="site-menu">
+          <summary>Menu</summary>
+          <nav aria-label="Mobile navigation">
+            <a href="index.html">Overview</a><a href="guide.html">Docs</a
+            ><a href="engineering.html">Engineering</a
+            ><a
+              href="https://github.com/Strategic-Automation/violin"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </nav>
+        </details>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1">
+      <div class="shell docs-layout">
+        <aside class="docs-sidebar">
+          <p class="nav-label">Documentation</p>
+          <nav aria-label="Documentation">
+            <a href="guide.html">Get started</a
+            ><a href="guard.html">Guard & evidence</a
+            ><a href="coverage.html" aria-current="page">Playbooks</a
+            ><a href="tools.html">Tool reference</a
+            ><a href="engineering.html">Engineering notes</a>
+          </nav>
+          <a
+            class="sidebar-source"
+            href="https://github.com/Strategic-Automation/violin"
+            >View source ↗</a
+          >
+        </aside>
+        <div class="docs-content">
+          <details class="docs-mobile">
+            <summary>In the docs <span>Playbooks</span></summary>
+            <nav aria-label="Documentation pages">
+              <a href="guide.html">Get started</a
+              ><a href="guard.html">Guard & evidence</a
+              ><a href="coverage.html" aria-current="page">Playbooks</a
+              ><a href="tools.html">Tool reference</a
+              ><a href="engineering.html">Engineering notes</a>
+            </nav>
+          </details>
+          <div class="page-heading">
+            <p class="eyebrow">Violin / Documentation</p>
+            <h1>Playbooks</h1>
+            <p class="intro">
+              Find a technique across 35 playbooks and seven routed skills. Open
+              a playbook to read its methodology.
+            </p>
+          </div>
+          <section class="doc-section first-section" id="playbooks">
+            <div class="filter-bar">
+              <button class="filter-pill active" data-filter="all">
+                All (35)
+              </button>
+              <button class="filter-pill" data-filter="injection">
+                Injection (10)
+              </button>
+              <button class="filter-pill" data-filter="auth">
+                Access &amp; Identity (4)
+              </button>
+              <button class="filter-pill" data-filter="api">
+                Server, API &amp; Cloud (8)
+              </button>
+              <button class="filter-pill" data-filter="logic">
+                Logic, Crypto &amp; LLM (4)
+              </button>
+              <button class="filter-pill" data-filter="client">
+                Client-Side (2)
+              </button>
+              <button class="filter-pill" data-filter="lifecycle">
+                Lifecycle (4)
+              </button>
+              <button class="filter-pill" data-filter="recon">Recon (3)</button>
+              <input
+                type="text"
+                class="search-input"
+                id="playbook-search"
+                placeholder="Search playbooks (e.g. sqli, jwt, ssrf, llm)..."
+                aria-label="Search playbooks"
+              />
+            </div>
+            <p id="playbook-results" class="results-count" role="status"></p>
+            <div class="playbooks-grid" id="playbooks-container">
+              <!-- Injection -->
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/sqli.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">sqli</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/nosql-injection.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">nosql-injection</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/command-injection.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">command-injection</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/ldap-injection.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">ldap-injection</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/xpath-injection.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">xpath-injection</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/ssti.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">ssti</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/xxe.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">xxe</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/deserialization.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">deserialization</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/prototype-pollution.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">prototype-pollution</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="injection"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/path-traversal.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Injection</span
+                ><span class="playbook-name">path-traversal</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <!-- Access & Auth -->
+              <a
+                class="playbook-card"
+                data-cat="auth"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/identity-auth/playbooks/idor-access-control.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Access &amp; Auth</span
+                ><span class="playbook-name">idor-access-control</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="auth"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/identity-auth/playbooks/auth-bypass.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Access &amp; Auth</span
+                ><span class="playbook-name">auth-bypass</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="auth"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/identity-auth/playbooks/jwt-attacks.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Access &amp; Auth</span
+                ><span class="playbook-name">jwt-attacks</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="auth"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/identity-auth/playbooks/redirects-unvalidated.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Access &amp; Auth</span
+                ><span class="playbook-name">redirects-unvalidated</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <!-- Server, API & Cloud -->
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/ssrf.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">ssrf</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/api-testing/playbooks/api-security.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">api-security</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/llm-security/playbooks/mcp-api-testing.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">mcp-api-testing</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/misconfig/playbooks/security-misconfiguration.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">security-misconfiguration</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/misconfig/playbooks/observability-failures.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">observability-failures</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/supply-chain.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">supply-chain</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/anti-automation.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">anti-automation</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="api"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/misconfig/playbooks/security-through-obscurity.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Server, API &amp; Cloud</span
+                ><span class="playbook-name">security-through-obscurity</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <!-- Logic, Crypto & LLM -->
+              <a
+                class="playbook-card"
+                data-cat="logic"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/business-logic/playbooks/workflow-state-abuse.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Logic &amp; LLM</span
+                ><span class="playbook-name">workflow-state-abuse</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="logic"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/input-validation.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Logic &amp; LLM</span
+                ><span class="playbook-name">input-validation</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="logic"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/identity-auth/playbooks/cryptographic-issues.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Logic &amp; LLM</span
+                ><span class="playbook-name">cryptographic-issues</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="logic"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/llm-security/playbooks/llm-prompt-injection.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Logic &amp; LLM</span
+                ><span class="playbook-name">llm-prompt-injection</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <!-- Client-Side -->
+              <a
+                class="playbook-card"
+                data-cat="client"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/web-app/playbooks/xss.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Client-Side</span
+                ><span class="playbook-name">xss</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="client"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/identity-auth/playbooks/csrf.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Client-Side</span
+                ><span class="playbook-name">csrf</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <!-- Lifecycle -->
+              <a
+                class="playbook-card"
+                data-cat="lifecycle"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/vuln-research.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Lifecycle</span
+                ><span class="playbook-name">vuln-research</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="lifecycle"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/exploitation.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Lifecycle</span
+                ><span class="playbook-name">exploitation</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="lifecycle"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/post-exploitation.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Lifecycle</span
+                ><span class="playbook-name">post-exploitation</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="lifecycle"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/reporting.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Lifecycle</span
+                ><span class="playbook-name">reporting</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <!-- Recon -->
+              <a
+                class="playbook-card"
+                data-cat="recon"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/recon.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Recon</span
+                ><span class="playbook-name">recon</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="recon"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/scoping.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Recon</span
+                ><span class="playbook-name">scoping</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+              <a
+                class="playbook-card"
+                data-cat="recon"
+                href="https://github.com/Strategic-Automation/violin/blob/master/skills/pentest/playbooks/tools.md"
+                target="_blank"
+                rel="noopener"
+                ><span class="playbook-category">Recon</span
+                ><span class="playbook-name">tools</span
+                ><span class="row-arrow" aria-hidden="true">↗</span></a
+              >
+            </div>
+          </section>
+          <a class="next-page" href="tools.html"
+            ><span>Next</span>Read the tool reference →</a
+          >
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>Violin · Open source · MIT</span>
+        <nav aria-label="Footer">
+          <a
+            href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+            >Security</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md"
+            >Contribute</a
+          ><a href="https://hermes-agent.nousresearch.com/"
+            >Built on Hermes ↗</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

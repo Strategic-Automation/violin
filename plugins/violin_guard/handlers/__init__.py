@@ -9,6 +9,7 @@ from .exec_handlers import (
     handle_exec_status,
     handle_heartbeat_done,
 )
+from .finding_handlers import handle_submit_finding
 from .hypothesis_handlers import handle_record_hypothesis
 from .ptt_handlers import (
     handle_rebind_pending_batch,
@@ -23,6 +24,7 @@ __all__ = [
     "handle_exec_cancel",
     "handle_exec_status",
     "handle_heartbeat_done",
+    "handle_submit_finding",
     "handle_rebind_pending_batch",
     "handle_record_hypothesis",
     "handle_record_ptt",

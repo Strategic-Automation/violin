@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guard &amp; evidence — Violin</title>
+    <meta
+      name="description"
+      content="Understand what runs, what gets blocked, and what a signed receipt proves."
+    />
+    <link
+      rel="canonical"
+      href="https://strategic-automation.github.io/violin/guard.html"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Guard &amp; evidence — Violin" />
+    <meta
+      property="og:description"
+      content="Understand what runs, what gets blocked, and what a signed receipt proves."
+    />
+    <meta
+      property="og:url"
+      content="https://strategic-automation.github.io/violin/guard.html"
+    />
+    <meta
+      property="og:image"
+      content="https://strategic-automation.github.io/violin/assets/social-preview.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script type="module" src="assets/site.js"></script>
+    <script type="module" src="assets/guard.js"></script>
+  </head>
+  <body class="documentation">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Violin home"
+          ><img src="assets/logo.png" alt="" width="32" height="32" /><span
+            >VIOLIN</span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <a href="index.html">Overview</a><a href="guide.html">Docs</a
+          ><a href="engineering.html">Engineering</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </nav>
+        <details class="site-menu">
+          <summary>Menu</summary>
+          <nav aria-label="Mobile navigation">
+            <a href="index.html">Overview</a><a href="guide.html">Docs</a
+            ><a href="engineering.html">Engineering</a
+            ><a
+              href="https://github.com/Strategic-Automation/violin"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </nav>
+        </details>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1">
+      <div class="shell docs-layout">
+        <aside class="docs-sidebar">
+          <p class="nav-label">Documentation</p>
+          <nav aria-label="Documentation">
+            <a href="guide.html">Get started</a
+            ><a href="guard.html" aria-current="page">Guard & evidence</a
+            ><a href="coverage.html">Playbooks</a
+            ><a href="tools.html">Tool reference</a
+            ><a href="engineering.html">Engineering notes</a>
+          </nav>
+          <a
+            class="sidebar-source"
+            href="https://github.com/Strategic-Automation/violin"
+            >View source ↗</a
+          >
+        </aside>
+        <div class="docs-content">
+          <details class="docs-mobile">
+            <summary>In the docs <span>Guard & evidence</span></summary>
+            <nav aria-label="Documentation pages">
+              <a href="guide.html">Get started</a
+              ><a href="guard.html" aria-current="page">Guard & evidence</a
+              ><a href="coverage.html">Playbooks</a
+              ><a href="tools.html">Tool reference</a
+              ><a href="engineering.html">Engineering notes</a>
+            </nav>
+          </details>
+          <div class="page-heading">
+            <p class="eyebrow">Violin / Documentation</p>
+            <h1>Guard & evidence</h1>
+            <p class="intro">
+              Understand what runs, what gets blocked, and what a signed receipt
+              proves.
+            </p>
+          </div>
+          <section id="how" class="doc-section">
+            <h2>Try an execution scenario</h2>
+            <p>
+              See how scope, task state, and command checks affect a request.
+              This is an illustrative demo, not a live agent.
+            </p>
+            <aside
+              class="simulator-card"
+              id="guard-simulator"
+              aria-label="Interactive execution guard simulation"
+            >
+              <div class="sim-header">
+                <div class="sim-title">Execution boundary</div>
+                <div
+                  class="sim-status pass"
+                  id="sim-overall-status"
+                  role="status"
+                >
+                  PASSED · SIGNED
+                </div>
+              </div>
+
+              <p class="demo-note">
+                Illustrative simulation · no commands are executed.
+              </p>
+              <div class="sim-scenarios">
+                <div class="sim-label">Select Test Scenario:</div>
+                <div class="scenario-btns">
+                  <button class="scenario-btn active" data-scenario="recon">
+                    1. In-Scope Recon
+                  </button>
+                  <button class="scenario-btn" data-scenario="scope_deny">
+                    2. Out-of-Scope Target
+                  </button>
+                  <button class="scenario-btn" data-scenario="destructive_deny">
+                    3. Destructive Block
+                  </button>
+                  <button class="scenario-btn" data-scenario="phase_deny">
+                    4. Phase Desync
+                  </button>
+                </div>
+              </div>
+
+              <div class="sim-body">
+                <ol class="gate-list" id="gate-checklist">
+                  <li class="gate-item">
+                    <span class="gate-name"
+                      >Written scope in <code>scope.yaml</code></span
+                    >
+                    <span class="gate-badge ok" id="g1">PASS</span>
+                  </li>
+                  <li class="gate-item">
+                    <span class="gate-name">Resolved target within scope</span>
+                    <span class="gate-badge ok" id="g2">PASS</span>
+                  </li>
+                  <li class="gate-item">
+                    <span class="gate-name"
+                      >Active PTT task under current phase</span
+                    >
+                    <span class="gate-badge ok" id="g3">PASS</span>
+                  </li>
+                  <li class="gate-item">
+                    <span class="gate-name">Routed specialist skill bound</span>
+                    <span class="gate-badge ok" id="g4">PASS</span>
+                  </li>
+                  <li class="gate-item">
+                    <span class="gate-name">Hypothesis binding validation</span>
+                    <span class="gate-badge ok" id="g5">PASS</span>
+                  </li>
+                  <li class="gate-item">
+                    <span class="gate-name"
+                      >Command history &amp; de-duplication</span
+                    >
+                    <span class="gate-badge ok" id="g6">PASS</span>
+                  </li>
+                  <li class="gate-item">
+                    <span class="gate-name"
+                      >Destructive pattern safety gate</span
+                    >
+                    <span class="gate-badge ok" id="g7">PASS</span>
+                  </li>
+                </ol>
+
+                <div
+                  class="sim-terminal"
+                  id="sim-output"
+                  tabindex="0"
+                  aria-label="Illustrative command output"
+                >
+                  // Terminal Output: violin_exec( phase = "RECON", target =
+                  "app.example.com", command = "nmap -sV -sC app.example.com" )
+                  → GATES PASSED (7/7) → Receipt sealed and signed: { "status":
+                  "ok", "receipt_hmac_sha256": "9f2c41d8...a7",
+                  "receipt_ed25519": "ed25519:MEUCIQDk3f...", "evidence_sha256":
+                  ["3b1f8c04..."] }
+                </div>
+              </div>
+            </aside>
+          </section>
+          <section id="limits" class="doc-section">
+            <h2>What the evidence can tell you</h2>
+            <p>
+              Receipts authenticate execution evidence. Severity, impact, and
+              report inclusion still require your judgment.
+            </p>
+            <div class="grid-cards">
+              <div class="feature-card">
+                <h3>A Single Run is a Noisy Sample</h3>
+                <p>
+                  Agentic runs vary run to run. Violin reports a distribution —
+                  mean pass@1, pass@k, pass^k — and prefers the mean to the best
+                  run. A repo test pass is not a live benchmark score.
+                </p>
+              </div>
+              <div class="feature-card">
+                <h3>The Guard is Not Containment</h3>
+                <p>
+                  The guard constrains what the agent is allowed to run against
+                  an approved scope. It does not isolate your physical network
+                  for you; run in an isolated environment.
+                </p>
+              </div>
+              <div class="feature-card">
+                <h3>No Model Choices Baked In</h3>
+                <p>
+                  Violin adds no credentials and selects no model provider; it
+                  uses your Hermes configuration. Use a capable frontier model —
+                  weaker models produce weaker hypotheses, not safer ones.
+                </p>
+              </div>
+              <div class="feature-card">
+                <h3>Receipts Are Not Judgment</h3>
+                <p>
+                  Receipts authenticate what was sent and received. Severity,
+                  impact, exploitability, and whether a finding belongs in the
+                  report remain human calls.
+                </p>
+              </div>
+            </div>
+          </section>
+          <details class="disclosure" id="compare">
+            <summary>Compare execution architectures</summary>
+            <div class="disclosure-body">
+              <p>
+                Architectural patterns, not a product ranking. Implementations
+                vary.
+              </p>
+              <div
+                class="table-container"
+                tabindex="0"
+                role="region"
+                aria-label="Architecture comparison, scroll horizontally"
+              >
+                <table class="comparison-table">
+                  <thead>
+                    <tr>
+                      <th>Architecture Dimension</th>
+                      <th>Autonomous Black-Box Agent</th>
+                      <th>General Agent + Shell Access</th>
+                      <th class="col-violin">Violin Profile</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><b>Scope Enforcement</b></td>
+                      <td>Implementation-dependent scope controls</td>
+                      <td>Whatever the prompt instructed</td>
+                      <td class="col-violin">
+                        Every command validated against an approved scope file,
+                        fail-closed
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>Evidence Model</b></td>
+                      <td>
+                        Implementation-dependent report and evidence output
+                      </td>
+                      <td>Markdown prose generated by the model</td>
+                      <td class="col-violin">
+                        Signed execution receipts; findings must cite receipts
+                        that prove them
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>Coverage Accounting</b></td>
+                      <td>Whatever built-in checks were executed</td>
+                      <td>Requires explicit coverage tracking</td>
+                      <td class="col-violin">
+                        Coverage matrix with disposition gates closed out at
+                        reporting
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>Specialist Methodology</b></td>
+                      <td>Product-specific checks and integrations</td>
+                      <td>Generic reasoning per prompt</td>
+                      <td class="col-violin">
+                        35 routed playbooks across 7 skills, chosen per active
+                        PTT task
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>State Across Sessions</b></td>
+                      <td>Server-side run record</td>
+                      <td>Prompt context window</td>
+                      <td class="col-violin">
+                        Persistent engagement state on disk: PTT, hypotheses,
+                        checkpoints
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>Tool Execution</b></td>
+                      <td>Proprietary internal tools</td>
+                      <td>Anything the shell can reach</td>
+                      <td class="col-violin">
+                        Guard-gated use of non-interactive tools in your
+                        Kali/Parrot image
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>Deployment Model</b></td>
+                      <td>Hosted or local, depending on implementation</td>
+                      <td>Local machine</td>
+                      <td class="col-violin">
+                        Local environment, your model config, inherits your
+                        configured model backend
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+          <details class="disclosure" id="for">
+            <summary>Where Violin fits</summary>
+            <div class="disclosure-body">
+              <div class="grid-cards">
+                <div class="feature-card">
+                  <h3>Scope Checked Per Command</h3>
+                  <p>
+                    Every target command is AST-resolved against the approved
+                    scope before execution starts. Out-of-scope hosts and
+                    excluded URL paths are denied fail-closed, not
+                    logged-and-run.
+                  </p>
+                </div>
+                <div class="feature-card">
+                  <h3>Your Tools, Your Image</h3>
+                  <p>
+                    No tool-specific execution adapters and no fragile binary
+                    allowlists: installed non-interactive tooling
+                    (<code>nmap</code>, <code>nuclei</code>, <code>ffuf</code>,
+                    <code>sqlmap</code>, <code>curl</code>) drives through one
+                    boundary.
+                  </p>
+                </div>
+                <div class="feature-card">
+                  <h3>Coverage You Can Defend</h3>
+                  <p>
+                    A coverage matrix generated from scope obligations plus
+                    methodology disposition gates means every in-scope route and
+                    required testing category ends with a disposition — not with
+                    silence.
+                  </p>
+                </div>
+                <div class="feature-card">
+                  <h3>Evidence for the Report</h3>
+                  <p>
+                    Findings carry severity, summary, and the signed receipts
+                    that authenticate decisive request and response bytes — the
+                    verifiable artifact needed during client readouts.
+                  </p>
+                </div>
+                <div class="feature-card">
+                  <h3>Survives Context Compression</h3>
+                  <p>
+                    PTT tasks, hypotheses, checkpoints, command history, and
+                    evidence live in structured state on disk. Long assessments
+                    do not reset when prompt context gets summarized.
+                  </p>
+                </div>
+                <div class="feature-card">
+                  <h3>Human-in-the-Loop by Design</h3>
+                  <p>
+                    Bounded command bursts are reviewed and settled after
+                    execution, pending batches can be rebound, and phase
+                    transitions require explicit task activation.
+                  </p>
+                </div>
+              </div>
+              <div class="cols2">
+                <div class="yes-box">
+                  <h3>✓ Use it for</h3>
+                  <ul>
+                    <li>
+                      Scoped web, API, identity, business-logic, and
+                      LLM-security testing
+                    </li>
+                    <li>
+                      Consultants who need per-finding evidence and a defensible
+                      coverage story
+                    </li>
+                    <li>
+                      Teams that need to inspect how an agent reached each
+                      finding
+                    </li>
+                    <li>
+                      Authorized lab, CTF-style, and internal assessment work
+                    </li>
+                  </ul>
+                </div>
+                <div class="no-box">
+                  <h3>✗ Do not use it for</h3>
+                  <ul>
+                    <li>
+                      Anything without written authorization and an approved
+                      scope
+                    </li>
+                    <li>Unattended mass scanning of hosts you do not own</li>
+                    <li>
+                      Replacing human judgment on severity, impact, or business
+                      context
+                    </li>
+                    <li>
+                      Network containment — that is your environment's job, not
+                      the profile's
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </details>
+          <a class="next-page" href="coverage.html"
+            ><span>Next</span>Explore the playbooks →</a
+          >
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>Violin · Open source · MIT</span>
+        <nav aria-label="Footer">
+          <a
+            href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+            >Security</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md"
+            >Contribute</a
+          ><a href="https://hermes-agent.nousresearch.com/"
+            >Built on Hermes ↗</a
+          >
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

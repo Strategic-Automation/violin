@@ -4,22 +4,33 @@ from __future__ import annotations
 
 import contextlib
 import re
+import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ..core import hypotheses, state
+from ..core.http_proof import has_capture_flag
 from ..core.phases import Phase, normalize_phase, requires_hypothesis
 from ..core.results import GuardResult
 from ..core.skill_receipts import get_binding
 from ..core.targets import normalize_target, resolve_command_targets
 from .scope_gate import validate_scope
 
+
+def _parse_hypothesis_timestamp(value: str) -> datetime | None:
+    candidate = value.strip().removesuffix(" UTC").removesuffix("Z").strip()
+    with contextlib.suppress(ValueError):
+        ts = datetime.fromisoformat(candidate)
+        return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+    return None
+
+
 # Grace window for the record-as-you-go recency gate: evidence newer than the
 # hypothesis board's last update by more than this many seconds blocks further
-# target commands. 15 minutes is generous enough for burst timing/clock skew
+# target commands. 30 minutes is generous enough for burst timing/clock skew
 # while still catching run-long bookkeeping deferral.
-_RECORD_AS_YOU_GO_GRACE = 15 * 60
+_RECORD_AS_YOU_GO_GRACE = 30 * 60
 
 _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
     (
@@ -43,16 +54,6 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
         "piping a download into a shell is blocked",
     ),
 ]
-
-_HTTP_CLIENT_RE = re.compile(r"\b(?:curl|wget)\b", re.I)
-_HTTP_URL_RE = re.compile(r"https?://\S+", re.I)
-_HTTP_LONG_FLAG_RE = re.compile(
-    r"-(?:include|verbose|head|dump-header|write-out|output|remote-name|output-document)\b",
-    re.I,
-)
-_HTTP_OFFLINE_CAPTURE_RE = re.compile(
-    r"-(?:o|O|output|remote-name|output-document)\b|\s>\s*[^\s|]+", re.I
-)
 
 
 @dataclass
@@ -84,28 +85,25 @@ def check_local_artifact_paths(command: str) -> HypothesisResult:
     return result
 
 
-def _has_short_flag(command: str, *flags: str) -> bool:
-    """True if any single-dash short-flag cluster contains one of `flags`."""
-    wanted = set(flags)
-    return any(
-        any(ch in wanted for ch in token) for token in re.findall(r"(?<!\S)-[A-Za-z]+", command)
-    )
-
-
 def check_http_proof_flags(command: str) -> HypothesisResult:
-    """Review-level guard: HTTP probes must capture the response status/headers."""
+    """Review direct HTTP clients that omit an explicit status observation."""
     result = HypothesisResult()
-    if not _HTTP_CLIENT_RE.search(command) or not _HTTP_URL_RE.search(command):
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
         return result
-    if _HTTP_LONG_FLAG_RE.search(command) or _HTTP_OFFLINE_CAPTURE_RE.search(command):
+    clients = [Path(token).name.lower() for token in tokens]
+    if not any(client in {"curl", "wget"} for client in clients):
         return result
-    if _has_short_flag(command, "i", "v", "I", "D", "w", "o", "O"):
+    if not any(token.lower().startswith(("http://", "https://")) for token in tokens):
         return result
-    result.add_warning(
-        "HTTP probe without status/headers capture: add `-i` (or `-sv`) to curl "
-        "so the evidence file records the response status line — plain `-s` "
-        "produces no HTTP/1.1 line and fails decisive-proof scoring"
-    )
+    for client in ("curl", "wget"):
+        if client in clients and not has_capture_flag(command, client):
+            result.add_warning(
+                "HTTP probe without an explicit status observation: use curl `-i`/`-w` or "
+                "wget `-S`; batch scripts should emit JSONL http_observation records"
+            )
+            break
     return result
 
 
@@ -164,6 +162,8 @@ def check_hypothesis_freshness(
     hypothesis_id: str | None = None,
     *,
     match_command_target: bool = True,
+    is_burst: bool = False,
+    task_id: str | None = None,
 ) -> HypothesisResult:
     """Ensure hypotheses exist and are fresh for phases that require them."""
     result = HypothesisResult()
@@ -171,10 +171,17 @@ def check_hypothesis_freshness(
     if not requires_hypothesis(phase):
         return result
 
+    is_operational_task = bool(task_id and task_id.strip().upper() in {"PT-103", "PT-104"})
+
     hyp_path = eng_dir / "hypotheses.md"
     hyps = hypotheses.parse_hypotheses(hyp_path)
 
     if not hyps:
+        if phase == Phase.EXPLOITATION and is_operational_task and not hypothesis_id:
+            result.add_info(
+                f"operational check under {task_id} in EXPLOITATION: hypothesis binding optional"
+            )
+            return result
         result.add_error(
             f"phase {phase.value} requires at least one hypothesis in hypotheses.md. "
             f"Use violin_record_hypothesis (e.g. id='H-001' title='...' target='...' "
@@ -242,6 +249,11 @@ def check_hypothesis_freshness(
         ):
             relevant.append(hypothesis)
     if not relevant:
+        if phase == Phase.EXPLOITATION and is_operational_task and not hypothesis_id:
+            result.add_info(
+                f"operational check under {task_id} in EXPLOITATION: hypothesis binding optional"
+            )
+            return result
         eligible = [
             f"H-{hypothesis.id}@{normalize_target(hypothesis.target)}[phase:{hypothesis.phase}]"
             for hypothesis in hyps
@@ -267,22 +279,25 @@ def check_hypothesis_freshness(
         Phase.PRIVESC,
         Phase.FLAGS,
     }:
-        any_research = any(
-            hypothesis.cve_research.strip() and hypothesis.exploit_research.strip()
-            for hypothesis in relevant
-        )
-        if not any_research:
-            example = relevant[0] if relevant else None
-            result.add_warning(
-                "hint: no CVE/Exploit research recorded yet — before writing a "
-                "custom exploit, try a web search for prior work (CVE databases, "
-                "ExploitDB, GitHub PoCs). Record the outcome via "
-                "violin_record_hypothesis "
-                f"id=H-{example.id if example else '00N'} "
-                "cve_research='...' exploit_research='...' — 'no results', "
-                "'not applicable', or 'source unavailable' are valid truthful "
-                "outcomes. This is a hint, not a block: execution may proceed."
+        if is_operational_task and not relevant and not hypothesis_id:
+            pass
+        else:
+            any_research = any(
+                hypothesis.cve_research.strip() and hypothesis.exploit_research.strip()
+                for hypothesis in relevant
             )
+            if not any_research:
+                example = relevant[0] if relevant else None
+                result.add_hint(
+                    "hint: no CVE/Exploit research recorded yet — before writing a "
+                    "custom exploit, try a web search for prior work (CVE databases, "
+                    "ExploitDB, GitHub PoCs). Record the outcome via "
+                    "violin_record_hypothesis "
+                    f"id=H-{example.id if example else '00N'} "
+                    "cve_research='...' exploit_research='...' — 'no results', "
+                    "'not applicable', or 'source unavailable' are valid truthful "
+                    "outcomes. This is a hint, not a block: execution may proceed."
+                )
 
     # Check for stale hypotheses (no update in 48h)
     stale = 0
@@ -290,19 +305,15 @@ def check_hypothesis_freshness(
     for hypothesis in hyps:
         if not hypothesis.updated:
             continue
-        ts = None
-        raw = hypothesis.updated.strip()
-        candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
-        with contextlib.suppress(ValueError):
-            ts = datetime.fromisoformat(candidate)
-        if ts is None:
-            continue
-        ts = ts.replace(tzinfo=UTC)
-        if (now - ts).total_seconds() > 48 * 3600:
+        ts = _parse_hypothesis_timestamp(hypothesis.updated)
+        if ts is not None and (now - ts).total_seconds() > 48 * 3600:
             stale += 1
 
     if stale:
-        result.add_warning(f"hypothesis guard: {stale} hypothesis(es) not updated in 48h")
+        result.add_hint(
+            f"hint: hypothesis guard: {stale} hypothesis(es) not updated in 48h — "
+            "review hypothesis board at a natural checkpoint. This is a hint, not a block."
+        )
 
     exec_dir = eng_dir / "evidence" / "executions"
     newest_evidence = 0.0
@@ -313,34 +324,36 @@ def check_hypothesis_freshness(
                     newest_evidence = max(newest_evidence, path.stat().st_mtime)
                 except OSError:
                     continue
-    if newest_evidence:
+    if newest_evidence and not is_burst and not state.has_pending_sync(eng_dir):
+        stale_ids: list[str] = []
         for hypothesis in relevant:
             if not hypothesis.updated:
                 continue
-            raw = hypothesis.updated.strip()
-            candidate = raw.removesuffix(" UTC").removesuffix("Z").strip()
-            updated_ts = None
-            with contextlib.suppress(ValueError):
-                updated_ts = datetime.fromisoformat(candidate)
+            updated_ts = _parse_hypothesis_timestamp(hypothesis.updated)
             if updated_ts is None:
                 continue
-            updated_ts = updated_ts.replace(tzinfo=UTC)
             board_epoch = updated_ts.timestamp()
             evidence_age_beyond_board = newest_evidence - board_epoch
             if evidence_age_beyond_board > _RECORD_AS_YOU_GO_GRACE:
-                # Record-as-you-go is a hint, not a block: re-syncing the board after
-                # every burst-loop probe drains the prompt budget and breaks the probe
-                # rhythm. False-positive protection lives at finding formalization /
-                # REPORTING close, not here — so warn at a natural checkpoint instead.
-                result.add_warning(
-                    "hint: hypothesis H-"
-                    f"{hypothesis.id} predates the latest execution evidence — record the "
-                    "batch result on the hypothesis board at a natural checkpoint "
-                    "(violin_record_hypothesis: status, Test Response, Runtime Evidence, "
-                    "Updated). This is a hint, not a block."
-                )
+                stale_ids.append(f"H-{hypothesis.id}")
 
-    result.add_info("relevant active hypothesis found")
+        if stale_ids:
+            summary_ids = ", ".join(stale_ids[:3]) + (
+                f" (+{len(stale_ids) - 3} more)" if len(stale_ids) > 3 else ""
+            )
+            result.add_hint(
+                f"hint: hypothesis {summary_ids} predates the latest execution evidence — record the "
+                "batch result on the hypothesis board at a natural checkpoint "
+                "(violin_record_hypothesis: status, Test Response, Runtime Evidence, "
+                "Updated). This is a hint, not a block."
+            )
+
+    if relevant:
+        result.add_info("relevant active hypothesis found")
+    else:
+        result.add_info(
+            f"operational check under {task_id} in EXPLOITATION: hypothesis binding optional"
+        )
     return result
 
 

@@ -205,15 +205,27 @@ def test_stale_active_ptt_task_auto_superseded(ctf_eng, monkeypatch):
     assert "superseded-by:PT-002" in old_task.note
 
 
-def test_invalid_ptt_start_status_error_message(ctf_eng):
-    """Verify starting a task with status [x] gives an accurate error message."""
+def test_reopen_closed_ptt_task_allowed(ctf_eng):
+    """Verify reopening a closed [x] task with status [~] succeeds."""
     ptt_path = ctf_eng / "state" / "ptt.md"
     ptt.update_task(ptt_path, "PT-002", "[x]", "closed task")
     updated_tasks = ptt.parse_ptt(ptt_path)
 
     from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
 
-    with pytest.raises(ValueError, match=r"must be \[\ \] or \[\~\] before it can be started"):
+    res = _start_ptt_task(ptt_path, updated_tasks, "PT-002", "[~]", "Reopen task", eng_dir=ctf_eng)
+    assert "PT-002" in res
+
+
+def test_invalid_ptt_start_status_error_message(ctf_eng):
+    """Verify starting a blocked task gives an accurate error message."""
+    ptt_path = ctf_eng / "state" / "ptt.md"
+    ptt.update_task(ptt_path, "PT-002", "[!]", "blocked task")
+    updated_tasks = ptt.parse_ptt(ptt_path)
+
+    from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
+
+    with pytest.raises(ValueError, match=r"has status '\[!\]'"):
         _start_ptt_task(
             ptt_path, updated_tasks, "PT-002", "[~]", "Attempt restart", eng_dir=ctf_eng
         )
@@ -256,53 +268,6 @@ def test_update_hypothesis_merge_existing_fields(ctf_eng):
     assert h2.title == "Updated Title"
     assert h2.runtime_evidence == "evidence/executions/1.json"
     assert h2.status == "Validated"
-
-
-def test_findings_lowercase_hypothesis_id(ctf_eng):
-    """Verify _validate_from_pending_batch accepts lowercase 'h-001' hypothesis_id."""
-    from plugins.violin_guard.core import findings, hypotheses
-
-    h_file = ctf_eng / "hypotheses.md"
-    evidence = ctf_eng / "evidence" / "executions" / "1.json"
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text('{"status":"completed"}', encoding="utf-8")
-    hypotheses.update_hypothesis(
-        h_file,
-        id="H-001",
-        title="SQLi",
-        status="Validated",
-        runtime_evidence="evidence/executions/1.json",
-        in_scope_hosts={"10.129.2.5"},
-        target="10.129.2.5",
-    )
-
-    pending = {
-        "batch_id": "b1",
-        "commands": [{"command": "echo test"}],
-        "ptt_task_id": "PT-001",
-        "phase": "RECON",
-    }
-
-    # Write a dummy execution receipt matched by pending command
-    exec_dir = ctf_eng / "evidence" / "executions"
-    exec_record = {
-        "command": "echo test",
-        "evidence_paths": {"manifest": "evidence/executions/e1.json"},
-    }
-    (exec_dir / "e1.json").write_text(json.dumps(exec_record), encoding="utf-8")
-
-    draft = findings._validate_from_pending_batch(
-        ctf_eng,
-        pending,
-        title="SQLi Finding",
-        severity="High",
-        description="Desc",
-        impact="Impact",
-        remediation="Remediation",
-        finding_id="FIND-001",
-        hypothesis_id="h-001",
-    )
-    assert draft["hypothesis_id"] == "H-001"
 
 
 def test_terminal_policy_ipv6_target_blocked():

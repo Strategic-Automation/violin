@@ -1,0 +1,75 @@
+name: pr-verify
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release-source:
+    if: github.event.pull_request.base.ref == 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the repository dev branch for releases
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REF" != dev ] || [ "$HEAD_REPO" != "$REPOSITORY" ]; then
+            echo "::error::Release PRs must originate from this repository's dev branch."
+            exit 1
+          fi
+
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Conventional Commits title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if ! printf '%s' "$TITLE" | grep -qP '^(feat|fix|refactor|perf|test|docs|chore|ci|style|revert|build|release)(\([^()]+\))?!?: [a-z0-9].*[^.]$'; then
+            echo "::error::PR title \"$TITLE\" does not follow Conventional Commits."
+            echo "Expected: <type>(<optional scope>): <lowercase summary, no trailing period>"
+            echo "Types: feat fix refactor perf test docs chore ci style revert build release"
+            echo "Examples: fix(guard): treat unknown hosts as blocked"
+            echo "          docs(readme): refresh the quickstart"
+            exit 1
+          fi
+
+  pr-body:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check description follows the PR template
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          body = os.environ.get("BODY", "") or ""
+          clean = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+
+          def section(title):
+              m = re.search(rf"^## {title}\s*\n(.*?)(?=^## |\Z)", clean, flags=re.I | re.M | re.S)
+              return m.group(1).strip() if m else None
+
+          errors = []
+          summary = section("summary")
+          if summary is None:
+              errors.append("missing '## Summary' section")
+          elif len(summary) < 40:
+              errors.append("'## Summary' must describe what changed and why (>40 characters)")
+          if section("verification") is None:
+              errors.append("missing '## Verification' section")
+
+          if errors:
+              print('::error::PR description does not follow .github/PULL_REQUEST_TEMPLATE.md: '
+                    + '; '.join(errors))
+              sys.exit(1)
+          print("PR description follows the template.")
+          PY

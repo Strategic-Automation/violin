@@ -13,12 +13,14 @@ hypothesis, history, evidence, and sync arguments needed by the full guard.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import ipaddress
 import re
 from urllib.parse import urlsplit
 
-from ..core.bash_ast import CommandSegment, parse_bash_segments
+from ..core.bash_ast import CommandSegment, parse_bash_segments, split_heredoc_body
+from ..core.targets import KNOWN_FILE_EXTENSIONS
 
 # ---------------------------------------------------------------------------
 # Rule Sets & Pattern Definitions
@@ -103,40 +105,34 @@ _NETWORK_MODULE_RE = re.compile(
     re.IGNORECASE,
 )
 _COMMAND_SUBSTITUTION_RE = re.compile(r"\$\(|`")
+
+
+def _shell_consumes_heredoc(head: str) -> bool:
+    """True when the command feeding the here-document is a shell (or exec-to-shell).
+
+    ``bash -s``, ``sh``, ``dash`` etc. read the heredoc body as *executed*
+    shell code. ``python3 -`` / ``node -`` treat it as program source whose
+    string literals are data, not connection commands.
+    """
+    try:
+        segments = parse_bash_segments(head)
+    except Exception:
+        return False
+    for segment in segments:
+        executable = segment.executable
+        if executable in _SHELL_WRAPPERS:
+            return True
+        # ``exec bash``-style wrappers: executable already resolved to the shell.
+        if executable in {"exec"} and any(w in _SHELL_WRAPPERS for w in segment.words[1:2]):
+            return True
+    return False
+
+
 _SUSPICIOUS_SCRIPT_RE = re.compile(
     r"\b(?:attack|exploit|fuzz|payload|poc|probe|recon|scan|scanner)\b",
     re.IGNORECASE,
 )
-_LOCAL_FILE_SUFFIXES = frozenset(
-    {
-        ".py",
-        ".pyw",
-        ".sh",
-        ".bash",
-        ".zsh",
-        ".ps1",
-        ".js",
-        ".mjs",
-        ".cjs",
-        ".rb",
-        ".pl",
-        ".log",
-        ".txt",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".xml",
-        ".csv",
-        ".tsv",
-        ".out",
-        ".err",
-        ".dat",
-        ".conf",
-        ".cfg",
-        ".ini",
-        ".md",
-    }
-)
+_LOCAL_FILE_SUFFIXES = KNOWN_FILE_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -214,20 +210,16 @@ def _has_target_literal_in_segment(seg: CommandSegment) -> bool:
     return False
 
 
-def _is_violin_init_command(seg: CommandSegment) -> bool:
-    """Return whether ``seg`` invokes Violin's host-local bootstrap command."""
+def _violin_admin_subcommand(seg: CommandSegment) -> str:
+    """Return the local Violin administration subcommand, if any."""
     if seg.executable not in {"python", "python3"}:
-        return False
+        return ""
     words = seg.words
     for index, word in enumerate(words):
         script = word.replace("\\", "/").removeprefix("./")
-        if (
-            (script == "scripts/violin_guard.py" or script.endswith("/scripts/violin_guard.py"))
-            and index + 1 < len(words)
-            and words[index + 1] == "init-engagement"
-        ):
-            return True
-    return False
+        if script == "scripts/violin_guard.py" or script.endswith("/scripts/violin_guard.py"):
+            return words[index + 1] if index + 1 < len(words) else ""
+    return ""
 
 
 def _dynamic_init_host(seg: CommandSegment) -> bool:
@@ -264,8 +256,16 @@ def _is_local_package_import_check(seg: CommandSegment) -> bool:
         return False
     if _url_hosts(seg.raw_text) or _IPV4_RE.search(seg.raw_text):
         return False
-    text = seg.raw_text.strip()
-    return bool(re.search(r"""(?:python|python3)\s+-c\s+["']\s*import\s+[\w\s,.]+\s*["']""", text))
+    if seg.executable not in {"python", "python3", "py"} or "-c" not in seg.words:
+        return False
+    index = seg.words.index("-c") + 1
+    if index >= len(seg.words):
+        return False
+    try:
+        body = ast.parse(seg.words[index]).body
+    except SyntaxError:
+        return False
+    return bool(body) and all(isinstance(node, ast.Import | ast.ImportFrom) for node in body)
 
 
 def _block_terminal_segment(seg: CommandSegment) -> str | None:
@@ -276,6 +276,17 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
         return _message("network socket path detected in the raw terminal command")
     if _UNC_PATH_RE.search(segment_text):
         return _message("UNC or network-share path detected in the raw terminal command")
+
+    admin_subcommand = _violin_admin_subcommand(seg)
+    if admin_subcommand == "init-engagement":
+        if _COMMAND_SUBSTITUTION_RE.search(segment_text) or _dynamic_init_host(seg):
+            return _message(
+                "dynamic init-engagement host detected; pass --host directly without "
+                "shell or file indirection"
+            )
+        return None
+    if admin_subcommand == "generate-closeout":
+        return None
 
     if (
         executable in _SCRIPT_INTERPRETERS
@@ -303,23 +314,12 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
     ):
         return None
 
-    # ``init-engagement`` writes local workspace files and creates no network
-    # traffic, so its scope host may be provided directly. Keep the exception
-    # narrow: other guard subcommands still use the normal classifier, and
-    # target values hidden behind shell expansion remain blocked.
-    if _is_violin_init_command(seg):
-        if _COMMAND_SUBSTITUTION_RE.search(segment_text) or _dynamic_init_host(seg):
-            return _message(
-                "dynamic init-engagement host detected; pass --host directly without "
-                "shell or file indirection"
-            )
-        return None
-
     if executable not in _LOCAL_COMMANDS and _has_target_literal_in_segment(seg):
         return _message("target host literal detected in the raw terminal command")
 
     if (
         executable in _SCRIPT_INTERPRETERS
+        and "-c" not in seg.words
         and _SUSPICIOUS_SCRIPT_RE.search(segment_text)
         and not _is_local_compilation_or_test(seg)
     ):
@@ -332,6 +332,16 @@ def block_terminal_command(command: str) -> str | None:
     """Return a block message for clearly target-touching raw terminal calls."""
     if not isinstance(command, str) or not command.strip():
         return None
+
+    # A shell fed by a here-document executes the body: scan it as its own
+    # command. (Non-shell interpreters like python3 - <<EOF treat the body as
+    # program *source*, not executed shell tokens — payload URLs there are
+    # data, not connection targets, and are intentionally not scanned.)
+    head, body = split_heredoc_body(command)
+    if body is not None and _shell_consumes_heredoc(head):
+        message = block_terminal_command(body)
+        if message:
+            return message
 
     tainted_variables = {
         name
@@ -359,7 +369,7 @@ def _message(reason: str) -> str:
         f"{reason}. Use `violin_exec` or `violin_exec_burst` to run on the engagement backend (typed tool wrappers)"
         "for any target command so scope, phase, PTT, hypotheses, history, "
         "evidence, and sync gates are enforced. The built-in terminal remains "
-        "available for host-local preparation, tests, builds, and bookkeeping."
+        "available for host-local preparation and bookkeeping."
     )
 
 
