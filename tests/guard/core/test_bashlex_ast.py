@@ -44,3 +44,23 @@ def test_block_terminal_command_local_pipeline_allowed():
     cmd = "cat /var/log/syslog | grep error | head -n 10"
     msg = terminal_policy.block_terminal_command(cmd)
     assert msg is None
+
+
+def test_declared_parse_errors_cover_every_bashlex_failure():
+    """The narrow except tuple must cover what bashlex actually raises."""
+    for bad in ("echo 'unterminated", "if then fi(", "echo $((("):
+        try:
+            bash_ast.bashlex.parse(bad)
+        except Exception as exc:
+            assert isinstance(exc, bash_ast._BASH_PARSE_ERRORS), (bad, type(exc))
+
+
+def test_unparseable_command_falls_back_to_naive_split(monkeypatch):
+    """A parser failure must still yield a best-effort segment, not an exception."""
+
+    def boom(_command: str):
+        raise bash_ast._BASH_PARSE_ERRORS[0]("unparseable", "", 0)
+
+    monkeypatch.setattr(bash_ast.bashlex, "parse", boom)
+    segments = bash_ast.parse_bash_segments("echo 'unterminated")
+    assert [segment.executable for segment in segments] == ["echo"]
