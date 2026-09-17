@@ -8,6 +8,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import bashlex
+import bashlex.errors
+
+# bashlex raises these on input it cannot parse. Callers deliberately fall back to a
+# naive word split rather than failing the command: an unparseable line must still be
+# classified by the terminal policy gate, because a parse error is not a safe default.
+_BASH_PARSE_ERRORS: tuple[type[BaseException], ...] = (bashlex.errors.ParsingError,)
 
 # Interpreters whose -c / -e argument is a nested script whose tokens are
 # executed and therefore ARE connection targets (unlike quoted text labels).
@@ -124,7 +130,7 @@ class _CommandVisitor:
         if not flags:
             return
         if isinstance(flags, str):
-            candidates = [flags]
+            candidates = [flags] if flags in words else []
         else:
             candidates = [flag for flag in flags if flag in words]
         if not candidates:
@@ -132,14 +138,16 @@ class _CommandVisitor:
         flag = candidates[0]
         try:
             code = words[words.index(flag) + 1]
-        except IndexError:
+        except (IndexError, ValueError):
             return
+
         if not code.strip():
             return
         try:
             nested = bashlex.parse(code)
-        except Exception:
+        except _BASH_PARSE_ERRORS:
             return
+
         for child in nested:
             self._collect_words(child)
 
@@ -199,7 +207,8 @@ def parse_bash_segments(command: str) -> list[CommandSegment]:
             visitor.visit(node)
         if visitor.segments:
             return visitor.segments
-    except Exception:
+    except _BASH_PARSE_ERRORS:
+        # Fall through to the naive word split below; see _BASH_PARSE_ERRORS.
         pass
 
     words = command.split()
@@ -234,7 +243,8 @@ def extract_all_command_words(command: str) -> list[str]:
                             if sub_clean:
                                 all_words.append(sub_clean)
             return list(dict.fromkeys(all_words))
-    except Exception:
+    except _BASH_PARSE_ERRORS:
+        # Fall through to the naive word split below; see _BASH_PARSE_ERRORS.
         pass
 
     try:
