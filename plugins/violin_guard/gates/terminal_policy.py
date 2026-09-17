@@ -13,12 +13,14 @@ hypothesis, history, evidence, and sync arguments needed by the full guard.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import ipaddress
 import re
 from urllib.parse import urlsplit
 
 from ..core.bash_ast import CommandSegment, parse_bash_segments, split_heredoc_body
+from ..core.targets import KNOWN_FILE_EXTENSIONS
 
 # ---------------------------------------------------------------------------
 # Rule Sets & Pattern Definitions
@@ -103,7 +105,6 @@ _NETWORK_MODULE_RE = re.compile(
     re.IGNORECASE,
 )
 _COMMAND_SUBSTITUTION_RE = re.compile(r"\$\(|`")
-_HEREDOC_REDIRECT_RE = re.compile(r"<<-?\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)")
 
 
 def _shell_consumes_heredoc(head: str) -> bool:
@@ -131,36 +132,7 @@ _SUSPICIOUS_SCRIPT_RE = re.compile(
     r"\b(?:attack|exploit|fuzz|payload|poc|probe|recon|scan|scanner)\b",
     re.IGNORECASE,
 )
-_LOCAL_FILE_SUFFIXES = frozenset(
-    {
-        ".py",
-        ".pyw",
-        ".sh",
-        ".bash",
-        ".zsh",
-        ".ps1",
-        ".js",
-        ".mjs",
-        ".cjs",
-        ".rb",
-        ".pl",
-        ".log",
-        ".txt",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".xml",
-        ".csv",
-        ".tsv",
-        ".out",
-        ".err",
-        ".dat",
-        ".conf",
-        ".cfg",
-        ".ini",
-        ".md",
-    }
-)
+_LOCAL_FILE_SUFFIXES = KNOWN_FILE_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +256,16 @@ def _is_local_package_import_check(seg: CommandSegment) -> bool:
         return False
     if _url_hosts(seg.raw_text) or _IPV4_RE.search(seg.raw_text):
         return False
-    text = seg.raw_text.strip()
-    return bool(re.search(r"""(?:python|python3)\s+-c\s+["']\s*import\s+[\w\s,.]+\s*["']""", text))
+    if seg.executable not in {"python", "python3", "py"} or "-c" not in seg.words:
+        return False
+    index = seg.words.index("-c") + 1
+    if index >= len(seg.words):
+        return False
+    try:
+        body = ast.parse(seg.words[index]).body
+    except SyntaxError:
+        return False
+    return bool(body) and all(isinstance(node, ast.Import | ast.ImportFrom) for node in body)
 
 
 def _block_terminal_segment(seg: CommandSegment) -> str | None:
@@ -339,6 +319,7 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
 
     if (
         executable in _SCRIPT_INTERPRETERS
+        and "-c" not in seg.words
         and _SUSPICIOUS_SCRIPT_RE.search(segment_text)
         and not _is_local_compilation_or_test(seg)
     ):
@@ -356,12 +337,11 @@ def block_terminal_command(command: str) -> str | None:
     # command. (Non-shell interpreters like python3 - <<EOF treat the body as
     # program *source*, not executed shell tokens — payload URLs there are
     # data, not connection targets, and are intentionally not scanned.)
-    if _HEREDOC_REDIRECT_RE.search(command):
-        head, body = split_heredoc_body(command)
-        if body is not None and _shell_consumes_heredoc(head):
-            message = block_terminal_command(body)
-            if message:
-                return message
+    head, body = split_heredoc_body(command)
+    if body is not None and _shell_consumes_heredoc(head):
+        message = block_terminal_command(body)
+        if message:
+            return message
 
     tainted_variables = {
         name

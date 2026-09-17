@@ -38,3 +38,11 @@ def test_review_batch_keeps_the_active_task_by_default():
         {"eng_dir": "/tmp/eng", "id": "PT-001", "note": "Reviewed batch evidence"},
     )
     assert model.status == "[~]"
+
+
+def test_record_hypothesis_allows_research_attempted():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "research_attempted": True},
+    )
+    assert model.research_attempted is True

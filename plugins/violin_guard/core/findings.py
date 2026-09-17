@@ -69,7 +69,12 @@ def _verified_receipt(
     verified = receipt_integrity.verify_runtime_receipt(receipt, engagement)
     if verified is None:
         raise ValueError(f"receipt is unsigned, foreign, or has changed evidence: {receipt_path}")
-    if receipt.get("status") not in {"completed", "timed_out", "output_limited"}:
+    if receipt.get("status") not in {
+        "completed",
+        "completed_with_error",
+        "timed_out",
+        "output_limited",
+    }:
         raise ValueError(f"receipt did not execute to a reviewable result: {receipt_path}")
     if receipt.get("exit_code") is None:
         raise ValueError(f"receipt has no exit status: {receipt_path}")
@@ -191,7 +196,7 @@ def submit_finding(
     warnings = _proof_byte_warnings(engagement, verified_paths, saved_evidence)
 
     store = _store_path(engagement)
-    with state.workflow_lock(engagement), state.lock_file(store.with_suffix(".lock")):
+    with state.workflow_lock(engagement), state.lock_file(store):
         records = load_findings(engagement)
         signature = {
             "title": title.strip().casefold(),
@@ -290,8 +295,7 @@ def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False)
         "",
         "## Executive Summary",
         "",
-        "<!-- Narrative placeholder: describe engagement posture, threat context, "
-        "and overall risk in free-form prose here. -->",
+        "<!-- Describe engagement posture, threat context, and overall risk here. -->",
         "",
         "",
         "## Severity Summary",

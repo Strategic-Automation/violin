@@ -69,7 +69,9 @@ def split_heredoc_body(command: str) -> tuple[str, str | None]:
         return command, None
     body_text = body[: end.start()]
     remainder = body[end.end() :]
-    head = command[: match.end()] + "\n" + remainder.lstrip("\n")
+    # Keep an empty, terminated heredoc so bashlex can still parse commands
+    # following the payload. An unterminated redirect consumed the remainder.
+    head = command[: match.end()] + "\n" + tag + "\n" + remainder.lstrip("\n")
     return head.strip("\n"), body_text
 
 

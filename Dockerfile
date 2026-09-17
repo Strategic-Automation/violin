@@ -61,7 +61,8 @@ COPY plugins /violin/plugins/
 COPY skills /violin/skills/
 COPY scripts /violin/scripts/
 COPY assets /violin/assets/
-COPY benchmark /violin/benchmark/
+COPY benchmark/run.py /violin/benchmark/run.py
+COPY benchmark/targets/duck-store/scope.yaml benchmark/targets/duck-store/engage.md /violin/benchmark/targets/duck-store/
 
 # The image has no tests/ tree (whitelist above), so pytest must not be
 # advertised as the workspace verify command. Hermes' project detection
@@ -83,15 +84,6 @@ RUN mkdir -p /root/.hermes/profiles/violin/home \
 # agent image carries no test framework and no test suite — a pentest agent
 # has no verify loop to run at closeout.
 RUN uv sync --no-dev
-
-# The agent image contains the runner but not the golden inventory or evaluator.
-RUN rm -rf /violin/benchmark/private \
-    /violin/benchmark/targets/duck-store/calibration \
-    /violin/benchmark/targets/duck-store/report.md \
-    /violin/benchmark/proof.py \
-    /violin/benchmark/score.py \
-    /violin/benchmark/ai_judge.py \
-    /violin/benchmark/indexer.py
 
 # Ensure host engagements folder can be mounted
 VOLUME ["/violin/engagements"]

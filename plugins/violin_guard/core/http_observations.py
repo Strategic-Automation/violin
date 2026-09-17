@@ -19,6 +19,11 @@ from yarl import URL
 
 HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
 
+# A response header line (`Name: value`) — the header name is a token that ends
+# at the colon with no space in between, which distinguishes it from the
+# labeled probe output forms (`req 1 401`, `statuses: {401: 15}`).
+_HEADER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:")
+
 
 @dataclass(frozen=True)
 class HTTPObservation:
@@ -86,7 +91,7 @@ def parse_http_statuses(content: str) -> tuple[int, ...]:
         # The status may land in its own token (`(200,`) or glom onto a
         # preceding label token (`LABEL(200,`), so strip both sides.
         tuple_match = re.match(
-            r"^\(?[A-Za-z_][A-Za-z0-9_]*\s*\(\s*(\d{3})\s*[,)]",
+            r"^(?:[A-Za-z_][A-Za-z0-9_]*\s*)?\(\s*(\d{3})\s*[,)]",
             line.strip(),
         )
         if tuple_match and _is_status_code_token(tuple_match.group(1)):
@@ -105,6 +110,12 @@ def parse_http_statuses(content: str) -> tuple[int, ...]:
             ):
                 statuses.extend([int(status_token)] * int(count_token))
             continue
+        # HTTP response header lines carry 3-digit values too (`Content-Length:
+        # 200`, `Retry-After: 429`). The guard adds `-i` to curl probes, so
+        # header lines are normal in saved evidence; their values are response
+        # metadata and must never be read as observed statuses.
+        if _HEADER_LINE.match(line.strip()):
+            continue
         # Bare form: a line of only 3-digit HTTP status codes (100-599),
         # e.g. `-w '%{http_code} '` on a rapid burst probe: "401 401 401 ...".
         if all(_is_status_code_token(token) for token in parts):
@@ -122,9 +133,12 @@ def parse_http_statuses(content: str) -> tuple[int, ...]:
             continue
         # `-w '%{http_code} '` immediately followed by the response body on the
         # same line: "200 [{\"id\":...}" or "400 {\"detail\":...}". The leading
-        # 3-digit token is the status; the rest is body. (The all-status bare
-        # form above only fires when every token is a status code.)
-        if _is_status_code_token(parts[0]):
+        # 3-digit token is the status; the rest is body.
+        if (
+            _is_status_code_token(parts[0])
+            and len(parts) >= 2
+            and parts[1].startswith(("{", "[", "<", '"', "'"))
+        ):
             statuses.append(int(parts[0]))
     return tuple(statuses)
 

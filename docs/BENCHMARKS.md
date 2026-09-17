@@ -24,6 +24,11 @@ controls. Neither is joined to a finding for vulnerability credit.
 
 ## Private evaluation
 
+The golden set is published in this repository for reproducibility; `benchmark/private/`
+means host-side evaluator material, not a secret or unseen holdout. Public availability
+limits claims about resistance to prior knowledge. The Docker build copies only the runner
+and public target inputs, so evaluator files are absent from every image layer.
+
 The agent container does not contain the golden set, matcher, scorer, calibration fixtures,
 or heuristic judge. After the agent exits, the host evaluator:
 

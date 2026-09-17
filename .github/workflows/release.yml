@@ -84,4 +84,4 @@ jobs:
           tag_name: ${{ steps.release_info.outputs.tag }}
           name: Violin ${{ steps.release_info.outputs.tag }}
           body_path: RELEASE_NOTES.md
-          target_commitish: master
+          target_commitish: ${{ github.sha }}

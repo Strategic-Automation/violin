@@ -6,6 +6,7 @@ import base64
 import contextlib
 import json
 import re
+import shlex
 import uuid
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -14,7 +15,7 @@ from typing import Any
 
 from yarl import URL
 
-from plugins.violin_guard.core.bash_ast import extract_all_command_words
+from plugins.violin_guard.core.bash_ast import extract_all_command_words, parse_bash_segments
 from plugins.violin_guard.core.http_observations import (
     HTTP_METHODS,
     parse_http_observations,
@@ -145,8 +146,6 @@ def _expand_shell_vars(command: str) -> str:
     """
     if not command or "$" not in command:
         return command
-    import re
-
     tokens: list[str]
     try:
         tokens = extract_all_command_words(command)
@@ -174,46 +173,49 @@ def _expand_shell_vars(command: str) -> str:
 
 
 def _command_requests(command: str) -> tuple[RequestObservation, ...]:
-    # Use the guard's own bash-AST tokenizer, not shlex: shlex collapses
-    # `sh -c 'python3 - <<PY ... curl https://... ...'` wrappers into a single
-    # token and drops the URLs, while the AST extracts nested words.
+    """Infer HTTP methods within individual shell commands, never across a batch."""
     command = _expand_shell_vars(command)
-
-    with contextlib.suppress(ValueError):
-        tokens = extract_all_command_words(command)
+    requests: list[RequestObservation] = []
+    segments = [segment for part in _sub_commands(command) for segment in parse_bash_segments(part)]
+    for segment in segments:
+        tokens = segment.words
+        if segment.executable in {"sh", "bash", "dash", "zsh", "ksh"}:
+            if "-c" in tokens and tokens.index("-c") + 1 < len(tokens):
+                requests.extend(_command_requests(tokens[tokens.index("-c") + 1]))
+            continue
+        if segment.executable not in {"curl", "wget"}:
+            continue
         method = ""
-        for index, token in enumerate(tokens[:-1]):
+        for index, token in enumerate(tokens):
             if token in {"-X", "--request"}:
-                method = tokens[index + 1].upper()
+                if index + 1 < len(tokens):
+                    method = tokens[index + 1].upper()
+            elif token.startswith("--request="):
+                method = token.split("=", 1)[1].upper()
+            elif token.startswith("-X") and len(token) > 2:
+                method = token[2:].upper()
         if not method:
             method = (
-                "POST"
+                "HEAD"
+                if "-I" in tokens or "--head" in tokens
+                else "GET"
+                if "-G" in tokens or "--get" in tokens
+                else "POST"
                 if any(
-                    token in {"-d", "--data", "--data-raw", "--data-binary"}
-                    or token.startswith("--data=")
+                    token in {"-d", "-F", "--json", "--form"}
+                    or token.startswith(
+                        ("--data", "--post-data", "--post-file", "--json=", "--form=")
+                    )
+                    or (token.startswith(("-d", "-F")) and len(token) > 2)
                     for token in tokens
                 )
                 else "GET"
             )
-        requests: list[RequestObservation] = []
         for token in tokens:
             if token.startswith(("http://", "https://")):
                 with contextlib.suppress(ValueError):
                     requests.append(RequestObservation(method, URL(token)))
-        # Scripted HTTP clients (python3/urllib inline, node, `python3 file.py`)
-        # embed the target URL as a string literal inside the command — often
-        # the only URL evidence for a flow that cannot be one curl. Extract
-        # those literals so a decisive scripted flow is not dropped for lack
-        # of a curl-shaped request. Skip URLs already observed so a plain
-        # single-URL curl command still yields exactly one request (the
-        # multi-request correlation guard depends on that count).
-        for url_token in re.findall(r"https?://[^\s'\"<>)]+", command):
-            with contextlib.suppress(ValueError):
-                candidate = URL(url_token)
-                if all(candidate != observed.url for observed in requests):
-                    requests.append(RequestObservation("GET", candidate))
-        return tuple(dict.fromkeys(requests))
-    return ()
+    return tuple(requests)
 
 
 def _proof_requests(proof: str) -> tuple[RequestObservation, ...]:
@@ -277,7 +279,12 @@ def receipt_bundles(
                 key=receipt_key,
                 public_key=receipt_public_key,
             )
-            if evidence is None:
+            if (
+                evidence is None
+                or receipt.get("status")
+                not in {"completed", "completed_with_error", "timed_out", "output_limited"}
+                or receipt.get("exit_code") is None
+            ):
                 continue
             verified_receipts[path] = evidence
             proof = "\n".join(_read(item) for item in evidence)
@@ -288,20 +295,16 @@ def receipt_bundles(
             # Scripted-flow observations carry exact methods (PUT/POST via
             # python client semantics), so prefer them over raw URL tokens.
             requests = proof_requests or script_requests or command_requests
-            # Unstructured multi-request batches cannot correlate a response to
-            # a request — EXCEPT scripted single-flow commands (python3 -c
-            # multi-step scripts, `python3 file.py`) whose every URL literal
-            # belongs to one coherent scripted flow, so the bundle is still a
-            # correlated unit even though it references several endpoints.
-            scripted_flow = bool(
-                re.search(
-                    r"\b(?:python3?|node|ruby|perl)\b\s+(?:-c\s+\S|[^;&|]{1,200}\.(?:py|js|rb|pl)\b)",
-                    str(receipt.get("command") or ""),
-                )
-            )
-            if not proof_requests and len(command_requests) != 1 and not scripted_flow:
+            # Multi-request output needs explicit request/response correlation,
+            # including scripts: sharing a process does not establish a match.
+            if not proof_requests and len(requests) != 1:
                 continue
-            executed = receipt.get("status") in {"completed", "timed_out", "output_limited"}
+            executed = receipt.get("status") in {
+                "completed",
+                "completed_with_error",
+                "timed_out",
+                "output_limited",
+            }
             executed = executed and receipt.get("exit_code") is not None
             for unit in _partition_structured_proof(proof):
                 unit_requests = _proof_requests(unit) or requests
@@ -398,16 +401,25 @@ def _load_command(receipt_path: Path) -> str:
 
 
 def _sub_commands(command: str) -> list[str]:
-    """Split a compound shell command into its top-level sub-commands.
-
-    ``sh -c 'A; B && C'`` runs A, B, C as separate commands; a body saved by
-    one of them must not inherit the requests of the others. Splitting on the
-    common separators (``;``, ``&&``, ``||``, newline) recovers the segments so
-    filename correlation can bind a body to the exact curl that wrote it.
-    """
-    import re
-
-    return [segment for segment in re.split(r";|\n|&&|\|\|", command) if segment.strip()]
+    """Split executable shell commands while preserving quoted payload separators."""
+    with contextlib.suppress(ValueError):
+        wrapper = shlex.split(command)
+        if (
+            len(wrapper) == 3
+            and Path(wrapper[0]).name in {"sh", "bash", "dash", "zsh", "ksh"}
+            and wrapper[1] == "-c"
+        ):
+            return _sub_commands(wrapper[2])
+    commands: list[str] = []
+    for segment in parse_bash_segments(command):
+        tokens = segment.words
+        if segment.executable in {"sh", "bash", "dash", "zsh", "ksh"} and "-c" in tokens:
+            index = tokens.index("-c") + 1
+            if index < len(tokens):
+                commands.extend(_sub_commands(tokens[index]))
+        else:
+            commands.append(segment.raw_text)
+    return commands
 
 
 def endpoint_signature(value: str) -> EndpointSpec | None:
