@@ -1,24 +1,60 @@
 # Changelog
 
-## Unreleased
+## 3.3.0
 
 ### Added
 
-- Landing page aimed at working testers: how the guard works, an engagement walkthrough, an approach
-  comparison, coverage, honest limits, and the questions testers actually ask.
-- Repository social preview card so shared links unfurl with the project identity.
-- GitHub Discussions as the community surface for playbook requests, setup questions, and engagement feedback.
-- Operator-facing articles under `docs/articles/` on guardrails, coverage discipline, and how to evaluate an
-  agentic pentest tool.
-
-### Fixed
-
-- README registered-tool list now includes `violin_submit_finding` and states the correct count of twelve.
+- Practitioner landing page covering how the guard works, an engagement walkthrough, an approach
+  comparison, coverage, honest limits, and the questions testers ask; built with Vite and verified by a
+  website workflow.
+- Operator articles under `docs/articles/` on guardrails for agentic pentesting, coverage discipline for
+  agent-assisted work, and how to evaluate an agentic pentest tool.
+- GitHub Discussions as the community surface, GitHub Sponsors, and a repository social preview card.
+- Benchmark aggregation that reports per-run distributions and pass@k across repeated runs.
+- Structured HTTP observation parsing, so a saved batch probe supplies method, url, and status without
+  prose inference.
+- CI automation for pull request titles and descriptions, path-based area labels, weekly grouped
+  Dependabot updates, and fast-forwarding `dev` after a release.
 
 ### Changed
 
+- Saved evidence files must be declared through `violin_exec` and authenticated by the cited signed
+  receipts before findings or benchmark scoring accept them; HTTP probes are rewritten safely before
+  execution (curl gains `-i`, wget `-S`) so evidence always carries a literal status line.
+- Benchmark runner children start with an isolated environment, so unrelated API keys and secrets are
+  never inherited, and zero-finding runs are aggregated instead of rejected.
+- Execute-code results are stored as a bounded, redacted representation; results that cannot be parsed
+  are recorded as completed-with-error rather than dropped.
+- Recency hints are suppressed during burst execution and active bounded batches, advisory hints no
+  longer require `HERMES_YOLO_MODE`, and operational checks can bind an optional hypothesis during
+  exploitation.
+- CLI closeout generation discovers the project virtual environment dynamically, and missing CLI
+  dependencies are reported with recovery commands.
+- CI tests the supported Python 3.11 on Linux and Windows only.
+- The container image installs Hermes into an isolated uv-managed Python 3.13 environment and copies a
+  runtime whitelist instead of the whole checkout; `docs/` and `.github/` are no longer
+  distribution-owned paths.
+
+### Fixed
+
+- Restore negative benchmark calibration and preserve per-command HTTP methods in compound probes.
+- Keep host evaluator files out of every agent image layer; the golden fixture remains public
+  for reproducibility and is not a secret holdout set.
+- Require validated hypotheses to have findings with authenticated runtime evidence before reporting closes.
+- Accept authenticated completed-with-error receipts for review without treating an execution error as proof.
+- Include structured advisory hints, shared secret redaction, and guard improvements from PR #102.
+- Hostname scope diagnostics state which setting to correct instead of restating the symptom.
+- The landing page renders all 35 playbooks on load, its category and search filters work, and the guard
+  simulator quotes the receipt fields and status vocabulary the guard actually seals.
+- README registered-tool list includes `violin_submit_finding` and states the correct count of twelve.
 - Corrected the README playbook, reference, and template counts to match the repository contents.
-- Linked the landing page and Discussions from the README badge row and section navigation.
+- Response header values in saved evidence (`Content-Length: 200`, `Retry-After: 429`) are no longer read
+  as observed HTTP statuses.
+
+### Removed
+
+- The unused benchmark judge and indexer helpers, and the standalone `finding-FIND-NNN.md` template
+  superseded by the findings store.
 
 ## 3.2.1
 

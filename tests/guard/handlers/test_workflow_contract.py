@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 
-from plugins.violin_guard.core import bootstrap, hypotheses, ptt, state
+from plugins.violin_guard.core import bootstrap, findings, hypotheses, ptt, receipt_integrity, state
 from plugins.violin_guard.core.phases import Phase
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
 from plugins.violin_guard.handlers.ptt_gates import (
+    _methodology_gate_errors,
     _redact_sensitive_note,
-    _validate_methodology_gates,
     _validate_phase_exit,
 )
 from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
@@ -252,7 +253,11 @@ def test_reporting_exit_blocks_recon_only_run_in_audit_mode(tmp_path: Path) -> N
         _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
-def test_reporting_exit_allows_exploitation_history_in_audit_mode(tmp_path: Path) -> None:
+def test_reporting_exit_allows_exploitation_history_in_audit_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
     engagement = tmp_path / "engagement"
     assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
     scope = engagement / "scope" / "scope.yaml"
@@ -276,7 +281,31 @@ def test_reporting_exit_allows_exploitation_history_in_audit_mode(tmp_path: Path
         status="Validated",
         runtime_evidence="evidence/exploitation/proof.txt",
     )
+    with pytest.raises(ValueError, match="validated hypotheses without a receipt-backed finding"):
+        _validate_phase_exit(engagement, "PT-050", "[x]")
+    receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "reporting-proof",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"stdout": "evidence/exploitation/proof.txt"},
+        },
+        engagement,
+    )
+    receipt_path = engagement / "evidence/executions/reporting-proof.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    findings.submit_finding(
+        engagement,
+        title="Validated issue",
+        severity="High",
+        summary="Reproduced with authenticated runtime evidence.",
+        receipt_paths=["evidence/executions/reporting-proof.json"],
+    )
     _validate_phase_exit(engagement, "PT-050", "[x]")
+    evidence.write_text("changed evidence", encoding="utf-8")
+    with pytest.raises(ValueError, match="changed evidence"):
+        _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
 def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
@@ -391,8 +420,9 @@ def test_methodology_gates_accepts_dispositioned_gates(tmp_path: Path) -> None:
     )
     gates = engagement / "state" / "methodology-gates.yaml"
     gates.write_text(_valid_gates_yaml(), encoding="utf-8")
-    _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
-    # no exception
+    assert not _methodology_gate_errors(
+        engagement, yaml.safe_load(scope.read_text(encoding="utf-8"))
+    )
 
 
 def test_methodology_gates_rejects_missing_categories(tmp_path: Path) -> None:
@@ -409,8 +439,8 @@ def test_methodology_gates_rejects_missing_categories(tmp_path: Path) -> None:
         "gates:\n  authentication-session:\n    status: tested\n    evidence_or_reason: 'evidence/x.txt'\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="undispositioned methodology gates"):
-        _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    errors = _methodology_gate_errors(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    assert any("undispositioned methodology gates" in err for err in errors)
 
 
 def test_methodology_gates_rejects_test_without_evidence(tmp_path: Path) -> None:
@@ -427,8 +457,8 @@ def test_methodology_gates_rejects_test_without_evidence(tmp_path: Path) -> None
         _valid_gates_yaml().replace("'evidence/vuln-research/", "'not-an-artifact/"),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="tested without evidence"):
-        _validate_methodology_gates(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    errors = _methodology_gate_errors(engagement, yaml.safe_load(scope.read_text(encoding="utf-8")))
+    assert any("tested without evidence" in err for err in errors)
 
 
 def test_vuln_research_exit_batches_all_preconditions_in_one_error(tmp_path: Path) -> None:

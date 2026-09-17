@@ -26,6 +26,7 @@ def _write_receipt(
     command: str,
     proof: str,
     declared_evidence_outputs: list[str] | None = None,
+    status: str = "completed",
 ) -> str:
     execution_dir = engagement / "evidence" / "executions"
     execution_dir.mkdir(parents=True, exist_ok=True)
@@ -36,7 +37,7 @@ def _write_receipt(
         {
             "execution_id": "exec-1",
             "command": command,
-            "status": "completed",
+            "status": status,
             "exit_code": 0,
             "evidence_paths": {"stdout": proof_path.relative_to(engagement).as_posix()},
             "declared_evidence_outputs": declared_evidence_outputs or [],
@@ -244,11 +245,12 @@ def test_calibration_known_good_matches_every_golden_case() -> None:
 
 
 def test_calibration_known_bad_receives_no_credit() -> None:
-    result = score_engagement(
-        Path("benchmark/targets/duck-store/calibration/known-bad"),
-        trusted_fixture=True,
-    )
+    fixture = Path("benchmark/targets/duck-store/calibration/known-bad")
+    assert fixture.is_dir()
+    assert len(findings.load_findings(fixture)) == 3
+    result = score_engagement(fixture, trusted_fixture=True)
     assert result["confirmed"] == 0
+    assert len(result["unmatched_findings"]) == 3
     assert result["benchmark_pass"] is False
 
 
@@ -437,13 +439,25 @@ def test_compound_command_body_correlates_to_its_own_subcommand(
 
 def test_agent_container_excludes_private_evaluator() -> None:
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
-    assert "/violin/benchmark/private" in dockerfile
-    assert "/violin/benchmark/proof.py" in dockerfile
-    assert "/violin/benchmark/score.py" in dockerfile
-    # Dev-only surfaces (tests/, docs/, .github/, AGENTS.md) are excluded by
-    # whitelist COPY — the image never copies the whole repo, so unlisted
-    # paths never ship (no rm -rf needed for them).
-    assert "COPY . /violin/" not in dockerfile
+    sources = [
+        source
+        for line in dockerfile.splitlines()
+        if line.startswith("COPY ")
+        for source in line.split()[1:-1]
+    ]
+    copied_files = {
+        child.as_posix()
+        for source in sources
+        for child in (Path(source).rglob("*") if Path(source).is_dir() else [Path(source)])
+        if child.is_file()
+    }
+    assert "benchmark/run.py" in copied_files
+    assert "benchmark/targets/duck-store/scope.yaml" in copied_files
+    assert not any(
+        path.startswith(("benchmark/private/", "benchmark/targets/duck-store/calibration/"))
+        or path in {"benchmark/proof.py", "benchmark/score.py"}
+        for path in copied_files
+    )
 
 
 def test_absence_challenge_credits_bare_status_code_burst() -> None:

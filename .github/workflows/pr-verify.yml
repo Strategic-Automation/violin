@@ -9,6 +9,21 @@ permissions:
   pull-requests: read
 
 jobs:
+  release-source:
+    if: github.event.pull_request.base.ref == 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the repository dev branch for releases
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$HEAD_REF" != dev ] || [ "$HEAD_REPO" != "$REPOSITORY" ]; then
+            echo "::error::Release PRs must originate from this repository's dev branch."
+            exit 1
+          fi
+
   pr-title:
     runs-on: ubuntu-latest
     steps:

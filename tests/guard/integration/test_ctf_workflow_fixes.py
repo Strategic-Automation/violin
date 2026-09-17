@@ -205,15 +205,27 @@ def test_stale_active_ptt_task_auto_superseded(ctf_eng, monkeypatch):
     assert "superseded-by:PT-002" in old_task.note
 
 
-def test_invalid_ptt_start_status_error_message(ctf_eng):
-    """Verify starting a task with status [x] gives an accurate error message."""
+def test_reopen_closed_ptt_task_allowed(ctf_eng):
+    """Verify reopening a closed [x] task with status [~] succeeds."""
     ptt_path = ctf_eng / "state" / "ptt.md"
     ptt.update_task(ptt_path, "PT-002", "[x]", "closed task")
     updated_tasks = ptt.parse_ptt(ptt_path)
 
     from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
 
-    with pytest.raises(ValueError, match=r"must be \[\ \] or \[\~\] before it can be started"):
+    res = _start_ptt_task(ptt_path, updated_tasks, "PT-002", "[~]", "Reopen task", eng_dir=ctf_eng)
+    assert "PT-002" in res
+
+
+def test_invalid_ptt_start_status_error_message(ctf_eng):
+    """Verify starting a blocked task gives an accurate error message."""
+    ptt_path = ctf_eng / "state" / "ptt.md"
+    ptt.update_task(ptt_path, "PT-002", "[!]", "blocked task")
+    updated_tasks = ptt.parse_ptt(ptt_path)
+
+    from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
+
+    with pytest.raises(ValueError, match=r"has status '\[!\]'"):
         _start_ptt_task(
             ptt_path, updated_tasks, "PT-002", "[~]", "Attempt restart", eng_dir=ctf_eng
         )

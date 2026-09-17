@@ -358,7 +358,10 @@ def _calibration_path(name: str) -> Path:
     normalized = name.removeprefix("known-")
     if normalized not in {"good", "bad"}:
         raise ValueError("calibration must be known-good or known-bad")
-    return CALIBRATION_ROOT / f"known-{normalized}"
+    fixture = CALIBRATION_ROOT / f"known-{normalized}"
+    if not fixture.is_dir() or not load_findings(fixture):
+        raise ValueError(f"calibration fixture is missing or empty: {fixture}")
+    return fixture
 
 
 def main() -> None:

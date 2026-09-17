@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -10,16 +9,14 @@ from typing import Any
 from ..core import ptt, state
 from ..core.history import history_contains
 from ..core.phases import requires_hypothesis
-from ..core.skill_policy import skill_spec
 from ..core.skill_receipts import (
     HermesSkillViewAdapter,
-    complete_delivery,
     get_binding,
-    prepare_delivery,
 )
 from .base import (
     _eng_path,
     _json,
+    _prepare_skill_reservation_payload,
     _running_background_command,
     _serialize_errors,
 )
@@ -143,35 +140,17 @@ def _handle_review_batch_skill_reservation(
     phase = ptt.normalize_phase(task.phase)
     if requires_hypothesis(phase) and not hypothesis_id:
         raise ValueError(f"hypothesis_id is required for {phase.value} batch review")
-    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
-    reservation = prepare_delivery(
+    _, digest, early_resp = _prepare_skill_reservation_payload(
         engagement,
-        session_id=state.resolve_session_id(engagement) or "review",
         skill=skill,
-        bundle_digest=digest,
         phase="RETROSPECTIVE" if skill == "fp-check" else phase.value,
+        task_id=task_id,
+        session_fallback="review",
+        extra_fields={"released": False},
+        adapter_cls=HermesSkillViewAdapter,
     )
-    if reservation.owner:
-        viewed = HermesSkillViewAdapter().view(skill, task_id=task_id)
-        completed = complete_delivery(engagement, reservation, viewed)
-        spec = skill_spec(skill)
-        return args, _json(
-            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
-            transition_applied=False,
-            released=False,
-            skill={
-                "name": skill,
-                "digest": digest,
-                "content": viewed.content,
-                "error": viewed.error,
-                "delivery_id": reservation.id,
-                "source": spec.source if spec else None,
-                "install_hint": spec.install_hint if spec else None,
-                "trust": spec.trust if spec else None,
-            },
-        )
-    if reservation.status == "preparing":
-        return args, _json("skill_preparing", transition_applied=False, released=False)
+    if early_resp is not None:
+        return args, early_resp
     updated_args = {**args, "note": _with_skill_token(str(args.get("note") or ""), skill, digest)}
     return updated_args, None
 
@@ -196,7 +175,7 @@ def _execute_batch_review(
         hypothesis_id=str(args.get("hypothesis_id") or ""),
         skill=skill or "review",
         technique=str(args.get("technique") or "batch-review"),
-        outcome=str(args.get("outcome") or "progress"),
+        outcome=str(args.get("outcome") or ""),
         evidence_paths=evidence_paths,
         next_action=str(args.get("next_action") or "review evidence"),
         next_technique=str(args.get("next_technique") or ""),
@@ -246,8 +225,7 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
             if skill and skill != "fp-check" and skill != binding_skill:
                 # The delivered skill binding is the task-specific source of truth and
                 # always wins over an explicitly passed skill (which may be the phase
-                # default, e.g. 'pentest'). Don't hard-reject into a deadlock — bind to
-                # the binding skill and hint at the resolution.
+                # default, e.g. 'pentest'). Default to the delivered binding skill.
                 skill = ""
             review_skill = skill or binding_skill
             args = {
