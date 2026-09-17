@@ -9,13 +9,10 @@ updates:
       interval: "weekly"
       day: "monday"
     groups:
-      python-minor-patch:
+      python-dependencies:
         applies-to: version-updates
         patterns:
           - "*"
-        update-types:
-          - "patch"
-          - "minor"
       security-updates:
         applies-to: security-updates
         patterns:
@@ -28,9 +25,6 @@ updates:
       interval: "weekly"
       day: "monday"
     groups:
-      actions-minor-patch:
+      actions-dependencies:
         patterns:
           - "*"
-        update-types:
-          - "patch"
-          - "minor"

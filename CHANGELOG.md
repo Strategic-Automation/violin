@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.3.2
+
+### Changed
+
+- Upgrade `actions/setup-python` to `@v7` across all workflows, completing repo-wide action v7 modernization.
+- Upgrade `softprops/action-gh-release` to `@v3` in release workflow.
+- Update Dependabot configuration to bundle major version updates alongside minor/patch into weekly groups to eliminate unbundled PR noise.
+
 ## 3.3.1
 
 ### Changed
