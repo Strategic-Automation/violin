@@ -229,15 +229,15 @@ ffuf -w /usr/share/wordlists/params.txt \
 A Python Turbo Intruder script for race condition testing:
 ```python
 def queueRequests(target, wordlists):
-    engine = RequestEngine(endpoint=target.endpoint,
-                           concurrentConnections=20,
-                           requestsPerConnection=10,
-                           pipeline=True)
+    engine = RequestEngine(
+        endpoint=target.endpoint, concurrentConnections=20, requestsPerConnection=10, pipeline=True
+    )
 
     for i in range(20):
         engine.queue(target.req, [])
         engine.queue(target.req, [])
         engine.queue(target.req, [])
+
 
 def handleResponse(req, interesting):
     table.add(req)
