@@ -27,7 +27,8 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
   <a href="#benchmarks">Benchmarks</a> ·
   <a href="https://strategic-automation.github.io/violin/">Landing page</a> ·
   <a href="https://github.com/Strategic-Automation/violin/discussions">Discussions</a> ·
-  <a href="#development">Development</a>
+  <a href="#development">Development</a> ·
+  <a href="#support-violin">Sponsor</a>
 </p>
 
 <p align="center">
@@ -309,13 +310,17 @@ scope, approvals, target ownership, data handling, and local law.
 
 Violin is an open-source project maintained by Strategic Automation Ltd.
 If Violin is useful to you or your organisation, you can
-[sponsor its continued development](https://github.com/sponsors/Strategic-Automation).
+[sponsor Violin on GitHub](https://github.com/sponsors/Strategic-Automation).
 
-Sponsorship supports continued development, testing, documentation,
-compatibility work, and releases.
+Sponsorship helps sustain maintenance, testing, documentation, compatibility
+work, issue triage, and dependable releases. Monthly, custom-amount, and
+one-time support are described in the
+[sponsorship policy and FAQ](SPONSORSHIP.md), the public source of truth for
+sponsorship and opt-in recognition.
 
-Violin remains available under the MIT licence. Sponsorship does not include
-guaranteed support, feature priority, or influence over security policy.
+Violin remains available under the [MIT licence](LICENSE). Sponsorship does
+not include guaranteed support, feature priority, or influence over security
+policy. Sponsors may remain private.
 
 ## License
 
