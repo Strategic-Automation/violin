@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://strategic-automation.github.io/violin/sitemap.xml
