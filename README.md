@@ -33,7 +33,7 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
 <p align="center">
   <strong>Following Violin?</strong>
   <a href="https://github.com/Strategic-Automation/violin/stargazers">Star the repository</a>
-  to keep it easy to find and help other security engineers discover it.
+  to keep it easy to find and help other security engineers discover supervised agentic pentesting.
 </p>
 
 ### Community discovery
