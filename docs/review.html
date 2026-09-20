@@ -202,6 +202,22 @@
                 >Read the Starlog analysis ↗</a
               >
             </p>
+            <h3>Review context and current state handling</h3>
+            <p>
+              That review described filesystem state as lacking transactional
+              guarantees, highlighted concurrent-session corruption risk, and
+              noted an unversioned checkpoint format. The current implementation
+              has since added atomic file replacement, advisory per-file locks,
+              an engagement workflow lock for multi-file transitions, concurrency
+              regression tests, and a versioned checkpoint template.
+            </p>
+            <p>
+              These controls reduce the specific race and partial-write risks
+              raised in the review, but they do not turn Violin's filesystem
+              state into a database transaction layer, a sandbox, or a
+              multi-tenant isolation boundary. Reviewers should test those
+              limits directly against the exact commit they evaluate.
+            </p>
           </section>
 
           <section class="doc-section">
