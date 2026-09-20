@@ -642,3 +642,62 @@ def test_submit_finding_no_warning_with_evidence_file_bytes(
 
     assert submitted["finding_id"] == "FIND-001"
     assert not submitted.get("warnings"), submitted.get("warnings")
+
+
+@pytest.mark.parametrize("scripted", [False, True])
+def test_only_actual_script_requests_support_receipt_inference(tmp_path, scripted):
+    from benchmark.proof import receipt_bundles
+
+    script = tmp_path / "probe.py"
+    call = "requests.post('https://example.test/api/v1/auth/login/totp')"
+    script.write_text(call if scripted else "# " + call, encoding="utf-8")
+    relative = _write_receipt(
+        tmp_path,
+        key=b"s" * 32,
+        command="python3 probe.py",
+        proof='HTTP/1.1 200 OK\n{"2fa":"bypassed","token":"signed"}\n',
+    )
+    bundles = receipt_bundles(tmp_path, [relative], receipt_key=b"s" * 32)
+    assert bool(bundles) is scripted
+    if scripted:
+        assert [(item.method, item.url.path) for item in bundles[0].requests] == [
+            ("POST", "/api/v1/auth/login/totp")
+        ]
+    # A second request must not inherit the first one's unstructured response.
+    relative = _write_receipt(
+        tmp_path,
+        key=b"s" * 32,
+        command="python3 probe.py; curl https://example.test/other",
+        proof="HTTP/1.1 200 OK\n",
+    )
+    assert not receipt_bundles(tmp_path, [relative], receipt_key=b"s" * 32)
+
+
+def test_structured_proof_skips_source_parsing_and_duplicate_reads(tmp_path, monkeypatch):
+    from benchmark import proof
+
+    relative = _write_receipt(
+        tmp_path,
+        key=b"s" * 32,
+        command="python3 probe.py",
+        proof='GET /items HTTP/1.1\nHTTP/1.1 200 OK\n{"items":[]}\n',
+    )
+    original_read = proof._read
+    reads = []
+
+    def read(path, *args):
+        reads.append(path)
+        return original_read(path, *args)
+
+    def unexpected_parse(*args):
+        pytest.fail("structured proof should not parse command/script source")
+
+    monkeypatch.setattr(proof, "_read", read)
+    monkeypatch.setattr(proof, "_source_requests", unexpected_parse)
+    assert proof.receipt_bundles(
+        tmp_path,
+        [relative],
+        receipt_key=b"s" * 32,
+        evidence_paths=["evidence/executions/proof.stdout.txt"],
+    )
+    assert len(reads) == len(set(reads)) == 2

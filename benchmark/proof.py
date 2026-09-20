@@ -15,6 +15,7 @@ from typing import Any
 
 from yarl import URL
 
+from benchmark.python_requests import python_request_observations
 from plugins.violin_guard.core.bash_ast import parse_bash_segments
 from plugins.violin_guard.core.http_observations import (
     HTTP_METHODS,
@@ -52,85 +53,57 @@ def _read(path: Path, limit: int = 2 * 1024 * 1024) -> str:
 
 
 def _python_request_observations(source: str) -> list[RequestObservation]:
-    """Parse python HTTP-client calls into request observations.
-
-    Covers the two dominant scripted shapes:
-    - ``urllib.request.Request('URL', data=..., method='VERB', ...)`` — the
-      method kwarg wins; ``data=`` without a method means POST (urllib
-      semantics: a body makes the request non-GET).
-    - ``requests.<verb>('URL')`` / ``session.<verb>('URL')`` style clients.
-    """
-    observations: list[RequestObservation] = []
-    for match in re.finditer(r"\bRequest\(\s*['\"](https?://[^'\"]+)['\"]([^)]*)", source):
-        url, rest = match.group(1), match.group(2)
-        method_match = re.search(r"method\s*=\s*['\"]([A-Z]+)['\"]", rest)
-        if method_match:
-            method = method_match.group(1)
-        elif re.search(r"\bdata\s*=", rest):
-            method = "POST"
-        else:
-            method = "GET"
-        with contextlib.suppress(ValueError):
-            observations.append(RequestObservation(method, URL(url)))
-    for match in re.finditer(
-        r"\b(?:requests|session|http)\s*\.\s*(get|post|put|delete|patch|head|options)\s*\(\s*['\"](https?://[^'\"]+)['\"]",
-        source,
-        re.IGNORECASE,
-    ):
-        with contextlib.suppress(ValueError):
-            observations.append(RequestObservation(match.group(1).upper(), URL(match.group(2))))
-    return observations
+    return [RequestObservation(method, url) for method, url in python_request_observations(source)]
 
 
-def _scripted_flow_requests(command: str, engagement: Path) -> tuple[RequestObservation, ...]:
-    """Harvest URL+method observations from scripted HTTP flows.
-
-    Two shapes are covered:
-    - ``python3 evidence/vuln-research/probe.py`` — the URLs live in the script
-      file referenced by path; read it (small, engagement-local).
-    - ``python3 -c "<inline script>"`` — the URLs live in the command text.
-
-    For each source: URL literals, python HTTP-client calls with exact
-    methods, and ``call('POST', '/path')`` helper-driver invocations resolved
-    against the source's base-URL literal (scheme+host only, so an endpoint
-    URL inside the script doesn't get path-joined).
-    """
-    sources: list[str] = []
-    # Inline python3 -c script bodies are the command text itself.
-    if re.search(r"\b(?:python3?|node|ruby|perl)\b\s+-c\b", command):
-        sources.append(command)
-    for match in re.finditer(r"[\w./-]+\.(?:py|js|rb|pl)\b", command):
-        candidate = (engagement / match.group(0)).resolve()
-        if not candidate.is_file() or not candidate.is_relative_to(engagement.resolve()):
-            continue
-        with contextlib.suppress(OSError):
-            sources.append(_read(candidate, 256 * 1024))
-
+def _scripted_flow_requests(
+    command: str, engagement: Path
+) -> tuple[RequestObservation, ...] | None:
+    """Inspect Python invocations; None means an unsupported/ambiguous script flow."""
+    if not re.search(r"\b(?:python[\d.]*|node|ruby|perl)(?:\.exe)?\b", command):
+        return ()
     requests: list[RequestObservation] = []
-    for source in sources:
-        # 1) python HTTP-client semantics: exact method per call site.
-        requests.extend(_python_request_observations(source))
-        # 2) full URL literals inside the script.
-        for url_token in re.findall(r"https?://[^\s'\"<>)]+", source):
-            with contextlib.suppress(ValueError):
-                requests.append(RequestObservation("GET", URL(url_token)))
-        # 3) helper-driver calls: call('POST', '/api/v1/orders/checkout', ...)
-        #    resolved against the script's base-URL literal.
-        base = re.search(r"https?://[^\s'\"<>)]+", source)
-        if base:
-            base_url = URL(base.group(0))
-            root = f"{base_url.scheme}://{base_url.host}"
-            if base_url.port:
-                root += f":{base_url.port}"
-            for call_match in re.finditer(
-                r"\b(?:call|request|req|api|fetch|do_request)\(\s*['\"]([A-Z]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]",
-                source,
-            ):
-                method, path = call_match.group(1), call_match.group(2)
-                if path.startswith("/"):
-                    with contextlib.suppress(ValueError):
-                        requests.append(RequestObservation(method, URL(root + path)))
+    for part in _sub_commands(command):
+        try:
+            tokens = shlex.split(part)
+        except ValueError:
+            continue
+        if tokens and Path(tokens[0]).name in {"node", "ruby", "perl", "python2"}:
+            return None
+        if not tokens or not re.fullmatch(
+            r"python(?:3(?:\.\d+)?)?(?:\.exe)?", Path(tokens[0]).name
+        ):
+            continue
+        arguments = tokens[1:]
+        while arguments and arguments[0] in {"-u", "-B", "-I", "-E", "-s", "-S"}:
+            arguments.pop(0)
+        if arguments and arguments[0] == "-c" and len(arguments) > 1:
+            observed = _python_request_observations(arguments[1])
+            if not observed:
+                return None
+            requests.extend(observed)
+        elif arguments and arguments[0].endswith(".py"):
+            candidate = (engagement / arguments[0]).resolve()
+            if not candidate.is_file() or not candidate.is_relative_to(engagement.resolve()):
+                return None
+            try:
+                observed = _python_request_observations(_read(candidate, 256 * 1024 + 1))
+            except OSError:
+                return None
+            if not observed:
+                return None
+            requests.extend(observed)
+        else:
+            return None
     return tuple(dict.fromkeys(requests))
+
+
+def _source_requests(command: str, engagement: Path) -> tuple[RequestObservation, ...]:
+    """Keep mixed shell/script requests together; unknown scripts need explicit proof."""
+    scripted = _scripted_flow_requests(command, engagement)
+    if scripted is None:
+        return ()
+    return tuple(dict.fromkeys((*scripted, *_command_requests(command))))
 
 
 def _url_assignment(segment: str) -> tuple[str, str] | None:
@@ -244,6 +217,26 @@ def _partition_structured_proof(proof: str) -> list[str]:
     return [value.source for value in observations] if observations else [proof]
 
 
+def _verified_receipt(
+    path: Path,
+    engagement: Path,
+    receipt_key: str | bytes | None,
+    receipt_public_key: str | bytes | None,
+) -> tuple[dict[str, Any], tuple[Path, ...] | None]:
+    receipt = json.loads(_read(path))
+    evidence = verified_evidence_paths(
+        receipt, engagement, key=receipt_key, public_key=receipt_public_key
+    )
+    if (
+        evidence is None
+        or receipt.get("status")
+        not in {"completed", "completed_with_error", "timed_out", "output_limited"}
+        or receipt.get("exit_code") is None
+    ):
+        return receipt, None
+    return receipt, evidence
+
+
 def receipt_bundles(
     engagement: Path,
     receipt_paths: list[str],
@@ -263,6 +256,8 @@ def receipt_bundles(
     bundles: list[ProofBundle] = []
     verified_receipts: dict[Path, tuple[Path, ...]] = {}
     receipt_stdouts: dict[Path, str] = {}
+    receipt_commands: dict[Path, str] = {}
+    evidence_text: dict[Path, str] = {}
     for relative_value in receipt_paths:
         path = (engagement / relative_value).resolve()
         if trusted_fixture:
@@ -281,40 +276,24 @@ def receipt_bundles(
         ):
             continue
         with contextlib.suppress(OSError, ValueError, json.JSONDecodeError):
-            receipt = json.loads(_read(path))
-            evidence = verified_evidence_paths(
-                receipt,
-                engagement,
-                key=receipt_key,
-                public_key=receipt_public_key,
-            )
-            if (
-                evidence is None
-                or receipt.get("status")
-                not in {"completed", "completed_with_error", "timed_out", "output_limited"}
-                or receipt.get("exit_code") is None
-            ):
+            receipt, evidence = _verified_receipt(path, engagement, receipt_key, receipt_public_key)
+            if evidence is None:
                 continue
+            for item in evidence:
+                if item not in evidence_text:
+                    evidence_text[item] = _read(item)
+            proof = "\n".join(evidence_text[item] for item in evidence)
+            command = str(receipt.get("command") or "")
             verified_receipts[path] = evidence
-            proof = "\n".join(_read(item) for item in evidence)
+            receipt_commands[path] = command
             receipt_stdouts[path] = proof
             proof_requests = _proof_requests(proof)
-            command_requests = _command_requests(str(receipt.get("command") or ""))
-            script_requests = _scripted_flow_requests(str(receipt.get("command") or ""), engagement)
-            # Scripted-flow observations carry exact methods (PUT/POST via
-            # python client semantics), so prefer them over raw URL tokens.
-            requests = proof_requests or script_requests or command_requests
+            # Structured proof is authoritative; avoid parsing source/shell unnecessarily.
+            requests = proof_requests or _source_requests(command, engagement)
             # Multi-request output needs explicit request/response correlation,
             # including scripts: sharing a process does not establish a match.
             if not proof_requests and len(requests) != 1:
                 continue
-            executed = receipt.get("status") in {
-                "completed",
-                "completed_with_error",
-                "timed_out",
-                "output_limited",
-            }
-            executed = executed and receipt.get("exit_code") is not None
             for unit in _partition_structured_proof(proof):
                 unit_requests = _proof_requests(unit) or requests
                 bundles.append(
@@ -323,10 +302,33 @@ def receipt_bundles(
                         str(receipt.get("command") or ""),
                         unit,
                         unit_requests,
-                        executed,
+                        True,
                     )
                 )
 
+    bundles.extend(
+        _saved_evidence_bundles(
+            engagement,
+            evidence_paths,
+            verified_receipts,
+            receipt_commands,
+            receipt_stdouts,
+            evidence_text,
+        )
+    )
+    return bundles
+
+
+def _saved_evidence_bundles(
+    engagement: Path,
+    evidence_paths: list[str] | None,
+    verified_receipts: dict[Path, tuple[Path, ...]],
+    receipt_commands: dict[Path, str],
+    receipt_stdouts: dict[Path, str],
+    evidence_text: dict[Path, str],
+) -> list[ProofBundle]:
+    """Correlate saved bodies only with the verified receipts that authenticated them."""
+    bundles: list[ProofBundle] = []
     # Attach saved decisive-evidence bodies (produced by a cited receipt).
     if evidence_paths and verified_receipts:
         trusted_root = (engagement / "evidence").resolve()
@@ -347,18 +349,16 @@ def receipt_bundles(
             if not producing_receipts:
                 continue
             with contextlib.suppress(OSError):
-                body = _read(path)
+                body = evidence_text[path]
                 # Correlate the body to the receipt whose command wrote it (by
                 # filename reference), so a body saved without ``-i`` headers still
                 # inherits that command's method/path AND command text — many
                 # URL-bearing patterns (``/api/v1/orders/``, ``fetch-url``,
                 # ``by-color``) live only in the command, not the saved body.
                 name = path.name
-                receipt_commands = [
-                    _load_command(receipt_path) for receipt_path in producing_receipts
-                ]
-                referenced_commands = [cmd for cmd in receipt_commands if name in cmd]
-                command = " ".join(referenced_commands or receipt_commands)
+                commands = [receipt_commands[receipt_path] for receipt_path in producing_receipts]
+                referenced_commands = [cmd for cmd in commands if name in cmd]
+                command = " ".join(referenced_commands or commands)
                 requests = _proof_requests(body)
                 if not requests and referenced_commands:
                     # A compound command may run several curls; the body is the
@@ -395,18 +395,12 @@ def receipt_bundles(
                 proof = body
                 if not parse_http_statuses(body):
                     for rp in producing_receipts:
-                        if name in _load_command(rp):
+                        if name in receipt_commands[rp]:
                             proof = f"{body}\n{receipt_stdouts.get(rp, '')}"
                             break
                 for unit in _partition_structured_proof(proof):
                     bundles.append(ProofBundle(path, command, unit, requests or (), True))
     return bundles
-
-
-def _load_command(receipt_path: Path) -> str:
-    with contextlib.suppress(OSError, ValueError, json.JSONDecodeError):
-        return str((json.loads(_read(receipt_path)) or {}).get("command") or "")
-    return ""
 
 
 def _sub_commands(command: str) -> list[str]:
