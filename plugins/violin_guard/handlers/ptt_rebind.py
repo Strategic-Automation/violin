@@ -11,6 +11,7 @@ from .base import (
     _json,
     _serialize_errors,
 )
+from .ptt_pending import validate_pending_phases
 
 
 def _rebind_fields(args: dict[str, Any]) -> tuple[str, str, str, str, str]:
@@ -78,18 +79,7 @@ def _validated_replacement_task(
         raise ValueError(
             f"replacement task {replacement_task_id!r} must be the sole active [~] task"
         )
-    phases = {
-        str(item.get("phase") or pending.get("phase") or "")
-        for item in pending.get("commands") or []
-    } - {""}
-    incompatible = sorted(
-        phase for phase in phases if not ptt.task_matches_phase(replacement, phase)
-    )
-    if incompatible:
-        raise ValueError(
-            f"replacement task {replacement_task_id!r} is not phase-compatible with "
-            + ", ".join(incompatible)
-        )
+    validate_pending_phases(replacement, pending, task_label="replacement task")
     return replacement
 
 

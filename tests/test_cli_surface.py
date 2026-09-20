@@ -195,6 +195,20 @@ def test_cli_entry_points_share_one_venv_bootstrap() -> None:
 
     for name in ("violin_guard.py", "generate-closeout.py"):
         source = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-        assert "ensure_venv" in source, f"{name} does not use the shared bootstrap"
+        assert "cli_imports" in source, f"{name} does not use the shared bootstrap"
         assert "def _ensure_venv" not in source, f"{name} still carries its own copy"
         assert "site-packages" not in source, f"{name} still walks site-packages itself"
+
+
+@pytest.mark.parametrize("module", ["scripts.violin_guard", "scripts.generate-closeout"])
+def test_cli_module_entry_points(module):
+    result = subprocess.run(
+        [sys.executable, "-m", module, "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout

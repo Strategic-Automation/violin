@@ -107,3 +107,14 @@ def ensure_venv(profile_root: Path) -> None:
             if exe.is_file() and Path(sys.executable).resolve() != exe.resolve():
                 res = subprocess.run([str(exe), *sys.argv], check=False)
                 sys.exit(res.returncode)
+
+
+@contextmanager
+def cli_imports() -> Iterator[None]:
+    """Prepare the checkout and venv, retaining actionable import diagnostics."""
+    profile_root = Path(__file__).resolve().parent.parent
+    if str(profile_root) not in sys.path:
+        sys.path.insert(0, str(profile_root))
+    with project_imports(profile_root):
+        ensure_venv(profile_root)
+        yield
