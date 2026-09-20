@@ -45,7 +45,13 @@ Violin is listed in community-curated collections including
 [awesome-infosec](https://github.com/onlurking/awesome-infosec).
 
 Third-party coverage:
+[Starlog technical analysis](https://starlog.is/articles/cybersecurity/strategic-automation-violin) and
 [“Violin: Supervised Agentic Penetration Testing Profile for Hermes Agent”](https://hamradio.my/violin-supervised-agentic-pentest-profile-hermes/).
+
+For independent evaluation, use the
+[reviewer kit](https://strategic-automation.github.io/violin/review.html), which
+collects the benchmark path, known limits, review context, and a factual
+comparison with autonomous pentest-agent designs.
 
 ---
 
