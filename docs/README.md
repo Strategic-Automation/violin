@@ -1,7 +1,7 @@
 # Website development
 
 The public homepage is `index.html`. Detailed content lives on `guide.html`,
-`guard.html`, `coverage.html`, `tools.html`, and `engineering.html`. Shared
+`guard.html`, `coverage.html`, `tools.html`, `engineering.html`, and `review.html`. Shared
 styles and behavior live in `assets/site.css` and `assets/site.js`; simulation
 and filtering scripts load only on their respective pages.
 
@@ -16,7 +16,7 @@ npm run dev
 npm run build
 ```
 
-The build writes all six page entry points to `dist/`. Do not commit generated
+The build writes all seven page entry points to `dist/`. Do not commit generated
 output or `node_modules/`. Keep the homepage short; put reference material in
 the docs. The website contracts enforce a 350-word homepage budget and check
 local destinations and copyable commands as well as the public inventories.
