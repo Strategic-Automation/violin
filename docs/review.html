@@ -202,6 +202,19 @@
                 >Read the Starlog analysis ↗</a
               >
             </p>
+            <p>
+              HamRadio.my published a separate overview on 18 September 2026,
+              focusing on the supervised workflow, Hermes integration, guard
+              boundary and evidence model.
+            </p>
+            <p>
+              <a
+                href="https://hamradio.my/violin-supervised-agentic-pentest-profile-hermes/"
+                target="_blank"
+                rel="noopener"
+                >Read the HamRadio.my overview ↗</a
+              >
+            </p>
             <h3>Review context and current state handling</h3>
             <p>
               That review described filesystem state as lacking transactional
@@ -217,6 +230,62 @@
               state into a database transaction layer, a sandbox, or a
               multi-tenant isolation boundary. Reviewers should test those
               limits directly against the exact commit they evaluate.
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>How Violin differs from autonomous pentest agents</h2>
+            <p>
+              Violin is not positioned as an autonomous replacement for a
+              penetration tester. Its design keeps authorization, scope changes,
+              destructive or sensitive actions, finding interpretation and final
+              reporting under human control.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Dimension</th>
+                  <th>Violin</th>
+                  <th>Typical autonomous-agent design</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Operating model</td>
+                  <td>Supervised engagement with explicit operator approvals</td>
+                  <td>Agent plans and executes a larger share of the workflow independently</td>
+                </tr>
+                <tr>
+                  <td>Target execution</td>
+                  <td>Target commands pass through a required guard boundary</td>
+                  <td>Execution policy varies by framework and deployment</td>
+                </tr>
+                <tr>
+                  <td>Scope</td>
+                  <td>Parsed from an approved engagement file and checked before execution</td>
+                  <td>Often represented as task context, policy, or agent instructions</td>
+                </tr>
+                <tr>
+                  <td>Evidence</td>
+                  <td>Findings bind to authenticated execution receipts and declared evidence</td>
+                  <td>Evidence capture and provenance vary by tool</td>
+                </tr>
+                <tr>
+                  <td>State</td>
+                  <td>Persistent engagement files designed for resumability and audit</td>
+                  <td>May rely on conversation memory, agent memory, databases, or task traces</td>
+                </tr>
+                <tr>
+                  <td>Safety boundary</td>
+                  <td>Documented as procedural enforcement, not network containment</td>
+                  <td>May use sandboxes, allowlists, policy engines, or host controls</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              This is a design comparison, not a claim that one architecture is
+              universally better. Reviewers should evaluate the controls and
+              trade-offs against their own threat model and operating process.
             </p>
           </section>
 
