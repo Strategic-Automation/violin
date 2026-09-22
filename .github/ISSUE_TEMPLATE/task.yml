@@ -1,25 +1,40 @@
-name: Feature Request
-description: Propose a focused Violin capability or workflow improvement
-type: feature
+name: Engineering Task
+description: Refactor, research, maintenance, documentation, or other bounded engineering work
+type: task
 body:
   - type: markdown
     attributes:
       value: |
-        Search existing issues first. Keep one independently reviewable concern per issue.
+        Use this form for bounded engineering work that is not a product defect or feature request.
 
   - type: checkboxes
     id: duplicate-check
     attributes:
       label: Duplicate check
       options:
-        - label: I searched open and closed issues for overlapping work.
+        - label: I searched open and closed issues and open pull requests for overlapping work.
           required: true
+
+  - type: dropdown
+    id: work-type
+    attributes:
+      label: Work type
+      options:
+        - Refactor
+        - Research / evaluation
+        - Maintenance
+        - Documentation
+        - Testing / quality
+        - CI / packaging
+        - Other
+    validations:
+      required: true
 
   - type: textarea
     id: summary
     attributes:
       label: Summary
-      description: Describe the capability or behaviour that should change.
+      description: State the bounded outcome this task should deliver.
     validations:
       required: true
 
@@ -27,15 +42,15 @@ body:
     id: why
     attributes:
       label: Why this matters
-      description: Explain the concrete user, correctness, safety, performance, maintainability, or cost benefit.
+      description: Explain the concrete benefit or risk being addressed.
     validations:
       required: true
 
   - type: textarea
-    id: implementation
+    id: scope
     attributes:
       label: Proposed implementation
-      description: Define the intended boundary and important constraints without overspecifying incidental details.
+      description: Define in-scope work, important constraints, and explicit non-goals where useful.
     validations:
       required: true
 
@@ -63,7 +78,7 @@ body:
       description: Link related issues/PRs. Use native dependencies/sub-issues when available.
 
   - type: textarea
-    id: references
+    id: verification
     attributes:
-      label: References
-      description: Relevant OWASP, PTES, CWE, NIST, upstream documentation, benchmarks, or research.
+      label: Verification / references
+      description: Planned checks, benchmarks, upstream docs, or research sources.

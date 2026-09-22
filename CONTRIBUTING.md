@@ -4,17 +4,24 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
 
 ## How to Contribute
 
-### Reporting Bugs
+### Creating Issues
 
-1. Check the [issues](https://github.com/Strategic-Automation/violin/issues) for duplicates
-2. Include: Violin version, Hermes version, OS/platform, steps to reproduce, and any guard output
-3. Use the bug report template if available
+Use the repository's structured issue forms:
 
-### Requesting Features
+- **Bug Report** for reproducible defects.
+- **Feature Request** for new capabilities or workflow behaviour.
+- **Engineering Task** for refactors, research, maintenance, documentation, CI, or testing work.
 
-1. Open a feature request issue describing the playbook, vulnerability class, or workflow you'd like added
-2. Explain the use case and how it fits Violin's supervised, authorized testing model
-3. Include references to OWASP, PTES, or NIST methodology if applicable
+Before opening an issue, search open and closed issues and open pull requests for overlapping
+work. Keep one independently reviewable concern per issue.
+
+Issue titles should be clean, descriptive summaries. Do not add priority, order, type, or
+status prefixes. Use GitHub-native issue types, project fields, dependencies, sub-issues,
+milestones, and area labels where available.
+
+See [the issue standards](.github/ISSUE_STANDARDS.md) for the canonical structure and metadata
+rules. Security vulnerabilities in Violin itself must be reported through
+[SECURITY.md](SECURITY.md), not a public issue.
 
 ### Submitting Changes
 
