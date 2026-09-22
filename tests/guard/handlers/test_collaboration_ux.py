@@ -191,6 +191,63 @@ def test_review_batch_conflicting_skill_binds_to_binding_skill_not_deadlock(
     assert get_binding(eng, "PT-010") == original_binding
 
 
+def test_review_batch_resolves_the_bound_hypothesis_route_not_the_phase_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """One route per task: the binding's hypothesis decides, so tools agree.
+
+    The task is bound to a class-routed skill ('identity-auth' for the
+    authorization class) while the phase default would be 'pentest'. Reviewing
+    the batch with that same skill - the one violin_record_ptt demanded - used to
+    be rejected as "not permitted; expected 'pentest' because phase default", so
+    no single skill satisfied both tools.
+
+    The board also records a free-text candidate source ('internet-search') that
+    maps to no route: deriving the context must filter it out rather than pass it
+    to the policy, which would reject the call with "unknown candidate source".
+    """
+    eng = _engagement(tmp_path)
+    _pending_batch(eng)
+    (eng / "hypotheses.md").write_text(
+        "# Hypotheses\n\n"
+        "## H-007: Cross-account order access\n\n"
+        "- **Status:** Candidate\n"
+        "- **Vuln Class:** authorization\n"
+        "- **Candidate Source:** internet-search\n",
+        encoding="utf-8",
+    )
+    (eng / "state" / ".skill-loaded-test-session").write_text(
+        "skill-loaded: identity-auth\n", encoding="utf-8"
+    )
+    bind_active_task(
+        eng,
+        "test-session",
+        skill="identity-auth",
+        hypothesis_id="H-007",
+        vulnerability_class="authorization",
+    )
+    monkeypatch.setattr(ptt_review, "HermesSkillViewAdapter", _ReadySkillAdapter)
+
+    args = {
+        "eng_dir": str(eng),
+        "id": "PT-010",
+        "status": "[~]",
+        "note": "Reviewed cross-account order access evidence",
+        "skill": "identity-auth",
+        "outcome": "progress",
+        "evidence_paths": ["evidence/executions/batch-command.stdout.txt"],
+        "next_action": "confirm object ownership boundary",
+        "next_technique": "idor",
+    }
+
+    prepared = json.loads(service.handle_review_batch(dict(args)))
+    assert prepared["status"] == "skill_prepared"
+    reviewed = json.loads(service.handle_review_batch(dict(args)))
+
+    assert reviewed["status"] == "ok"
+    assert get_binding(eng, "PT-010")["skill"] == "identity-auth"
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [

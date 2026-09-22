@@ -54,6 +54,52 @@ def test_injects_i_for_wget_too():
     assert "wget -S" in out
 
 
+def test_leaves_piped_probe_stdout_untouched():
+    """A probe whose stdout feeds a parser must not be reshaped.
+
+    Injecting ``-i`` ahead of a JSON consumer makes it fail to decode the body
+    and the probe silently degrades to an unauthenticated request.
+    """
+    cmd = (
+        "curl -sS -X POST https://duck-store.escape.tech/api/v1/auth/login "
+        "-H 'Content-Type: application/json' -d '{}' "
+        "| python3 -c 'import json,sys; print(json.load(sys.stdin)[\"access_token\"])'"
+    )
+    assert normalize_http_proof_flags(cmd) == cmd
+
+
+def test_leaves_piped_probe_untouched_after_stderr_redirect():
+    cmd = "curl -sS https://duck-store.escape.tech/api/v1/users/ 2>/dev/null | jq -r '.id'"
+    assert normalize_http_proof_flags(cmd) == cmd
+
+
+def test_leaves_piped_probe_untouched_after_stream_merge():
+    cmd = "curl -sS https://duck-store.escape.tech/api/v1/orders/1 2>&1 | grep -o 'total'"
+    assert normalize_http_proof_flags(cmd) == cmd
+
+
+def test_injects_i_for_logical_or_operator():
+    """``||`` is not a pipe: no consumer parses this probe's stdout."""
+    cmd = "curl -sS https://duck-store.escape.tech/api/v1/users/ || echo unavailable"
+    assert normalize_http_proof_flags(cmd).startswith("curl -i")
+
+
+def test_leaves_xargs_wrapped_probe_untouched():
+    """Capture is injected only into a direct curl/wget invocation.
+
+    A probe wrapped inside another program's arguments (``xargs``, ``parallel``)
+    is left byte-identical: the rewriter never edits text it does not own.
+    """
+    cmd = "cat ids.txt | xargs -I{} curl -sS https://duck-store.escape.tech/api/v1/orders/{}"
+    assert normalize_http_proof_flags(cmd) == cmd
+
+
+def test_injects_i_for_probe_followed_by_logical_and():
+    """``&&`` is not a pipe: the probe's stdout is still what the receipt holds."""
+    cmd = "curl -sS -o body.txt https://duck-store.escape.tech/ && wc -c body.txt"
+    assert "curl -i" in normalize_http_proof_flags(cmd)
+
+
 def test_preserves_quoted_url_fragments():
     cmd = "curl -sS 'https://duck-store.escape.tech/path?redirect=https://evil.example'"
     out = normalize_http_proof_flags(cmd)

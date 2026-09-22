@@ -283,6 +283,15 @@ class ExecBurstArgsModel(BaseModel):
     timeout_seconds: int = Field(180, ge=1, le=1800)
     cwd: str = Field("", description="Engagement-relative working directory")
     continue_on_error: bool = False
+    evidence_outputs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "engagement-relative evidence files this batch writes (same paths you would pass "
+            "to violin_exec); each command's receipt declares them so violin_submit_finding "
+            "can authenticate the files. Bursts are approved as one batch, so declare the "
+            "union of the files the batch produces."
+        ),
+    )
 
 
 class ExecStatusArgsModel(BaseModel):

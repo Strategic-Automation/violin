@@ -15,7 +15,7 @@ from typing import Any
 
 from yarl import URL
 
-from plugins.violin_guard.core.bash_ast import extract_all_command_words, parse_bash_segments
+from plugins.violin_guard.core.bash_ast import parse_bash_segments
 from plugins.violin_guard.core.http_observations import (
     HTTP_METHODS,
     parse_http_observations,
@@ -133,43 +133,52 @@ def _scripted_flow_requests(command: str, engagement: Path) -> tuple[RequestObse
     return tuple(dict.fromkeys(requests))
 
 
-def _expand_shell_vars(command: str) -> str:
-    """Textually expand ``VAR=url`` assignments and ``$VAR``/``${VAR}`` refs.
+def _url_assignment(segment: str) -> tuple[str, str] | None:
+    """Return ``(name, url)`` when a command segment assigns an http(s) base URL.
 
-    Agents commonly set a base-URL shell variable (``export B=https://host/api``)
-    and then ``curl $B/admin/users``. URL extraction only recognises literal
-    ``http(s)://`` tokens, so without expansion those requests are invisible and
-    every endpoint correlation fails. This rewrites ``$B/...`` back to a literal
-    URL so the rest of the pipeline sees the real request. ``$(...)`` command
-    substitution is left untouched (the opener ``$`` is followed by ``(``, not a
-    variable name), so only true variable references are expanded.
+    Handles ``B=https://host``, ``B="https://host"``, ``export B=https://host``
+    and the environment-prefix form ``B=https://host curl ...``.
+    """
+    text = segment.strip()
+    if text.startswith("export "):
+        text = text.removeprefix("export ").lstrip()
+    name, separator, value = text.partition("=")
+    if not separator or not name.isidentifier():
+        return None
+    words = value.split()
+    if not words:
+        return None
+    url = words[0].strip("\"'")
+    if not url.startswith(("http://", "https://")):
+        return None
+    return name, url
+
+
+def _expand_shell_vars(command: str) -> str:
+    """Expand ``VAR=url`` assignments so ``$VAR`` refs resolve to literal URLs.
+
+    Agents set a base-URL variable (``B=https://host/api``) and probe with
+    ``curl "$B/admin/users"``. Request extraction only recognises literal
+    ``http(s)://`` tokens, so without expansion those probes are invisible and
+    every endpoint correlation fails for the findings they evidence. Assignments
+    are read from the parsed command segments - the same units the rest of this
+    module reasons about, which covers ``export``, quoted, subshell and
+    environment-prefix forms alike. ``$(...)`` is left alone: that ``$`` is
+    followed by ``(``, not a variable name.
     """
     if not command or "$" not in command:
         return command
-    tokens: list[str]
-    try:
-        tokens = extract_all_command_words(command)
-    except ValueError:
-        tokens = command.split()
-    if not tokens:
-        tokens = command.split()
     env: dict[str, str] = {}
-    for index, token in enumerate(tokens):
-        name = token
-        if token == "export" and index + 1 < len(tokens):
-            name = tokens[index + 1]
-        key, sep, value = name.partition("=")
-        if sep and key and not key.startswith("$") and value.startswith(("http://", "https://")):
-            env[key] = value
+    for part in _sub_commands(command):
+        assignment = _url_assignment(part)
+        if assignment is not None:
+            env[assignment[0]] = assignment[1]
     if not env:
         return command
     pattern = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
-
-    def _replace(match: re.Match[str]) -> str:
-        name = match.group(1) or match.group(2)
-        return env.get(name, match.group(0))
-
-    return pattern.sub(_replace, command)
+    return pattern.sub(
+        lambda match: env.get(match.group(1) or match.group(2), match.group(0)), command
+    )
 
 
 def _command_requests(command: str) -> tuple[RequestObservation, ...]:

@@ -133,6 +133,7 @@ def handle_exec_burst(args: dict, **kwargs):
     timeout_seconds = args.get("timeout_seconds", 180)
     cwd = args.get("cwd", "")
     continue_on_error = bool(args.get("continue_on_error", False))
+    burst_evidence_outputs = list(args.get("evidence_outputs") or [])
 
     cmds = list(args.get("commands") or [])
     commands_file = args.get("commands_file")
@@ -213,6 +214,7 @@ def handle_exec_burst(args: dict, **kwargs):
                     timeout_seconds=timeout_seconds,
                     cwd=cwd,
                     label=label,
+                    evidence_outputs=burst_evidence_outputs,
                     ptt_task_id=active_task_id,
                     sync_reservation=None if item["local"] else reservation_id,
                 )
