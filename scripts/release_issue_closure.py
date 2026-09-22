@@ -26,7 +26,10 @@ CLOSING_KEYWORD_PATTERN = r"close[sd]?|fix(?:e[sd])?|resolve[sd]?"
 
 _CLAIM_START = re.compile(rf"(?im)^[^\S\n]*(?:{CLOSING_KEYWORD_PATTERN})\b[ \t]*:?[ \t]*")
 _ISSUE_REFERENCE = re.compile(r"#(\d+)")
-_REFERENCE_SEPARATOR = re.compile(r"(?:[ \t]*(?:,|and|&))+")
+# The reference list that follows a keyword: issue numbers joined by commas or
+# "and", which is as far as GitHub reads. It ends at the first other token, so
+# "Closes #138. Nothing overlaps #145." claims #138 alone.
+_REFERENCE_RUN = re.compile(r"^(?:(?:[ \t]*(?:,|and|&))*[ \t]*#\d+)+")
 _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _CODE_FENCE = re.compile(r"^[ \t]*```.*?^[ \t]*```", re.DOTALL | re.MULTILINE)
 _SQUASH_MERGE_SUFFIX = re.compile(r"\(#(\d+)\)\s*$")
@@ -36,25 +39,10 @@ SubjectReader = Callable[[str, str], list[str]]
 
 
 def _leading_references(remainder: str) -> list[int]:
-    """Return the issue numbers in the reference list that opens ``remainder``.
+    """Return the issue numbers in the reference list that opens ``remainder``."""
 
-    The list ends at the first word or punctuation that is not another
-    reference, so prose on the same line never joins it: ``Closes #138. Targets
-    `dev`; nothing overlaps #145.`` claims #138 alone, exactly as GitHub reads it.
-    """
-
-    references: list[int] = []
-    position = 0
-    while position < len(remainder):
-        separator = _REFERENCE_SEPARATOR.match(remainder, position)
-        cursor = separator.end() if separator else position
-        cursor += len(remainder[cursor:]) - len(remainder[cursor:].lstrip(" \t"))
-        reference = _ISSUE_REFERENCE.match(remainder, cursor)
-        if not reference:
-            break
-        references.append(int(reference.group(1)))
-        position = reference.end()
-    return references
+    run = _REFERENCE_RUN.match(remainder)
+    return [int(number) for number in _ISSUE_REFERENCE.findall(run.group())] if run else []
 
 
 def claimed_issues(body: str | None) -> set[int]:
