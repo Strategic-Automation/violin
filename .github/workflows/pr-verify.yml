@@ -25,7 +25,7 @@ jobs:
           fi
 
   release-issues:
-    if: github.event.pull_request.base.ref == 'master'
+    if: true  # PROBE ONLY
     runs-on: ubuntu-latest
     permissions:
       contents: read
