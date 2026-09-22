@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from plugins.violin_guard import handlers as service  # noqa: E402
 from plugins.violin_guard import handlers as tools  # noqa: E402
-from plugins.violin_guard.core import bootstrap, ptt, state  # noqa: E402
+from plugins.violin_guard.core import bootstrap, ptt, schemas, state  # noqa: E402
 from plugins.violin_guard.core.targets import resolve_target  # noqa: E402
 from plugins.violin_guard.engine import execution  # noqa: E402
 from plugins.violin_guard.gates.command import CheckResult  # noqa: E402
@@ -479,6 +479,62 @@ def test_plugin_exec_burst_accepts_inline_commands(monkeypatch, tmp_path):
     assert [item["index"] for item in data["results"]] == [1, 2]
     assert "gobuster dir" in data["results"][0]["command"]
     assert "curl -H" in data["results"][1]["command"]
+
+
+def test_exec_burst_model_accepts_evidence_outputs():
+    """A burst may declare the evidence files it writes, like violin_exec does."""
+    model = schemas.ExecBurstArgsModel(
+        eng_dir="eng",
+        phase="recon",
+        target="10.10.10.10",
+        commands=["curl -i http://10.10.10.10/"],
+        evidence_outputs=["evidence/recon/root.txt"],
+    )
+
+    assert model.evidence_outputs == ["evidence/recon/root.txt"]
+
+
+def test_exec_burst_declares_evidence_outputs_on_every_command_receipt(eng, monkeypatch):
+    """Burst-declared evidence must reach each receipt so findings can cite it.
+
+    Bursts are approved as one batch, so the declared outputs apply to every
+    command in it; without this, files written by a burst cannot authenticate a
+    finding and violin_submit_finding rejects the citation.
+    """
+    _patch_burst(monkeypatch, str(eng))
+    declared = [
+        "evidence/vuln-research/ratelimit_login.txt",
+        "evidence/recon/login_admin.txt",
+    ]
+    captured: list[list[str]] = []
+    inner_execute = execution.execute
+
+    def recording_execute(command, **kwargs):
+        captured.append(list(kwargs.get("evidence_outputs") or []))
+        return inner_execute(command, **kwargs)
+
+    monkeypatch.setattr(execution, "execute", recording_execute)
+    data = json.loads(
+        service.handle_exec_burst(
+            {
+                "eng_dir": str(eng),
+                "scope": str(eng / "scope" / "scope.yaml"),
+                "phase": "recon",
+                "target": "10.10.10.10",
+                "commands": [
+                    "curl -i http://10.10.10.10/api/v1/users/ -o evidence/recon/login_admin.txt",
+                    "nmap -sV 10.10.10.10",
+                ],
+                "evidence_outputs": declared,
+                "session_id": "ts",
+                "skill_loaded_file": str(eng / "state" / ".skill-loaded-ts"),
+                "label": "evidence-batch",
+            }
+        )
+    )
+
+    assert data["status"] == "batch_complete", data
+    assert captured == [declared, declared]
 
 
 # --- plugin surface --------------------------------------------------------

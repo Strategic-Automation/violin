@@ -22,6 +22,7 @@ from .targets import normalize_target
 
 __all__ = [
     "Hypothesis",
+    "find_by_id",
     "parse_hypotheses",
     "update_hypothesis",
     "validate_hypothesis_record",
@@ -183,6 +184,22 @@ def _normalize_id(value: Any) -> str:
             "use the next free H-NNN for new hypotheses"
         )
     return normalized.zfill(3)
+
+
+def find_by_id(path: Path, hypothesis_id: str) -> Hypothesis | None:
+    """Return the hypothesis addressed by ``H-007`` or ``007``, else ``None``.
+
+    Deliberately tolerant: a stale or malformed id recorded in a binding must
+    fall back to the caller's default rather than raise mid-resolution.
+    """
+
+    try:
+        normalized = _normalize_id(hypothesis_id)
+    except ValueError:
+        return None
+    if not normalized:
+        return None
+    return next((item for item in parse_hypotheses(path) if item.id == normalized), None)
 
 
 def parse_hypotheses(path: Path) -> list[Hypothesis]:

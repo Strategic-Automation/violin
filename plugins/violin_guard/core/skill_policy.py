@@ -19,6 +19,7 @@ __all__ = [
     "SkillSpec",
     "catalog_snapshot",
     "resolve_skill_route",
+    "routable_context",
     "skill_spec",
     "validate_catalog",
     "validate_skill_selection",
@@ -401,6 +402,27 @@ def resolve_skill_route(
     allowed = () if mismatch else (selected,)
     return RouteDecision(
         canonical_phase.value, raw_vulnerability, raw_source, selected, allowed, tuple(mismatch)
+    )
+
+
+def routable_context(
+    vulnerability_class: str | None = None, candidate_source: str | None = None
+) -> tuple[str, str]:
+    """Return the part of a recorded context that the router can act on.
+
+    A hypothesis board is free text: its ``candidate_source`` may name a tool, a
+    directory, or a phrase with no route. Passing such a value on to
+    :func:`validate_skill_selection` adds an "unknown candidate source" mismatch
+    and fails an otherwise valid call, so a *derived* hint is filtered to the
+    values that map to a route while an explicit caller value stays the caller's
+    responsibility.
+    """
+
+    vulnerability = _normalize(vulnerability_class)
+    source = _normalize(candidate_source)
+    return (
+        vulnerability if vulnerability in _VULNERABILITY_ROUTES else "",
+        source if source in _SOURCE_ROUTES else "",
     )
 
 

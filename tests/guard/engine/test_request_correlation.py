@@ -38,6 +38,36 @@ def test_shell_split_preserves_quoted_semicolons():
     assert "value=a;b" in parts[0]
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # A base-URL variable assigned as a plain statement (no ``export``) must
+        # still resolve: avoiding a hardcoded host is normal practice, and an
+        # unexpanded ``$B/...`` makes every endpoint correlation fail.
+        ('B=https://host; curl -sS -i "$B/orders/1"', [("GET", "/orders/1")]),
+        ('B=https://host\ncurl -sS -i "$B/users/"', [("GET", "/users/")]),
+        ('B="https://host"; curl -sS "$B/coupons"', [("GET", "/coupons")]),
+        (
+            'B=https://host; export C=https://host; curl -sS "$B/a"; curl -sS "${C}/b"',
+            [("GET", "/a"), ("GET", "/b")],
+        ),
+        ('B=https://host curl -sS "$B/env-prefixed"', [("GET", "/env-prefixed")]),
+    ],
+)
+def test_base_url_variable_assignment_resolves_requests(command, expected):
+    assert [(item.method, item.url.path) for item in _command_requests(command)] == expected
+
+
+def test_command_substitution_is_not_treated_as_a_variable():
+    """``$(...)`` must stay untouched: only true variable refs are expanded."""
+    command = 'B=https://host; curl -sS "$B/users/$(cat id.txt)"'
+    requests = _command_requests(command)
+
+    assert len(requests) == 1
+    assert requests[0].url.path.startswith("/users/")
+    assert "$(" in requests[0].url.path
+
+
 @pytest.mark.parametrize("status", ["completed_with_error", "running", "starting"])
 def test_receipt_status_is_consistent_for_findings_and_scoring(tmp_path, monkeypatch, status):
     key = b"s" * 32
@@ -69,3 +99,17 @@ def test_script_batch_requires_correlated_observations(tmp_path: Path):
         proof="HTTP/1.1 403 Forbidden\nHTTP/1.1 200 OK\n",
     )
     assert receipt_bundles(tmp_path, [receipt], receipt_key=key) == []
+
+
+def test_arithmetic_expansion_does_not_abort_request_correlation():
+    """A receipt using ``$((...))`` must still correlate its requests.
+
+    bashlex raises NotImplementedError for arithmetic expansion rather than a parse
+    error. If that escapes the parser fallback, scoring dies for the whole run and
+    every finding loses its request attribution, not just this one command.
+    """
+    command = 'for i in 1 2 3; do n=$((i+1)); curl -sS -i "https://host/items/$n"; done'
+    requests = _command_requests(command)
+
+    assert [item.method for item in requests] == ["GET"]
+    assert requests[0].url.path.startswith("/items/")

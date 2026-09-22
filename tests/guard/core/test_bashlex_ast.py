@@ -48,11 +48,24 @@ def test_block_terminal_command_local_pipeline_allowed():
 
 def test_declared_parse_errors_cover_every_bashlex_failure():
     """The narrow except tuple must cover what bashlex actually raises."""
-    for bad in ("echo 'unterminated", "if then fi(", "echo $((("):
+    for bad in ("echo 'unterminated", "if then fi(", "echo $(((", "echo $((1+1))"):
         try:
             bash_ast.bashlex.parse(bad)
         except Exception as exc:
             assert isinstance(exc, bash_ast._BASH_PARSE_ERRORS), (bad, type(exc))
+
+
+def test_arithmetic_expansion_falls_back_instead_of_raising():
+    """$((...)) is complete shell, but bashlex raises NotImplementedError for it.
+
+    It must take the same best-effort fallback as a syntax error: otherwise the
+    command aborts the caller instead of being classified.
+    """
+    command = 'for i in 1 2 3; do n=$((i+1)); curl -sS "https://target.test/a/$n"; done'
+    words = bash_ast.extract_all_command_words(command)
+    assert "curl" in words
+    segments = bash_ast.parse_bash_segments(command)
+    assert any(segment.executable == "curl" for segment in segments)
 
 
 def test_unparseable_command_falls_back_to_naive_split(monkeypatch):

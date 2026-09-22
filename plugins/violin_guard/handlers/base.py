@@ -10,9 +10,14 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from ..core import state
-from ..core.skill_policy import skill_spec
-from ..core.skill_receipts import HermesSkillViewAdapter, complete_delivery, prepare_delivery
+from ..core import hypotheses, state
+from ..core.skill_policy import routable_context, skill_spec
+from ..core.skill_receipts import (
+    HermesSkillViewAdapter,
+    complete_delivery,
+    get_binding,
+    prepare_delivery,
+)
 from ..gates import command as cmd_module
 from ..gates.command import CheckCommandArgs
 
@@ -47,6 +52,31 @@ def _json(status_name: str, **payload) -> str:
     return json.dumps({"schema_version": 2, "status": status_name, **payload})
 
 
+def _hypothesis_route_context(eng_dir: str | Path, hypothesis_id: str) -> tuple[str, str]:
+    """Return the routable (vuln_class, candidate_source) a hypothesis records."""
+
+    record = hypotheses.find_by_id(_eng_path(str(eng_dir)) / "hypotheses.md", hypothesis_id)
+    if record is None:
+        return "", ""
+    return routable_context(record.vuln_class, record.candidate_source)
+
+
+def _bound_route_context(eng_dir: str | Path, task_id: str) -> tuple[str, str]:
+    """Resolve a task's routing context from the hypothesis its binding records.
+
+    ``violin_record_ptt`` routes from the hypothesis ``vuln_class``, but a caller
+    that passes no context resolves from the phase default instead, so the same
+    task demanded two different skills depending on which tool asked. Reading the
+    bound hypothesis here gives every caller one answer; the phase default stays
+    as the fallback for a task with no binding.
+    """
+
+    hypothesis_id = str((get_binding(eng_dir, task_id) or {}).get("hypothesis_id") or "").strip()
+    if not hypothesis_id:
+        return "", ""
+    return _hypothesis_route_context(eng_dir, hypothesis_id)
+
+
 def _prepare_skill_reservation_payload(
     eng_dir: str | Path,
     *,
@@ -59,6 +89,8 @@ def _prepare_skill_reservation_payload(
     extra_fields: dict[str, Any] | None = None,
     adapter_cls: Any = HermesSkillViewAdapter,
 ) -> tuple[Any, str, str | None]:
+    if not vulnerability_class and not candidate_source:
+        vulnerability_class, candidate_source = _bound_route_context(eng_dir, task_id)
     digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
     reservation = prepare_delivery(
         eng_dir,

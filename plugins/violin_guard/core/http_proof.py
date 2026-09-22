@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import shlex
 
-from .bash_ast import parse_bash_segments
+from .bash_ast import CommandSegment, parse_bash_segments
 
 _HTTP_URL_RE = re.compile(r"https?://\S+", re.I)
 
@@ -51,6 +51,33 @@ def has_capture_flag(command: str, client: str) -> bool:
     return False
 
 
+def _segment_spans(command: str, segments: list[CommandSegment]) -> list[tuple[int, int] | None]:
+    """Locate each parsed segment in the original command text, in order."""
+    spans: list[tuple[int, int] | None] = []
+    search_start = 0
+    for segment in segments:
+        start = command.find(segment.raw_text, search_start)
+        if start < 0:
+            spans.append(None)
+            continue
+        end = start + len(segment.raw_text)
+        spans.append((start, end))
+        search_start = end
+    return spans
+
+
+def _pipes_into(separator: str) -> bool:
+    """Whether the text between two parsed commands pipes stdout into the next one.
+
+    A pipeline stage's stdout belongs to its consumer, so a capture flag must not
+    be injected there: ``curl -s ... | python3 -c 'json.load(sys.stdin)'`` would
+    otherwise decode headers as JSON and silently degrade the probe. ``||`` is the
+    logical-or operator - it runs the next command but does not consume this one's
+    stdout - so it is not a pipe.
+    """
+    return "|" in separator and "||" not in separator
+
+
 def normalize_http_proof_flags(command: str) -> str:
     """Inject the client-specific flag into an HTTP probe missing status capture.
 
@@ -59,24 +86,26 @@ def normalize_http_proof_flags(command: str) -> str:
     the flag is inserted immediately after the client token without rebuilding
     or re-quoting the rest of the command.
     """
+    segments = parse_bash_segments(command)
+    spans = _segment_spans(command, segments)
     insertions: list[tuple[int, str]] = []
-    search_start = 0
-    for segment in parse_bash_segments(command):
+    for index, segment in enumerate(segments):
         client = segment.executable.casefold().removesuffix(".exe")
         if client not in _CLIENT_TOKEN_RE or not _HTTP_URL_RE.search(segment.raw_text):
             continue
         if has_capture_flag(segment.raw_text, client):
             continue
-        segment_start = command.find(segment.raw_text, search_start)
-        if segment_start < 0:
+        span = spans[index]
+        if span is None:
             continue
+        following = spans[index + 1] if index + 1 < len(spans) else None
+        if following is not None and _pipes_into(command[span[1] : following[0]]):
+            continue
+        start = span[0]
         client_match = _CLIENT_TOKEN_RE[client].search(segment.raw_text)
         if client_match is None:
             continue
-        insertions.append(
-            (segment_start + client_match.end(), f" {_INJECTED_CAPTURE_FLAG[client]}")
-        )
-        search_start = segment_start + len(segment.raw_text)
+        insertions.append((start + client_match.end(), f" {_INJECTED_CAPTURE_FLAG[client]}"))
 
     rewritten = command
     for position, value in reversed(insertions):
