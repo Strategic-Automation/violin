@@ -62,7 +62,7 @@ def test_all_release_version_surfaces_match_exact_semver() -> None:
         str(plugin["version"]),
         changelog.group(1) if changelog else "",
     }
-    assert versions == {"3.3.2"}
+    assert versions == {"3.3.3"}
     assert any(
         str(dependency).lower().startswith("pyyaml")
         for dependency in project["project"]["dependencies"]
