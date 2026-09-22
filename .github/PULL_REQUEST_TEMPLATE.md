@@ -2,7 +2,9 @@ Fixes #
 
 ## Summary
 
-<!-- What changed, and why? 1-3 sentences: who benefits and what problem this solves. Keep the `Fixes #` line above only when this PR closes an issue; otherwise delete it. -->
+<!-- What changed, and why? 1-3 sentences: who benefits and what problem this solves. Keep the `Fixes #` line above only when this PR closes an issue; otherwise delete it.
+
+Release PRs (`dev` → `master`) must instead list every issue the shipped PRs claim, for example `Closes #83, #84`. Only a merge into the default branch closes issues, so this release PR is where those keywords take effect; the `release-issues` check fails the release when one is missing. See CONTRIBUTING.md. -->
 
 ## Verification
 
