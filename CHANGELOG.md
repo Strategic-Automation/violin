@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.3.3
+
+### Added
+
+- Close issues automatically when a pull request that claims them merges into `dev`: the merge-time workflow comments with the merge commit and closes each claimed issue as completed, and refuses to act on unmerged pull requests.
+- `check-release` gate for release pull requests, so every issue claimed by the pull requests in a release is either already closed or listed with a closing keyword before the release merges.
+- Structured GitHub issue templates (bug report, feature request, task) with documented title and body standards, plus validation tests for them.
+
+### Changed
+
+- Consolidate guard result handling, the standalone CLI virtualenv bootstrap, and review helpers to remove duplicated code paths.
+- Narrow the guard's bash parse fallback instead of treating every unparsed command as unsafe.
+- Handle automated dependency pull requests in CI, and bump `filelock`.
+- Documentation: reviewer kit for independent evaluation, strengthened discovery and conversion positioning, and manual dispatch for the post-release `dev` sync.
+
 ## 3.3.2
 
 ### Changed
