@@ -13,7 +13,19 @@ from . import state
 # ---------------------------------------------------------------------------
 
 
-class RecordPttArgsModel(BaseModel):
+class ReviewOutcomeFields(BaseModel):
+    """Shared evidence and next-step fields for task and batch reviews."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: str = ""
+    evidence_paths: list[str] = Field(default_factory=list)
+    next_action: str = ""
+    next_technique: str = ""
+    research_attempted: bool = False
+
+
+class RecordPttArgsModel(ReviewOutcomeFields):
     """Start one untouched [ ] PTT task with [~], or review the active task after a completed batch. A non-empty note is required; reviewed batches are bound automatically."""
 
     model_config = ConfigDict(extra="forbid")
@@ -31,11 +43,6 @@ class RecordPttArgsModel(BaseModel):
     skill: str = Field(..., description="Selected Violin skill required before task activation")
     technique: str = Field(..., description="Concrete technique required before task activation")
     hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
-    outcome: str = ""
-    evidence_paths: list[str] = Field(default_factory=list)
-    next_action: str = ""
-    next_technique: str = ""
-    research_attempted: bool = False
     title: str = Field("", description="Required when explicitly creating a new PTT task")
     phase: str = Field("", description="Phase for an explicitly created PTT task")
 
@@ -201,7 +208,7 @@ class FindingRecordModel(FindingClaimModel):
     engagement_id: str = ""
 
 
-class ReviewBatchArgsModel(BaseModel):
+class ReviewBatchArgsModel(ReviewOutcomeFields):
     """Review a completed batch and release its sync lock. Submit findings separately."""
 
     model_config = ConfigDict(extra="forbid")
@@ -221,11 +228,6 @@ class ReviewBatchArgsModel(BaseModel):
         description="Review skill; defaults to the active execution binding (or fp-check if specified)",
     )
     hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
-    outcome: str = ""
-    evidence_paths: list[str] = Field(default_factory=list)
-    next_action: str = ""
-    next_technique: str = ""
-    research_attempted: bool = False
 
 
 class RebindPendingBatchArgsModel(BaseModel):

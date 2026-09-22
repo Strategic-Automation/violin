@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .phases import Phase, normalize_phase
+from .results import GuardResult
 from .state import atomic_text
 
 __all__ = [
@@ -70,11 +71,8 @@ class PttValidationResult:
         self.warnings.append(msg)
 
     def exit_code(self) -> int:
-        if self.errors:
-            return 1
-        if self.warnings:
-            return 2
-        return 0
+        # Composition preserves the existing positional fields and serialized shape.
+        return GuardResult(errors=self.errors, warnings=self.warnings).exit_code()
 
 
 def parse_ptt(path: Path) -> list[PttTask]:

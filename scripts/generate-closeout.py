@@ -5,17 +5,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-_PROFILE_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROFILE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROFILE_ROOT))
+if __package__:
+    from .cli_environment import cli_imports
+else:
+    from cli_environment import cli_imports
 
-from scripts.cli_environment import ensure_venv, project_imports
-
-with project_imports(_PROFILE_ROOT):
-    ensure_venv(_PROFILE_ROOT)
-
+with cli_imports():
     from plugins.violin_guard.core import findings
 
 
@@ -28,17 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="Overwrite existing artifacts")
 
     args = parser.parse_args(argv)
-    try:
-        yaml_path = findings.generate_findings_yaml(args.eng_dir, force=args.force)
-        report_path = findings.generate_report_md(
-            args.eng_dir, target=args.target, force=args.force
-        )
-    except ValueError as exc:
-        print(f"BLOCK: {exc}")
-        return 1
-    print(f"OK: wrote {yaml_path}")
-    print(f"OK: wrote {report_path}")
-    return 0
+    result = findings.generate_closeout(args.eng_dir, target=args.target, force=args.force)
+    result.print()
+    return result.exit_code()
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from .ptt_gates import (
     _validate_phase_exit,
     _with_skill_token,
 )
+from .ptt_pending import validate_pending_phases
 
 
 def _task_row_contains(path: Path, task_id: str, marker: str) -> bool:
@@ -79,17 +80,7 @@ def _validate_review_ptt_state(
         active = ptt.find_active_task(tasks)
         if not active or active.id != task_id:
             raise ValueError(f"batch task {task_id!r} must be the sole active [~] task")
-        phases = {
-            str(item.get("phase") or pending.get("phase") or "")
-            for item in pending.get("commands") or []
-        } - {""}
-        incompatible = sorted(
-            phase for phase in phases if not ptt.task_matches_phase(active, phase)
-        )
-        if incompatible:
-            raise ValueError(
-                f"batch task {task_id!r} is not phase-compatible with " + ", ".join(incompatible)
-            )
+        validate_pending_phases(active, pending, task_label="batch task")
     return ptt_path, marker, already_recorded
 
 

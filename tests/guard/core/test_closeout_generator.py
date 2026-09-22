@@ -68,3 +68,62 @@ def test_generators_do_not_overwrite_without_force(tmp_path: Path) -> None:
         generate_findings_yaml(tmp_path)
     with pytest.raises(ValueError, match="force=True"):
         generate_report_md(tmp_path, target="https://example.test")
+
+
+@pytest.mark.parametrize(
+    "entry_point",
+    [
+        ["scripts/violin_guard.py", "generate-closeout"],
+        ["scripts/generate-closeout.py"],
+        ["scripts/generate-closeout.py", "generate-closeout"],
+    ],
+)
+def test_closeout_cli_success_refusal_and_force(tmp_path, entry_point):
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[3]
+    engagement = tmp_path / "engagement with spaces"
+    _write_finding(engagement)
+    invocation = [
+        sys.executable,
+        str(root / entry_point[0]),
+        *entry_point[1:],
+        "--eng-dir",
+        str(engagement),
+        "--target",
+        "https://example.test",
+    ]
+
+    def run(*extra):
+        return subprocess.run(
+            [*invocation, *extra],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+
+    yaml_path = engagement / "evidence" / "reporting" / "findings.yaml"
+    report_path = engagement / "reporting" / "report.md"
+    result = run()
+    expected = f"OK: wrote {yaml_path}\nOK: wrote {report_path}\n"
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
+    assert result.stderr == ""
+    original = (yaml_path.read_bytes(), report_path.read_bytes())
+    result = run()
+    assert result.returncode == 1
+    assert result.stdout.startswith("BLOCK: ")
+    assert "force=True" in result.stdout
+    assert "OK:" not in result.stdout
+    assert (yaml_path.read_bytes(), report_path.read_bytes()) == original
+    result = run("--force")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == expected
+    assert (yaml_path.read_bytes(), report_path.read_bytes()) == original
+    (engagement / "evidence" / "findings.jsonl").unlink()
+    result = run("--force")
+    assert result.returncode == 1
+    assert result.stdout == "BLOCK: no validated findings in evidence/findings.jsonl\n"
