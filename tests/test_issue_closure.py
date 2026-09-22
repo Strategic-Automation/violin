@@ -94,6 +94,15 @@ def test_words_after_the_reference_list_do_not_join_it() -> None:
     assert claimed_issues("Closes #1, #2, and #3 plus #4") == {1, 2, 3}
 
 
+def test_the_full_syntax_for_each_issue_is_read() -> None:
+    # GitHub closes only the reference that follows a keyword, so a release
+    # description repeats the keyword per issue.
+    assert claimed_issues("Closes #1, Closes #2, Closes #3") == {1, 2, 3}
+    assert claimed_issues("Closes #1 , closes #2") == {1, 2}
+    # A reference in another repository is outside this gate's scope.
+    assert claimed_issues("Fixes #83, fixes octo-org/other#84") == {83}
+
+
 def test_shipped_pull_requests_reads_squash_merge_subjects() -> None:
     subjects = [
         "fix: correlate finding evidence (#160)",
@@ -221,7 +230,7 @@ def test_missing_issue_is_reported_with_a_paste_ready_line() -> None:
     assert report.required == (83, 84, 138)
     assert report.provided == (83,)
     assert report.missing == (84, 138)
-    assert report.closing_line == "Closes #84, #138"
+    assert report.closing_line == "Closes #84, Closes #138"
 
 
 def test_an_issue_closed_by_the_merge_time_pass_is_not_required_again() -> None:
@@ -348,7 +357,18 @@ def test_check_release_accepts_a_release_with_nothing_to_close(
 def test_release_gate_report_has_no_closing_line_without_a_gap() -> None:
     report = ReleaseGateReport(required=(83,), provided=(83,), missing=())
 
-    assert report.closing_line == "Closes "
+    assert report.closing_line == ""
+
+
+def test_the_closing_line_is_accepted_by_this_gate_and_by_github() -> None:
+    report = ReleaseGateReport(required=(1, 2, 3), provided=(), missing=(1, 2, 3))
+
+    line = report.closing_line
+
+    # GitHub closes an issue only for the reference that follows a keyword, so
+    # the keyword is repeated rather than the issues listed once.
+    assert line == "Closes #1, Closes #2, Closes #3"
+    assert claimed_issues(line) == {1, 2, 3}
 
 
 # --- the workflows that call this -------------------------------------------------

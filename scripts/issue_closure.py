@@ -82,15 +82,21 @@ def _claim_remainder(line: str) -> str | None:
 def _leading_issues(remainder: str) -> list[int]:
     """Return the issue numbers in the reference list that opens ``remainder``.
 
-    The list ends at the first token that is neither a reference nor a
-    conjunction, so prose on the same line never joins it: ``Closes #138.
-    Targets dev; nothing overlaps #145.`` claims #138 alone.
+    The list ends at the first token that is neither a reference, a conjunction
+    nor another closing keyword, so prose on the same line never joins it:
+    ``Closes #138. Targets dev; nothing overlaps #145.`` claims #138 alone.
+
+    A repeated keyword continues the list, because GitHub documents the full
+    syntax for each issue: ``Closes #1, Closes #2`` claims both.
     """
 
     numbers: list[int] = []
     for token in remainder.split():
         word = token.strip(REFERENCE_PUNCTUATION)
-        if word.lower() in REFERENCE_CONJUNCTIONS or word == ",":
+        if not word:
+            # A token of punctuation alone, as in "#1 , #2".
+            continue
+        if word.lower() in REFERENCE_CONJUNCTIONS or word.lower() in CLOSING_KEYWORDS:
             continue
         number = _issue_number(word)
         if number is None:
@@ -228,9 +234,17 @@ class ReleaseGateReport:
 
     @property
     def closing_line(self) -> str:
-        """A ready-to-paste closing line for the missing issues."""
+        """A ready-to-paste closing line for the missing issues.
 
-        return "Closes " + ", ".join(f"#{number}" for number in self.missing)
+        GitHub interprets a closing keyword only for the reference that follows
+        it, so the keyword is repeated per issue (``Closes #1, Closes #2``)
+        instead of listed once (``Closes #1, #2``), which would close only the
+        first.
+        """
+
+        if not self.missing:
+            return ""
+        return ", ".join(f"Closes #{number}" for number in self.missing)
 
 
 @dataclass(frozen=True)
