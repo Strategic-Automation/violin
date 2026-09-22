@@ -1,0 +1,115 @@
+name: Issue hygiene
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate issue structure
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            if (issue.pull_request) return;
+
+            const body = issue.body || "";
+            const title = issue.title || "";
+            const labels = (issue.labels || []).map(label =>
+              typeof label === "string" ? label.toLowerCase() : label.name.toLowerCase()
+            );
+            const nativeType = (issue.type?.name || "").toLowerCase();
+
+            const hasHeading = (name) => {
+              const escaped = name.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
+              return new RegExp("^#{2,3}\\s+" + escaped + "\\s*$", "im").test(body);
+            };
+
+            const problems = [];
+
+            if (/^(?:p[0-2](?:-\\d+)?\\s*:|\\[(?:bug|feature|task)\\])/i.test(title)) {
+              problems.push("Use a clean descriptive title; priority/order/type prefixes belong in GitHub metadata.");
+            }
+
+            if (/^## Backlog metadata/im.test(body) ||
+                /^-?\\s*\\*\\*(?:Priority|Backlog order|Status):\\*\\*/im.test(body)) {
+              problems.push("Do not duplicate priority, order, or status in the issue body.");
+            }
+
+            if (!hasHeading("Summary")) {
+              problems.push("Add a Summary section.");
+            }
+            if (!hasHeading("Acceptance criteria")) {
+              problems.push("Add Acceptance criteria with observable, testable outcomes.");
+            }
+
+            const isBug = nativeType === "bug" || labels.includes("bug");
+            const isFeature = nativeType === "feature" || labels.includes("enhancement");
+            const isTask = nativeType === "task";
+
+            if (isBug && !hasHeading("Reproduction")) {
+              problems.push("Bug issues should include a Reproduction section.");
+            }
+
+            if ((isFeature || isTask) && !hasHeading("Why this matters")) {
+              problems.push("Feature/task issues should include Why this matters.");
+            }
+
+            if ((isFeature || isTask) &&
+                !hasHeading("Proposed implementation") &&
+                !hasHeading("Scope")) {
+              problems.push("Feature/task issues should include Proposed implementation (or Scope).");
+            }
+
+            const marker = "<!-- violin-issue-hygiene -->";
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              per_page: 100
+            });
+            const existing = comments.find(comment =>
+              comment.user?.type === "Bot" && (comment.body || "").includes(marker)
+            );
+
+            if (problems.length === 0) {
+              if (existing) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id
+                });
+              }
+              return;
+            }
+
+            const message = [
+              marker,
+              "This issue does not yet match Violin's issue standard:",
+              "",
+              ...problems.map(problem => "- " + problem),
+              "",
+              "See [.github/ISSUE_STANDARDS.md](../blob/dev/.github/ISSUE_STANDARDS.md)."
+            ].join("\n");
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: message
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: message
+              });
+            }

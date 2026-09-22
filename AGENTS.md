@@ -39,7 +39,38 @@ uv run python scripts/violin_guard.py check-release # Release gate check
 - **Recovery:** If post-release sync fails, inspect the graph and merge `master` back into `dev`; never rewrite a shared protected branch to hide divergence.
 - **Commit Conventions:** Follow Conventional Commits (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`). Use imperative mood, lowercase types, and no trailing periods. Ensure clean rebasing without duplicate dual-author cherry-picks.
 
-## 5. Hard Boundaries
+## 5. Issue Creation & Triage
+
+All agent-created or agent-edited issues MUST follow
+`.github/ISSUE_STANDARDS.md`.
+
+Before creating an issue:
+
+1. Search open and closed issues for duplicates and overlapping scope.
+2. Search open pull requests for work that already implements the change.
+3. Keep one independently reviewable concern per issue.
+4. Prefer GitHub-native metadata over prose: issue type, project Priority/Status,
+   dependencies, sub-issues, milestones, and area labels.
+5. Never encode priority/order/type/status in the title or a metadata block.
+6. Use native blocked-by/blocking relationships for true dependencies and parent/sub-issues
+   for larger outcomes. If the available API cannot set a native field, do not invent a
+   duplicate text field; leave it for triage.
+7. Use the canonical body order: Summary; Why this matters; Reproduction (bugs);
+   Proposed implementation; Implementation area; Acceptance criteria;
+   Dependencies / related work; References.
+8. Acceptance criteria MUST be observable and testable. Avoid vague criteria such as
+   "improve quality" or "works better".
+9. Preserve existing reproduction evidence, decisions, research, and acceptance criteria
+   when editing an issue. Do not restyle a well-formed issue just for consistency.
+10. Public issues MUST NOT contain credentials, target/customer data, engagement evidence,
+    or undisclosed vulnerabilities in Violin itself; follow `SECURITY.md` for private
+    vulnerability reporting.
+
+For human-created issues, use the repository Bug Report, Feature Request, or Engineering Task
+form. Agents creating issues through an API must produce the same logical structure and use
+native `Bug`, `Feature`, or `Task` issue types when supported.
+
+## 6. Hard Boundaries
 1. **NEVER Bypass Target Execution Guards:** No raw shell execution for target commands.
 2. **NEVER Swallow Exceptions or Patch Tests Superficially:** Fix root causes; never mask errors or alter assertions (no bare `except Exception: pass`).
 3. **NEVER Hardcode Target IPs:** Resolve via `violin_target` or `scope.yaml`.
