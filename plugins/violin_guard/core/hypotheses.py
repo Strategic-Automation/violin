@@ -10,7 +10,7 @@ valid phase, and a target that is in scope (audit P1-hyp).
 from __future__ import annotations
 
 import dataclasses
-import re
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -202,21 +202,34 @@ def find_by_id(path: Path, hypothesis_id: str) -> Hypothesis | None:
     return next((item for item in parse_hypotheses(path) if item.id == normalized), None)
 
 
-def parse_hypotheses(path: Path) -> list[Hypothesis]:
-    """Parse hypothesis headings and recognised fields in any field order."""
-    if not path.exists():
-        return []
-    records: list[Hypothesis] = []
-    current: Hypothesis | None = None
+def _iter_board_lines(text: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(line_index, stripped_line)`` for the board's reader-visible lines.
+
+    The single structural view of the file, shared by the reader and the writer. An
+    HTML comment is invisible to both, so neither side can mistake a commented example
+    record for a real one — the canonical template documents the record format inside
+    a comment.
+    """
+
     in_comment = False
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for index, raw_line in enumerate(text.splitlines()):
         line = raw_line.strip()
         if "<!--" in line:
             in_comment = True
         if in_comment:
             if "-->" in line:
                 in_comment = False
-            continue
+        else:
+            yield index, line
+
+
+def parse_hypotheses(path: Path) -> list[Hypothesis]:
+    """Parse hypothesis headings and recognised fields in any field order."""
+    if not path.exists():
+        return []
+    records: list[Hypothesis] = []
+    current: Hypothesis | None = None
+    for _index, line in _iter_board_lines(path.read_text(encoding="utf-8")):
         heading = _parse_heading(line)
         if heading:
             if current:
@@ -446,40 +459,141 @@ def update_hypothesis(
     if len(persisted) != 1 or persisted[0].title != target.title:
         atomic_text(path, original)
         raise ValueError(
-            f"hypothesis update integrity check failed for H-{h_id}; original board was restored"
+            f"hypothesis update integrity check failed for H-{h_id}; original board was "
+            "restored. The record did not persist as a single block — inspect the board's "
+            "hypothesis headings and HTML comments, then retry once they are consistent."
         )
     return target
 
 
+_HYPOTHESIS_HOST_HEADING = "## Active Theories"
+
+
+def _record_span_end(lines: list[str], start: int) -> int:
+    """Return the index one past the last line of the record heading at ``start``.
+
+    A record owns its heading, its field lines and the blank lines between them. It
+    ends at the first line of structure it does not own: any heading at any depth
+    outside a comment, or the start of an authored HTML comment. Ending on every
+    heading — not only the next record heading — keeps a section that sits between two
+    records, and any comment, exactly where the author put it.
+    """
+
+    index = start + 1
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if stripped.startswith("#") or "<!--" in stripped:
+            return index
+        index += 1
+    return len(lines)
+
+
+def _insertion_index(lines: list[str], visible_lines: set[int]) -> int:
+    """Return the index where a record the board does not own yet belongs.
+
+    Records belong to the section hosting them (``## Active Theories``), so a new one
+    lands at that section's end — after the records already there and after the
+    authored comment documenting the format — instead of at end of file.
+    """
+
+    host = next(
+        (
+            index
+            for index in sorted(visible_lines)
+            if lines[index].strip() == _HYPOTHESIS_HOST_HEADING
+        ),
+        None,
+    )
+    if host is None:
+        return len(lines)
+    index = host + 1
+    while index < len(lines):
+        if index in visible_lines:
+            if _parse_heading(lines[index].strip()):
+                index = _record_span_end(lines, index)
+                continue
+            return index
+        index += 1
+    return len(lines)
+
+
+def _malformed_record_heading(line: str) -> bool:
+    """Return True for a heading that names a hypothesis the reader rejects.
+
+    ``### H-H-001: ...`` is not a record — its id is not a number — so the reader
+    ignores it. The writer drops such a heading and its field lines rather than leaving
+    a broken entry on the board, which is what the caller's canonicalisation expects.
+    """
+
+    stripped = line.strip()
+    if not stripped.startswith("#"):
+        return False
+    return stripped.lstrip("#").strip().startswith("H-")
+
+
 def _rewrite_hypotheses(path: Path, hypotheses_list: list[Hypothesis]) -> None:
-    """Rewrite the hypotheses file while preserving structural sections (Decoy Trail, Observations, etc.)."""
+    """Write the hypothesis records in place, leaving every other byte untouched.
+
+    Structure is read with the parser's own comment-aware scan, so the writer cannot
+    disagree with the reader about where records begin and end. That disagreement
+    duplicated a whole board written with ``## H-00N`` headings, which then failed the
+    caller's integrity check and left a phase the agent could never set, and it deleted
+    the field-format comment from the canonical template.
+    """
+
     ensure_dir(path.parent)
     template = path.read_text(encoding="utf-8") if path.exists() else "# Hypothesis Board\n\n"
+    lines = template.splitlines(keepends=True)
+    visible_lines = {index for index, _line in _iter_board_lines(template)}
 
-    # Preserve section structure (e.g. ## Active Theories ... ## Observations ... ## Decoy Trail)
-    active_heading = "## Active Theories"
-    active_pos = template.find(active_heading)
+    rendered = {hypothesis.id: hypothesis.to_markdown() for hypothesis in hypotheses_list}
+    replacements: dict[int, tuple[int, str]] = {}
+    emitted: set[str] = set()
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        heading = _parse_heading(stripped) if index in visible_lines else None
+        malformed = (
+            heading is None and index in visible_lines and _malformed_record_heading(stripped)
+        )
+        if heading is None and not malformed:
+            index += 1
+            continue
+        span_end = _record_span_end(lines, index)
+        # An id the caller dropped, a second heading for an id already written, and a
+        # malformed heading the reader rejects all leave a removed span: the record set
+        # the caller passed is the truth.
+        text = ""
+        if heading is not None and heading.id not in emitted:
+            text = rendered.get(heading.id, "")
+            if text:
+                emitted.add(heading.id)
+        replacements[index] = (span_end, text)
+        index = span_end
 
-    if active_pos != -1:
-        header = template[: active_pos + len(active_heading)].strip() + "\n\n"
-        # Find next section header after Active Theories
-        next_sec = re.search(r"\n##\s+(?!Active Theories)", template[active_pos:])
-        trailer = template[active_pos + next_sec.start() + 1 :].lstrip() if next_sec else ""
-    else:
-        # Fallback: locate first hypothesis heading starting with ### H-
-        first_heading = re.search(r"^###\s+H-", template, re.MULTILINE)
-        if first_heading:
-            header = template[: first_heading.start()].rstrip() + "\n\n"
-            next_sec = re.search(r"\n##\s+", template[first_heading.start() :])
-            trailer = (
-                template[first_heading.start() + next_sec.start() + 1 :].lstrip()
-                if next_sec
-                else ""
-            )
-        else:
-            header = template.strip() + "\n\n"
-            trailer = ""
+    pending = "".join(
+        rendered[hypothesis.id]
+        for hypothesis in hypotheses_list
+        if hypothesis.id and hypothesis.id not in emitted
+    )
+    insertion = _insertion_index(lines, visible_lines) if pending else 0
 
-    body = "\n".join(hypothesis.to_markdown() for hypothesis in hypotheses_list)
-    content = header + body + ("\n\n" + trailer if trailer else "\n")
-    atomic_text(path, content)
+    output: list[str] = []
+    inserted = False
+    index = 0
+    while index <= len(lines):
+        if pending and not inserted and index >= insertion:
+            output.append(pending)
+            inserted = True
+        if index == len(lines):
+            break
+        replacement = replacements.get(index)
+        if replacement is None:
+            output.append(lines[index])
+            index += 1
+            continue
+        span_end, text = replacement
+        if text:
+            output.append(text)
+        index = span_end
+    atomic_text(path, "".join(output))
