@@ -30,6 +30,29 @@ Violin is a **Hermes-native agentic pentest profile** for supervised, authorised
   <a href="#development">Development</a>
 </p>
 
+<p align="center">
+  <strong>Following Violin?</strong>
+  <a href="https://github.com/Strategic-Automation/violin/stargazers">Star the repository</a>
+  to keep it easy to find and help other security engineers discover supervised agentic pentesting.
+</p>
+
+### Community discovery
+
+Violin is listed in community-curated collections including
+[awesome-ai-security](https://github.com/gmh5225/awesome-ai-security),
+[awesome-hermes-skills](https://github.com/ZeroPointRepo/awesome-hermes-skills),
+[awesome-hermes-agent](https://github.com/Anil-matcha/awesome-hermes-agent), and
+[awesome-infosec](https://github.com/onlurking/awesome-infosec).
+
+Third-party coverage:
+[Starlog technical analysis](https://starlog.is/articles/cybersecurity/strategic-automation-violin) and
+[“Violin: Supervised Agentic Penetration Testing Profile for Hermes Agent”](https://hamradio.my/violin-supervised-agentic-pentest-profile-hermes/).
+
+For independent evaluation, use the
+[reviewer kit](https://strategic-automation.github.io/violin/review.html), which
+collects the benchmark path, known limits, review context, and a factual
+comparison with autonomous pentest-agent designs.
+
 ---
 
 <table>

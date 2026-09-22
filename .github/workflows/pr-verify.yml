@@ -24,6 +24,37 @@ jobs:
             exit 1
           fi
 
+  release-issues:
+    if: github.event.pull_request.base.ref == 'master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Check out the release source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Require every shipped issue in the release description
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Closing keywords only close issues when they merge into the default
+          # branch, so this release PR is the one place they take effect. The
+          # runner image ships the gh CLI the script reads GitHub with.
+          git fetch --tags --force origin dev master
+          base="$(git describe --tags --abbrev=0 origin/dev 2>/dev/null || git merge-base origin/master origin/dev)"
+          printf '%s' "$BODY" > release-body.md
+          python3 scripts/issue_closure.py check-release \
+            --body-file release-body.md \
+            --repo "$REPOSITORY" \
+            --base "$base" \
+            --head origin/dev
+
   pr-title:
     runs-on: ubuntu-latest
     steps:
@@ -41,7 +72,9 @@ jobs:
           fi
 
   pr-body:
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check description follows the PR template

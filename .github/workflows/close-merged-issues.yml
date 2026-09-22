@@ -1,0 +1,40 @@
+name: Close merged issues
+
+# GitHub closes an issue from a closing keyword only when that keyword reaches the
+# repository's default branch, which is `master` here. Feature work merges into
+# `dev` instead, so this workflow closes the issues a merged pull request claims.
+#
+# `pull_request_target` is used because a token issued for a forked pull request is
+# read-only. No pull-request code is checked out: the job reads the event payload and
+# runs the script from `dev`, so nothing a contributor writes can execute here.
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  close:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - name: Check out dev
+        uses: actions/checkout@v7
+        with:
+          ref: dev
+
+      - name: Close the issues this pull request claims
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          python3 scripts/issue_closure.py close-merged \
+            --pr "$PULL_REQUEST" \
+            --repo "$REPOSITORY"

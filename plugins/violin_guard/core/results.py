@@ -30,3 +30,11 @@ class GuardResult:
         if self.warnings:
             return 2
         return 0
+
+    def print(self) -> None:
+        for error in self.errors:
+            print(f"BLOCK: {error}")
+        for warning in self.warnings:
+            print(f"REVIEW: {warning}")
+        for info in self.infos:
+            print(f"OK: {info}")

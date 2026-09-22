@@ -17,14 +17,6 @@ from ..core.results import GuardResult
 class ScopeResult(GuardResult):
     scope_data: dict[str, Any] | None = None
 
-    def print(self) -> None:
-        for error in self.errors:
-            print(f"BLOCK: {error}")
-        for warning in self.warnings:
-            print(f"REVIEW: {warning}")
-        for info in self.infos:
-            print(f"OK: {info}")
-
 
 def load_scope(scope_path: Path) -> dict[str, Any]:
     """Read a scope mapping or raise a user-facing validation error."""

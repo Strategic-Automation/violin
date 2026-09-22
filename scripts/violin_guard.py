@@ -5,64 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
 
-# Bootstrap the profile root so the plugin package can be imported directly.
-_PROFILE_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROFILE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROFILE_ROOT))
+if __package__:
+    from .cli_environment import cli_imports
+else:
+    from cli_environment import cli_imports
 
-from scripts.cli_environment import project_imports
-
-
-def _ensure_venv() -> None:
-    try:
-        import pydantic  # noqa: F401
-
-        return
-    except ImportError:
-        pass
-
-    candidates: list[Path] = []
-    if os.getenv("VIRTUAL_ENV"):
-        candidates.append(Path(os.environ["VIRTUAL_ENV"]))
-    candidates.extend(
-        [
-            _PROFILE_ROOT / ".venv",
-            _PROFILE_ROOT.parent / ".venv",
-            Path("/violin/.venv"),
-        ]
-    )
-
-    for venv in candidates:
-        if not venv.is_dir():
-            continue
-        site_packages = list(venv.glob("lib/python*/site-packages")) + list(
-            venv.glob("Lib/site-packages")
-        )
-        for sp in site_packages:
-            if sp.is_dir() and str(sp) not in sys.path:
-                sys.path.insert(0, str(sp))
-        try:
-            import pydantic  # noqa: F401
-
-            return
-        except ImportError:
-            pass
-
-        for exe_name in ("bin/python", "bin/python3", "Scripts/python.exe", "Scripts/python"):
-            exe = venv / exe_name
-            if exe.is_file() and Path(sys.executable).resolve() != exe.resolve():
-                res = subprocess.run([str(exe), *sys.argv], check=False)
-                sys.exit(res.returncode)
-
-
-with project_imports(_PROFILE_ROOT):
-    _ensure_venv()
-
+with cli_imports():
     from plugins.violin_guard import handlers
     from plugins.violin_guard.core import bootstrap, findings, state
     from plugins.violin_guard.engine import release
@@ -109,17 +60,9 @@ def cmd_validate_scope(args: argparse.Namespace) -> int:
 
 
 def cmd_generate_closeout(args: argparse.Namespace) -> int:
-    try:
-        yaml_path = findings.generate_findings_yaml(args.eng_dir, force=args.force)
-        report_path = findings.generate_report_md(
-            args.eng_dir, target=args.target, force=args.force
-        )
-    except ValueError as exc:
-        print(f"BLOCK: {exc}")
-        return 1
-    print(f"OK: wrote {yaml_path}")
-    print(f"OK: wrote {report_path}")
-    return 0
+    result = findings.generate_closeout(args.eng_dir, target=args.target, force=args.force)
+    result.print()
+    return result.exit_code()
 
 
 def cmd_record_ptt(args: argparse.Namespace) -> int:

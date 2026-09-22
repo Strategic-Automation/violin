@@ -46,3 +46,47 @@ def test_record_hypothesis_allows_research_attempted():
         {"eng_dir": "/tmp/eng", "research_attempted": True},
     )
     assert model.research_attempted is True
+
+
+@pytest.mark.parametrize(
+    "model_type,required,default_status",
+    [
+        (
+            schemas.RecordPttArgsModel,
+            {"eng_dir": "eng", "id": "PT-001", "skill": "pentest", "technique": "recon"},
+            "",
+        ),
+        (
+            schemas.ReviewBatchArgsModel,
+            {"eng_dir": "eng", "id": "PT-001", "note": "reviewed"},
+            "[~]",
+        ),
+    ],
+)
+def test_review_payload_contract(model_type, required, default_status):
+    first = model_type.model_validate(required)
+    second = model_type.model_validate(required)
+    assert first.status == default_status
+    assert first.outcome == first.next_action == first.next_technique == ""
+    assert first.research_attempted is False
+    first.evidence_paths.append("evidence/recon/result.txt")
+    assert second.evidence_paths == []
+    payload = {
+        **required,
+        "outcome": "confirmed",
+        "evidence_paths": ["evidence/recon/result.txt"],
+        "next_action": "continue",
+        "next_technique": "inspect",
+        "research_attempted": True,
+    }
+    output = model_type.model_validate(payload).model_dump()
+    assert all(output[key] == value for key, value in payload.items())
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        model_type.model_validate({**required, "unexpected": True})
+    with pytest.raises(ValidationError):
+        model_type.model_validate({**required, "evidence_paths": "not-a-list"})
+    for key in required:
+        with pytest.raises(ValidationError):
+            model_type.model_validate(
+                {name: value for name, value in required.items() if name != key}
+            )

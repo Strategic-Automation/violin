@@ -53,13 +53,7 @@ class CheckCommandArgs:
 
 @dataclass
 class CheckResult(GuardResult):
-    def print(self) -> None:
-        for error in self.errors:
-            print(f"BLOCK: {error}")
-        for warning in self.warnings:
-            print(f"REVIEW: {warning}")
-        for info in self.infos:
-            print(f"OK: {info}")
+    """Command validation result."""
 
 
 def check_command(args: CheckCommandArgs) -> CheckResult:

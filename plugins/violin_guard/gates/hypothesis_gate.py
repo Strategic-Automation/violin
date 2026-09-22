@@ -58,13 +58,7 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, str]] = [
 
 @dataclass
 class HypothesisResult(GuardResult):
-    def print(self) -> None:
-        for error in self.errors:
-            print(f"BLOCK: {error}")
-        for warning in self.warnings:
-            print(f"REVIEW: {warning}")
-        for info in self.infos:
-            print(f"OK: {info}")
+    """Hypothesis validation result."""
 
 
 def check_destructive_patterns(command: str) -> HypothesisResult:

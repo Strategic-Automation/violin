@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reviewer kit — Violin</title>
+    <meta
+      name="description"
+      content="A concise reviewer kit for Violin: what to test, what makes it different, known limits, benchmark methodology, and independent coverage."
+    />
+    <link
+      rel="canonical"
+      href="https://strategic-automation.github.io/violin/review.html"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Reviewer kit — Violin" />
+    <meta
+      property="og:description"
+      content="A concise reviewer kit for Violin: setup, architecture, evaluation, known limits, and independent coverage."
+    />
+    <meta
+      property="og:url"
+      content="https://strategic-automation.github.io/violin/review.html"
+    />
+    <meta
+      property="og:image"
+      content="https://strategic-automation.github.io/violin/assets/social-preview.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/site.css" />
+    <script type="module" src="assets/site.js"></script>
+  </head>
+  <body class="documentation">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Violin home"
+          ><img src="assets/logo.png" alt="" width="32" height="32" /><span
+            >VIOLIN</span
+          ></a
+        >
+        <nav class="desktop-nav" aria-label="Main navigation">
+          <a href="index.html">Overview</a><a href="guide.html">Docs</a
+          ><a href="engineering.html">Engineering</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin"
+            target="_blank"
+            rel="noopener"
+            >GitHub ↗</a
+          >
+        </nav>
+        <details class="site-menu">
+          <summary>Menu</summary>
+          <nav aria-label="Mobile navigation">
+            <a href="index.html">Overview</a><a href="guide.html">Docs</a
+            ><a href="engineering.html">Engineering</a
+            ><a
+              href="https://github.com/Strategic-Automation/violin"
+              target="_blank"
+              rel="noopener"
+              >GitHub ↗</a
+            >
+          </nav>
+        </details>
+      </div>
+    </header>
+    <main id="main-content" tabindex="-1">
+      <div class="shell docs-layout">
+        <aside class="docs-sidebar">
+          <p class="nav-label">Documentation</p>
+          <nav aria-label="Documentation">
+            <a href="guide.html">Get started</a
+            ><a href="guard.html">Guard &amp; evidence</a
+            ><a href="coverage.html">Playbooks</a
+            ><a href="tools.html">Tool reference</a
+            ><a href="engineering.html">Engineering notes</a
+            ><a href="review.html" aria-current="page">Reviewer kit</a>
+          </nav>
+          <a
+            class="sidebar-source"
+            href="https://github.com/Strategic-Automation/violin"
+            >View source ↗</a
+          >
+        </aside>
+        <div class="docs-content">
+          <details class="docs-mobile">
+            <summary>In the docs <span>Reviewer kit</span></summary>
+            <nav aria-label="Documentation pages">
+              <a href="guide.html">Get started</a
+              ><a href="guard.html">Guard &amp; evidence</a
+              ><a href="coverage.html">Playbooks</a
+              ><a href="tools.html">Tool reference</a
+              ><a href="engineering.html">Engineering notes</a
+              ><a href="review.html" aria-current="page">Reviewer kit</a>
+            </nav>
+          </details>
+
+          <div class="page-heading">
+            <p class="eyebrow">Violin / Independent evaluation</p>
+            <h1>Reviewer kit</h1>
+            <p class="intro">
+              Everything needed to evaluate Violin without relying on marketing
+              claims: setup, architecture, proof rules, known limits and a
+              reproducible benchmark path.
+            </p>
+          </div>
+
+          <section class="doc-section first-section">
+            <h2>What Violin is</h2>
+            <p>
+              Violin is an open-source Hermes-native profile for supervised,
+              authorised penetration testing. It combines persistent engagement
+              state, routed security playbooks, guarded target execution,
+              receipt-backed evidence and release-gated reporting.
+            </p>
+            <p>
+              The project is intentionally designed for human-supervised
+              assessments rather than autonomous unsupervised scanning.
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>What to test</h2>
+            <ol>
+              <li>Install Violin into a Hermes 0.18.0+ environment.</li>
+              <li>Create an engagement with explicit scope.</li>
+              <li>Record one PTT task and load its routed skill.</li>
+              <li>Run target commands through <code>violin_exec</code>.</li>
+              <li>Inspect signed receipts and evidence files.</li>
+              <li>Submit a typed finding backed by decisive receipts.</li>
+              <li>Check closeout gates, coverage and report generation.</li>
+            </ol>
+            <p>
+              Start with the <a href="guide.html">getting-started guide</a> and
+              <a href="guard.html">guard documentation</a>.
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>Questions worth asking</h2>
+            <ul>
+              <li>Does persistent state make long-running work easier to resume and audit?</li>
+              <li>Are execution boundaries and scope checks understandable to an operator?</li>
+              <li>Can a reviewer trace a reported finding back to decisive evidence?</li>
+              <li>Where can the agent still fail despite the guard?</li>
+              <li>How much human intervention is needed for a useful assessment?</li>
+              <li>Do repeated runs show stable capability or high variance?</li>
+            </ul>
+          </section>
+
+          <section class="doc-section">
+            <h2>Known limits</h2>
+            <p>
+              The raw-terminal hook is a best-effort safety net, not a sandbox
+              or network containment boundary. Violin assumes a trusted host
+              environment and operators remain responsible for target
+              ownership, scope, approvals, data handling and local law.
+            </p>
+            <p>
+              Read the full limitations and execution model in
+              <a href="guard.html#limits">Guard &amp; evidence</a>.
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>Benchmarking</h2>
+            <p>
+              Violin's benchmark methodology scores typed, receipt-backed
+              findings rather than report prose. It separates finding score,
+              coverage and methodology, and recommends multiple independent runs
+              because agentic results are non-deterministic.
+            </p>
+            <p>
+              <a
+                href="https://github.com/Strategic-Automation/violin/blob/master/docs/BENCHMARKS.md"
+                target="_blank"
+                rel="noopener"
+                >Read the benchmark methodology ↗</a
+              >
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>Independent coverage</h2>
+            <p>
+              Starlog published an independent technical analysis of Violin on
+              17 September 2026, including architectural strengths and
+              criticisms around host trust, containment and state persistence.
+            </p>
+            <p>
+              <a
+                href="https://starlog.is/articles/cybersecurity/strategic-automation-violin"
+                target="_blank"
+                rel="noopener"
+                >Read the Starlog analysis ↗</a
+              >
+            </p>
+            <p>
+              HamRadio.my published a separate overview on 18 September 2026,
+              focusing on the supervised workflow, Hermes integration, guard
+              boundary and evidence model.
+            </p>
+            <p>
+              <a
+                href="https://hamradio.my/violin-supervised-agentic-pentest-profile-hermes/"
+                target="_blank"
+                rel="noopener"
+                >Read the HamRadio.my overview ↗</a
+              >
+            </p>
+            <h3>Review context and current state handling</h3>
+            <p>
+              That review described filesystem state as lacking transactional
+              guarantees, highlighted concurrent-session corruption risk, and
+              noted an unversioned checkpoint format. The current implementation
+              has since added atomic file replacement, advisory per-file locks,
+              an engagement workflow lock for multi-file transitions, concurrency
+              regression tests, and a versioned checkpoint template.
+            </p>
+            <p>
+              These controls reduce the specific race and partial-write risks
+              raised in the review, but they do not turn Violin's filesystem
+              state into a database transaction layer, a sandbox, or a
+              multi-tenant isolation boundary. Reviewers should test those
+              limits directly against the exact commit they evaluate.
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>How Violin differs from autonomous pentest agents</h2>
+            <p>
+              Violin is not positioned as an autonomous replacement for a
+              penetration tester. Its design keeps authorization, scope changes,
+              destructive or sensitive actions, finding interpretation and final
+              reporting under human control.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Dimension</th>
+                  <th>Violin</th>
+                  <th>Typical autonomous-agent design</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Operating model</td>
+                  <td>Supervised engagement with explicit operator approvals</td>
+                  <td>Agent plans and executes a larger share of the workflow independently</td>
+                </tr>
+                <tr>
+                  <td>Target execution</td>
+                  <td>Target commands pass through a required guard boundary</td>
+                  <td>Execution policy varies by framework and deployment</td>
+                </tr>
+                <tr>
+                  <td>Scope</td>
+                  <td>Parsed from an approved engagement file and checked before execution</td>
+                  <td>Often represented as task context, policy, or agent instructions</td>
+                </tr>
+                <tr>
+                  <td>Evidence</td>
+                  <td>Findings bind to authenticated execution receipts and declared evidence</td>
+                  <td>Evidence capture and provenance vary by tool</td>
+                </tr>
+                <tr>
+                  <td>State</td>
+                  <td>Persistent engagement files designed for resumability and audit</td>
+                  <td>May rely on conversation memory, agent memory, databases, or task traces</td>
+                </tr>
+                <tr>
+                  <td>Safety boundary</td>
+                  <td>Documented as procedural enforcement, not network containment</td>
+                  <td>May use sandboxes, allowlists, policy engines, or host controls</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              This is a design comparison, not a claim that one architecture is
+              universally better. Reviewers should evaluate the controls and
+              trade-offs against their own threat model and operating process.
+            </p>
+          </section>
+
+          <section class="doc-section">
+            <h2>For reviewers and security teams</h2>
+            <p>
+              Independent criticism is welcome. If you publish a review, test,
+              benchmark or integration report, please link the exact Violin
+              version or commit you evaluated so results remain reproducible.
+            </p>
+            <p>
+              For private security reports, use
+              <a
+                href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+                target="_blank"
+                rel="noopener"
+                >SECURITY.md</a
+              >.
+            </p>
+          </section>
+        </div>
+      </div>
+    </main>
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <span>Violin · Open source · MIT</span>
+        <nav aria-label="Footer">
+          <a
+            href="https://github.com/Strategic-Automation/violin/blob/master/SECURITY.md"
+            >Security</a
+          ><a
+            href="https://github.com/Strategic-Automation/violin/blob/master/CONTRIBUTING.md"
+            >Contribute</a
+          ><a href="https://hermes-agent.nousresearch.com/">Built on Hermes ↗</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -4,17 +4,24 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
 
 ## How to Contribute
 
-### Reporting Bugs
+### Creating Issues
 
-1. Check the [issues](https://github.com/Strategic-Automation/violin/issues) for duplicates
-2. Include: Violin version, Hermes version, OS/platform, steps to reproduce, and any guard output
-3. Use the bug report template if available
+Use the repository's structured issue forms:
 
-### Requesting Features
+- **Bug Report** for reproducible defects.
+- **Feature Request** for new capabilities or workflow behaviour.
+- **Engineering Task** for refactors, research, maintenance, documentation, CI, or testing work.
 
-1. Open a feature request issue describing the playbook, vulnerability class, or workflow you'd like added
-2. Explain the use case and how it fits Violin's supervised, authorized testing model
-3. Include references to OWASP, PTES, or NIST methodology if applicable
+Before opening an issue, search open and closed issues and open pull requests for overlapping
+work. Keep one independently reviewable concern per issue.
+
+Issue titles should be clean, descriptive summaries. Do not add priority, order, type, or
+status prefixes. Use GitHub-native issue types, project fields, dependencies, sub-issues,
+milestones, and area labels where available.
+
+See [the issue standards](.github/ISSUE_STANDARDS.md) for the canonical structure and metadata
+rules. Security vulnerabilities in Violin itself must be reported through
+[SECURITY.md](SECURITY.md), not a public issue.
 
 ### Submitting Changes
 
@@ -45,10 +52,31 @@ Thanks for your interest in Violin — the supervised agentic Hermes pentest pro
      revert build release`. CI checks every title.
    - Description: fill in `PULL_REQUEST_TEMPLATE.md` (Summary and Verification
      are required; CI checks this too). Link the issue you close with
-     `Fixes #123` on its own line.
+     `Fixes #123` on its own line: merging into `dev` closes it (see below).
    - Area labels (guard, playbooks, benchmark, docs, ci, tests, packaging) are
      applied automatically; add others by hand where useful.
    - Feature branches are squash-merged; release PRs merge with a merge commit.
+
+### Issue Closure
+
+GitHub closes an issue from `Fixes`/`Closes`/`Resolves` only when those keywords
+reach the **default branch**, which is `master` here. Feature pull requests
+target `dev`, so GitHub's own closing never applies to them. Violin covers both
+ends of the flow:
+
+- **On merge into `dev`** — `.github/workflows/close-merged-issues.yml` closes
+  the open issues the merged pull request claims and comments on each one with
+  the pull request title and merge commit. `Fixes #123` therefore behaves as
+  expected on a normal pull request.
+- **On release (`dev` → `master`)** — the release pull request must claim every
+  issue the work it ships claims, because that merge is the one place GitHub's
+  own keywords take effect. The `release-issues` check in
+  `.github/workflows/pr-verify.yml` fails the release PR when one is missing,
+  prints the `Closes #...` line to add, and ignores issues that the merge-time
+  pass already closed.
+
+`References #123` never closes anything in either place, so an issue that is only
+mentioned stays open as intended.
 
 ### Playbook Standards
 

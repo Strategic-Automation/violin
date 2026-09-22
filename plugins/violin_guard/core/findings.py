@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from . import receipt_integrity, schemas, state
+from .results import GuardResult
 
 FINDINGS_PATH = Path("evidence/findings.jsonl")
 _SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")
@@ -325,7 +326,22 @@ def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False)
     return output
 
 
+def generate_closeout(eng_dir: str | Path, *, target: str, force: bool = False) -> GuardResult:
+    """Generate both closeout artifacts with the existing CLI result contract."""
+    result = GuardResult()
+    try:
+        yaml_path = generate_findings_yaml(eng_dir, force=force)
+        report_path = generate_report_md(eng_dir, target=target, force=force)
+    except ValueError as exc:
+        result.add_error(str(exc))
+        return result
+    result.add_info(f"wrote {yaml_path}")
+    result.add_info(f"wrote {report_path}")
+    return result
+
+
 __all__ = [
+    "generate_closeout",
     "FINDINGS_PATH",
     "generate_findings_yaml",
     "generate_report_md",

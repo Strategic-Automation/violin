@@ -7,7 +7,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: Object.fromEntries(
-        ["index", "guide", "guard", "coverage", "tools", "engineering"].map(
+        ["index", "guide", "guard", "coverage", "tools", "engineering", "review"].map(
           (name) => [
             name,
             fileURLToPath(new URL(`./${name}.html`, import.meta.url)),
