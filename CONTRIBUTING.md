@@ -52,10 +52,31 @@ rules. Security vulnerabilities in Violin itself must be reported through
      revert build release`. CI checks every title.
    - Description: fill in `PULL_REQUEST_TEMPLATE.md` (Summary and Verification
      are required; CI checks this too). Link the issue you close with
-     `Fixes #123` on its own line.
+     `Fixes #123` on its own line. This records the claim; it does not close the
+     issue, because the PR targets `dev` (see below).
    - Area labels (guard, playbooks, benchmark, docs, ci, tests, packaging) are
      applied automatically; add others by hand where useful.
    - Feature branches are squash-merged; release PRs merge with a merge commit.
+
+### Release Pull Requests
+
+GitHub closes an issue from `Fixes`/`Closes`/`Resolves` only when those keywords
+reach the **default branch**. Topic branches and `dev` are not the default
+branch, so `Fixes #123` on a `dev` PR closes nothing; the release pull request
+(`dev` → `master`) is where the keywords take effect.
+
+A release PR must therefore name every issue that the work it ships claims:
+
+- List them on one line, for example `Closes #83, #84, #159`.
+- The `release-issues` check in `.github/workflows/pr-verify.yml` reads the
+  pull requests merged into `dev` since the last release tag, collects the issues
+  they claim to close, and fails the release PR when one is missing. It prints
+  the line to add, and it ignores claims for issues that are already closed.
+- Merging the release PR into `master` closes those issues automatically. Nothing
+  else closes them: there is no separate issue-closing workflow.
+
+`References #123` never closes anything and is not required in a release PR, so
+an issue that is only mentioned (not fixed) stays open as intended.
 
 ### Playbook Standards
 
