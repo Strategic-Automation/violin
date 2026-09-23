@@ -227,7 +227,10 @@ def check_hypothesis_freshness(
         try:
             hypothesis_phase = normalize_phase(hypothesis.phase)
         except ValueError:
-            if norm_hyp_id is not None and not str(hypothesis.phase or "").strip():
+            # An unphased hypothesis defaults to the phase in effect at the
+            # gate, so a hypothesis recorded without an explicit phase is
+            # never stranded with an empty phase that the gate cannot match.
+            if not str(hypothesis.phase or "").strip():
                 hypothesis_phase = phase
             else:
                 continue

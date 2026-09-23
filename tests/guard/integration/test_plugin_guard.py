@@ -560,6 +560,37 @@ def test_unphased_hypothesis_defaults_to_current_phase_when_linked(tmp_path):
     )
 
 
+def test_unphased_hypothesis_defaults_to_current_phase_unlinked(tmp_path):
+    """A hypothesis recorded without an explicit phase is acceptable to the
+    gate without needing to be explicitly linked: the empty phase defaults to
+    the phase in effect at the gate (empty-phase deadlock fix, #176)."""
+    (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "scope" / "scope.yaml").write_text(
+        "targets:\n  in_scope_urls: [https://duck-store.escape.tech]\n"
+        "rules_of_engagement:\n  allowed_actions: [RECON, VULN_RESEARCH]\n"
+        "engagement:\n  name: Test\n"
+        "authorized_parties: [Tester]\n"
+        "authorisation:\n  confirmed: true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "hypotheses.md").write_text(
+        "### H-001: API surface\n"
+        "- **Target:** https://duck-store.escape.tech\n"
+        "- **Status:** Candidate\n"
+        "- **Phase:**\n",  # empty phase: recorded without a phase
+        encoding="utf-8",
+    )
+
+    result = command.check_hypothesis_freshness(
+        tmp_path,
+        command.Phase.VULN_RESEARCH,
+        "curl -i https://duck-store.escape.tech/api/v1/products",
+    )
+    assert not result.errors, (
+        f"Unphased hypothesis should be admitted against the current phase: {result.errors}"
+    )
+
+
 def test_check_command_routes_research_hint_to_active_task_hypothesis(tmp_path):
     """Verify check_command binds the active PTT task's hypothesis and hints, not blocks.
 
