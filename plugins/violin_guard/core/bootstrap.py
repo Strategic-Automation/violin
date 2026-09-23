@@ -138,6 +138,32 @@ def _ctf_ptt(host: str) -> str:
 """
 
 
+def _seed_coverage_matrix(eng_dir: Path, scope_data: dict) -> None:
+    """Pre-key state/coverage-matrix.yaml with the engagement's obligations.
+
+    Reuses the exact seeding shape from benchmark/run.py (lowercased obligation
+    keys, ``pending`` status) so a fresh engagement's matrix matches the keys the
+    VULN_RESEARCH close gate expects instead of placeholder example paths.
+    """
+    obligations = [
+        str(item).strip()
+        for item in ((scope_data or {}).get("engagement") or {}).get("coverage_obligations") or []
+        if str(item).strip()
+    ]
+    if not obligations:
+        # No declared vocabulary yet: leave the empty template for the operator.
+        return
+    coverage = {
+        "coverage": {
+            obligation.lower(): {"status": "pending", "evidence_or_reason": ""}
+            for obligation in obligations
+        }
+    }
+    (eng_dir / "state" / "coverage-matrix.yaml").write_text(
+        yaml.safe_dump(coverage, sort_keys=False), encoding="utf-8"
+    )
+
+
 def _ctf_scope(host: str) -> dict:
     return {
         "targets": {"ip_addresses": [host], "in_scope_urls": []},
@@ -180,6 +206,7 @@ def init_engagement(
 
     ensure_dir(eng_dir)
     record_session_id(eng_dir, session_id)
+    matrix_created_here = not (eng_dir / "state" / "coverage-matrix.yaml").exists()
     for rel in _ARTIFACT_DIRECTORIES:
         ensure_dir(eng_dir / rel)
     for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():
@@ -193,6 +220,13 @@ def init_engagement(
         scope_path = eng_dir / "scope" / "scope.yaml"
         scope_path.write_text(yaml.safe_dump(_ctf_scope(host), sort_keys=False), encoding="utf-8")
         result.add_info("wrote CTF scope")
+
+    if matrix_created_here:
+        scope_path = eng_dir / "scope" / "scope.yaml"
+        scope_data = (
+            yaml.safe_load(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
+        )
+        _seed_coverage_matrix(eng_dir, scope_data if isinstance(scope_data, dict) else {})
 
     if result.errors or result.warnings:
         result.add_error("init-engagement produced an incomplete or non-compliant engagement")

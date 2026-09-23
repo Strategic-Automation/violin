@@ -60,6 +60,44 @@ def test_generate_report_md_contents(tmp_path: Path) -> None:
     assert "evidence/executions/order.json" in text
 
 
+def test_report_renders_both_receipts_and_declared_evidence_distinctly(
+    tmp_path: Path,
+) -> None:
+    _write_finding(tmp_path)
+    text = generate_report_md(tmp_path, target="https://example.test").read_text(encoding="utf-8")
+    assert "**Authenticating receipts (signed execution receipts):**" in text
+    assert "- `evidence/executions/order.json`" in text
+    assert "**Declared evidence (decisive response bytes):**" in text
+    assert "- `evidence/executions/order.stdout.txt`" in text
+    # The two sets differ, so the report states the difference rather than
+    # collapsing the declared evidence into the receipts.
+    assert "distinct sets" in text
+
+
+def test_report_marks_finding_with_no_declared_evidence(tmp_path: Path) -> None:
+    engagement = Path(tmp_path)
+    store = engagement / "evidence" / "findings.jsonl"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema_version": 1,
+        "finding_id": "FIND-002",
+        "title": "Status-code only probe",
+        "severity": "Low",
+        "summary": "Flagged by a status-code-only probe with no saved response body.",
+        "status": "validated",
+        "receipt_paths": ["evidence/executions/probe.json"],
+        "execution_ids": ["exec-2"],
+        "evidence_paths": [],
+    }
+    store.write_text(
+        json.dumps(record) + "\n",
+        encoding="utf-8",
+    )
+    text = generate_report_md(engagement, target="https://example.test").read_text(encoding="utf-8")
+    assert "evidence_complete: false" in text
+    assert "no declared evidence_paths" in text
+
+
 def test_generators_do_not_overwrite_without_force(tmp_path: Path) -> None:
     _write_finding(tmp_path)
     generate_findings_yaml(tmp_path)

@@ -8,10 +8,16 @@ from typing import Any
 
 import yaml
 
-from ..core import findings, hypotheses, ptt
+from ..core import findings, history, hypotheses, ptt
 from ..core.redaction import redact_single_line
 
 _CANONICAL_FINDING_OR_HYPOTHESIS_RE = re.compile(r"evidence/|FIND-\d+|H-\d+", re.IGNORECASE)
+
+# A REPORTING close is satisfied by a command that produced authenticated proof of
+# impact: one executed in an exploitation/later phase, or one executed under VULN_RESEARCH
+# with a trusting receipt (validation proof-of-concepts legitimately live there).
+_LATER_PROOF_PHASES = frozenset({"exploitation", "post_exploitation", "privesc", "flags"})
+_VULN_RESEARCH_PHASES = frozenset({"vuln_research", "vuln-research"})
 
 _EXPECTED_METHODOLOGY_GATES = frozenset(
     {
@@ -57,6 +63,37 @@ def _validate_disposition_entry(name: str, entry: Any) -> list[str]:
     if status == "tested" and not _CANONICAL_FINDING_OR_HYPOTHESIS_RE.search(reason):
         return [f"{name_normalized} (tested without evidence/FIND/hypothesis reference)"]
     return []
+
+
+def _coverage_key_errors(entries: Any, obligations: list[Any]) -> list[str]:
+    """Validate coverage-matrix cells against the engagement obligation vocabulary.
+
+    Shared by the VULN_RESEARCH close gate and the bootstrap write path, so an
+    unrecognised obligation key fails immediately and lists the accepted keys.
+    A cell is recognized if its lowercased key or evidence text maps to at least
+    one obligation. Returns error strings; empty means the key mapping is sound.
+    """
+    accepted = {
+        str(obligation).strip().lower()
+        for obligation in (obligations or [])
+        if str(obligation).strip()
+    }
+    if not accepted or not isinstance(entries, dict) or not entries:
+        return []
+    errors: list[str] = []
+    for name, entry in entries.items():
+        cell = (
+            f"{str(name).strip().lower()} "
+            f"{str((entry or {}).get('evidence_or_reason') or '').strip().lower()}"
+            if isinstance(entry, dict)
+            else str(name).strip().lower()
+        )
+        if not any(obligation in cell for obligation in accepted):
+            errors.append(
+                f"{name} (unrecognised obligation key; accepted keys: "
+                f"{', '.join(sorted(accepted))})"
+            )
+    return errors
 
 
 def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
@@ -119,6 +156,7 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                             )
                     for name, entry in entries.items():
                         unresolved_coverage.extend(_validate_disposition_entry(name, entry))
+                    unresolved_coverage.extend(_coverage_key_errors(entries, obligations))
                     if unresolved_coverage:
                         hints = [
                             "how to fix: each obligation must map to a coverage-matrix cell",
@@ -182,14 +220,15 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
     if phase.value == "REPORTING":
         validated = [item for item in board if item.canonical_status() == "Validated"]
         if validated:
-            reported_proofs: list[set[Path]] = []
+            reported_proofs: dict[str, set[Path]] = {}
             for record in findings.load_findings(engagement):
+                finding_id = str(record.get("finding_id") or "<unknown>")
                 proof_paths: set[Path] = set()
                 for receipt_path in record["receipt_paths"]:
                     _, evidence = findings._verified_receipt(engagement, receipt_path)
                     proof_paths.add((engagement / receipt_path).resolve())
                     proof_paths.update(evidence)
-                reported_proofs.append(proof_paths)
+                reported_proofs[finding_id] = proof_paths
             unreported = []
             for item in validated:
                 evidence_paths = {
@@ -197,16 +236,29 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                     for value in item.runtime_evidence.split(",")
                     if value.strip()
                 }
-                if not evidence_paths or not any(
-                    evidence_paths.issubset(proof) for proof in reported_proofs
-                ):
-                    unreported.append(f"H-{item.id}")
+                if not evidence_paths:
+                    unreported.append(f"H-{item.id} (no runtime evidence recorded)")
+                    continue
+                for proof_paths in reported_proofs.values():
+                    if evidence_paths & proof_paths:
+                        break  # a finding authenticates at least one runtime-evidence path
+                else:
+                    if reported_proofs:
+                        first_id, first_proof = next(iter(reported_proofs.items()))
+                        candidate = min(evidence_paths - first_proof)
+                        unreported.append(
+                            f"H-{item.id}: finding {first_id} cites none of its runtime "
+                            f"evidence; citing a receipt for {candidate.name} would satisfy it"
+                        )
+                    else:
+                        unreported.append(f"H-{item.id}: no receipt-backed findings submitted")
             if unreported:
                 raise ValueError(
                     "REPORTING cannot close: validated hypotheses without a receipt-backed "
                     "finding: "
-                    + ", ".join(unreported)
-                    + ". Submit findings citing the receipts that authenticate their runtime evidence."
+                    + "; ".join(unreported)
+                    + ". Submit findings whose receipts authenticate at least one "
+                    "runtime-evidence path."
                 )
         scope_path = engagement / "scope" / "scope.yaml"
         scope_data = (
@@ -216,22 +268,37 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
             (scope_data.get("engagement") or {}).get("audit_mode") is True
         ):
             history_path = engagement / "state" / "history.md"
-            reached_later_phase = False
+            proof_commands: list[str] = []
+            unreceipted: list[str] = []
             if history_path.is_file():
-                history_text = history_path.read_text(encoding="utf-8", errors="replace")
-                for token in re.findall(r"phase=([a-zA-Z_]+)", history_text):
-                    if token.lower() in {"exploitation", "post_exploitation", "privesc", "flags"}:
-                        reached_later_phase = True
-                        break
-            if not reached_later_phase:
+                for line in history_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    match = re.search(r"phase=([a-zA-Z_-]+)", line)
+                    if match is None:
+                        continue
+                    phase = match.group(1).strip().lower()
+                    receipt_backed = " | receipt=" in line
+                    if phase in _LATER_PROOF_PHASES or (
+                        phase in _VULN_RESEARCH_PHASES and receipt_backed
+                    ):
+                        proof_commands.append(history._recorded_command(line) or "")
+                    elif phase in _VULN_RESEARCH_PHASES:
+                        unreceipted.append(history._recorded_command(line) or "")
+            if not proof_commands:
+                if unreceipted:
+                    command = unreceipted[-1]
+                    remedy = (
+                        f"Record a trusting receipt for validation command {command!r} "
+                        "(run it under VULN_RESEARCH) — its output is already cited by "
+                        "the findings."
+                    )
+                else:
+                    remedy = (
+                        "Run a proof-capture command under EXPLOITATION (or a later "
+                        "phase), or under VULN_RESEARCH with a trusting receipt."
+                    )
                 raise ValueError(
                     "REPORTING cannot close: no commands were executed in EXPLOITATION or a "
-                    "later phase (all history is phase=recon). "
-                    "ROOT CAUSE: PT-103 (EXPLOITATION) was never activated or never ran commands. "
-                    "FIX: call violin_record_ptt to set PT-103 status='[~]' (phase=EXPLOITATION), "
-                    "then run proof-capture commands (re-run the exploit to save its decisive "
-                    "output as evidence) under phase=exploitation before closing REPORTING. "
-                    "Skipping the exploitation phase produces an incomplete assessment."
+                    f"later phase with a receipt-backed proof. {remedy}"
                 )
 
 
