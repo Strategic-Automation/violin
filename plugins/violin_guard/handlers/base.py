@@ -77,6 +77,12 @@ def _bound_route_context(eng_dir: str | Path, task_id: str) -> tuple[str, str]:
     return _hypothesis_route_context(eng_dir, hypothesis_id)
 
 
+_REPEAT_CALL_NOTE = (
+    "the transition is not applied yet - call violin_record_ptt again with the identical "
+    "arguments to apply it"
+)
+
+
 def _prepare_skill_reservation_payload(
     eng_dir: str | Path,
     *,
@@ -108,6 +114,7 @@ def _prepare_skill_reservation_payload(
         early_resp = _json(
             "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
             transition_applied=False,
+            next_step=_REPEAT_CALL_NOTE,
             **(extra_fields or {}),
             skill={
                 "name": skill,
@@ -125,6 +132,7 @@ def _prepare_skill_reservation_payload(
         early_resp = _json(
             "skill_preparing",
             transition_applied=False,
+            next_step=_REPEAT_CALL_NOTE,
             **(extra_fields or {}),
             skill={"name": skill, "digest": digest},
         )

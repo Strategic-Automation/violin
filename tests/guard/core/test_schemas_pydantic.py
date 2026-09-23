@@ -90,3 +90,12 @@ def test_review_payload_contract(model_type, required, default_status):
             model_type.model_validate(
                 {name: value for name, value in required.items() if name != key}
             )
+
+
+def test_exec_burst_publishes_the_session_binding_rule():
+    """#186: the binding rule and where the id is read are published, not discovered."""
+    description = schemas.EXEC_BURST_SCHEMA["description"]
+    assert "different session" in description
+    assert "violin_status.skill.session_id" in description
+    field = schemas.ExecBurstArgsModel.model_fields["session_id"]
+    assert "violin_status.skill.session_id" in (field.description or "")
