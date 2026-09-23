@@ -115,14 +115,14 @@ def seal_execution_receipt(
     return sealed
 
 
-def verified_evidence_paths(
+def _signed_digests(
     record: dict[str, Any],
-    engagement: Path,
     *,
     key: str | bytes | None = None,
     public_key: str | bytes | None = None,
-) -> tuple[Path, ...] | None:
-    """Return authenticated, unchanged evidence paths or fail closed."""
+) -> dict[str, str]:
+    """Return the evidence digests a receipt's own signature covers."""
+    failure = f"receipt is unsigned or foreign: {record.get('execution_id') or 'no execution_id'}"
     public_signature = str(record.get(PUBLIC_SIGNATURE_FIELD) or "")
     if public_signature.startswith("ed25519:") and public_key is not None:
         try:
@@ -134,20 +134,60 @@ def verified_evidence_paths(
                 b64decode(public_signature.removeprefix("ed25519:"), validate=True),
                 _canonical_receipt(record),
             )
-        except (ValueError, InvalidSignature):
-            return None
+        except (ValueError, InvalidSignature) as exc:
+            raise ValueError(failure) from exc
     else:
         secret = _decode_key(key)
         signature = str(record.get(SIGNATURE_FIELD) or "")
         if secret is None or not signature.startswith("hmac-sha256:"):
-            return None
+            raise ValueError(failure)
         expected = hmac.new(secret, _canonical_receipt(record), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature.removeprefix("hmac-sha256:"), expected):
-            return None
+            raise ValueError(failure)
     digests = record.get(DIGESTS_FIELD)
     if not isinstance(digests, dict):
-        return None
+        raise ValueError(failure)
+    return {str(value): str(digest) for value, digest in digests.items()}
+
+
+def _cited_versions(
+    engagement: Path, *, key: str | bytes | None, public_key: str | bytes | None
+) -> dict[str, dict[str, str]]:
+    """Map each evidence path to the digests signed receipts recorded for it.
+
+    Evidence identity is content: every signed batch authenticates the version
+    it wrote, so a path cited by two receipts is satisfied while it still holds
+    a version either of them recorded, instead of having to match them all.
+    """
+    versions: dict[str, dict[str, str]] = {}
+    receipts_root = engagement / "evidence" / "executions"
+    for candidate in sorted(receipts_root.glob("*.json")):
+        try:
+            record = json.loads(candidate.read_text(encoding="utf-8"))
+            digests = (
+                _signed_digests(record, key=key, public_key=public_key)
+                if isinstance(record, dict)
+                else {}
+            )
+        except (OSError, ValueError):
+            continue
+        name = str(record.get("execution_id") or candidate.name)
+        for relative, digest in digests.items():
+            versions.setdefault(relative, {}).setdefault(digest, name)
+    return versions
+
+
+def _authenticate_evidence(
+    record: dict[str, Any],
+    engagement: Path,
+    *,
+    key: str | bytes | None = None,
+    public_key: str | bytes | None = None,
+) -> tuple[Path, ...]:
+    """Return the evidence a receipt authenticates, or explain the conflict."""
+    digests = _signed_digests(record, key=key, public_key=public_key)
     evidence_root = (engagement / "evidence").resolve()
+    versions: dict[str, dict[str, str]] = {}
     verified: list[Path] = []
     for value, expected_digest in digests.items():
         relative = Path(str(value))
@@ -157,23 +197,51 @@ def verified_evidence_paths(
             or not candidate.is_relative_to(evidence_root)
             or not candidate.is_file()
             or candidate.is_symlink()
-            or not hmac.compare_digest(_file_digest(candidate), str(expected_digest))
         ):
-            return None
+            raise ValueError(f"evidence is missing or outside evidence/: {value}")
+        current = _file_digest(candidate)
+        if not hmac.compare_digest(current, str(expected_digest)):
+            versions = versions or _cited_versions(engagement, key=key, public_key=public_key)
+            citations = versions.get(relative.as_posix()) or {}
+            if current not in citations:
+                raise ValueError(
+                    f"has changed evidence: {relative.as_posix()} holds {current}, which no "
+                    "signed receipt recorded. Conflicting citations: "
+                    + ", ".join(
+                        f"{name} recorded {digest}" for digest, name in sorted(citations.items())
+                    )
+                    + ". REMEDY: one saved file may be cited by several receipts, so restore one "
+                    "of those recorded versions, or re-run the probe and cite the receipt that "
+                    "recorded the bytes now on disk."
+                )
         verified.append(candidate)
     return tuple(verified)
 
 
-def verify_runtime_receipt(record: dict[str, Any], engagement: Path) -> tuple[Path, ...] | None:
+def verified_evidence_paths(
+    record: dict[str, Any],
+    engagement: Path,
+    *,
+    key: str | bytes | None = None,
+    public_key: str | bytes | None = None,
+) -> tuple[Path, ...] | None:
+    """Return authenticated, unchanged evidence paths or fail closed."""
+    try:
+        return _authenticate_evidence(record, engagement, key=key, public_key=public_key)
+    except ValueError:
+        return None
+
+
+def verify_runtime_receipt(record: dict[str, Any], engagement: Path) -> tuple[Path, ...]:
     """Verify a receipt inside the guard process without exposing signing material."""
     if _RUNTIME_SIGNING_KEY is not None:
         try:
             private_key = Ed25519PrivateKey.from_private_bytes(_RUNTIME_SIGNING_KEY)
-        except ValueError:
-            return None
+        except ValueError as exc:
+            raise ValueError("receipt is unsigned or foreign") from exc
         public_key = private_key.public_key().public_bytes_raw()
-        return verified_evidence_paths(record, engagement, public_key=public_key)
-    return verified_evidence_paths(record, engagement, key=_RUNTIME_KEY)
+        return _authenticate_evidence(record, engagement, public_key=public_key)
+    return _authenticate_evidence(record, engagement, key=_RUNTIME_KEY)
 
 
 __all__ = [

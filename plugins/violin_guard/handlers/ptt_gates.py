@@ -225,7 +225,13 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                 finding_id = str(record.get("finding_id") or "<unknown>")
                 proof_paths: set[Path] = set()
                 for receipt_path in record["receipt_paths"]:
-                    _, evidence = findings._verified_receipt(engagement, receipt_path)
+                    try:
+                        _, evidence = findings._verified_receipt(engagement, receipt_path)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"finding {record['finding_id']} cites a receipt that does not "
+                            f"authenticate its evidence: {exc}"
+                        ) from exc
                     proof_paths.add((engagement / receipt_path).resolve())
                     proof_paths.update(evidence)
                 reported_proofs[finding_id] = proof_paths
