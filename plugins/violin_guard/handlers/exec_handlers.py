@@ -135,7 +135,29 @@ def handle_exec_burst(args: dict, **kwargs):
     continue_on_error = bool(args.get("continue_on_error", False))
     burst_evidence_outputs = list(args.get("evidence_outputs") or [])
 
-    cmds = list(args.get("commands") or [])
+    raw_commands = args.get("commands")
+    if isinstance(raw_commands, str):
+        # A doubled-encoded burst arrives as the JSON string of an array rather
+        # than the array itself. Reject it naming the expected shape before any
+        # command is admitted, so no receipt is ever written for the malformed
+        # burst.
+        return _json(
+            "error",
+            error=(
+                "commands must be a list of strings; received a single "
+                "(JSON-encoded) string — pass the decoded array, not its JSON text"
+            ),
+        )
+    cmds = list(raw_commands or [])
+    for command_index, cmd in enumerate(cmds):
+        if not isinstance(cmd, str):
+            return _json(
+                "error",
+                error=(
+                    f"commands must be a list of strings; element "
+                    f"{command_index + 1} is not a string"
+                ),
+            )
     commands_file = args.get("commands_file")
     if commands_file:
         try:
