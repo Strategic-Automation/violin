@@ -120,3 +120,19 @@ def test_injects_i_into_mixed_clients_in_compound_command():
     out = normalize_http_proof_flags(cmd)
     assert "curl -i -s" in out
     assert "wget -S -q" in out
+
+
+def test_leaves_probe_captured_into_a_variable_untouched():
+    """TOKEN=$(curl ...) consumes stdout, so -i would corrupt the captured body."""
+    cmd = "TOKEN=$(curl -s https://duck-store.escape.tech/api/v1/auth/login)"
+    assert normalize_http_proof_flags(cmd) == cmd
+
+
+def test_leaves_backtick_probe_captured_into_a_variable_untouched():
+    cmd = "TOKEN=`curl -s https://duck-store.escape.tech/api/v1/auth/login`"
+    assert normalize_http_proof_flags(cmd) == cmd
+
+
+def test_still_injects_when_stdout_reaches_the_receipt():
+    cmd = "curl -s https://duck-store.escape.tech/api/v1/health; echo done"
+    assert "-i" in normalize_http_proof_flags(cmd)

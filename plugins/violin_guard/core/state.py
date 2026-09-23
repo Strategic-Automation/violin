@@ -406,6 +406,23 @@ def rebind_pending_sync(
     return mutate_json(path, rebind)
 
 
+def _recorded_findings(eng_dir: Path) -> int:
+    """How many findings this engagement has recorded so far.
+
+    A review that produced a finding is progress even when it re-cites an
+    already-seen evidence path or describes the result in prose instead of the
+    literal ``validated``/``rejected`` outcome - punishing that is what made the
+    anti-stuck hint fire on productive batches. Imported here because
+    ``findings`` imports this module at import time.
+    """
+    from . import findings
+
+    try:
+        return len(findings.load_findings(eng_dir))
+    except (OSError, ValueError, KeyError):
+        return 0
+
+
 def record_semantic_review(
     eng_dir: str | Path,
     *,
@@ -426,7 +443,8 @@ def record_semantic_review(
     ``violin_review_batch`` calls.  A review resets the no-progress counter only
     when it actually produced something new — a fresh evidence path not seen on
     any previously recorded technique, a decisive ``outcome``
-    (``validated`` or ``rejected``), or a genuine pivot where ``next_technique``
+    (``validated`` or ``rejected``), a finding recorded since the previous review,
+    or a genuine pivot where ``next_technique``
     differs from the current ``technique`` (a new attack path).  Repeating
     already-recorded evidence keeps the counter growing, which is exactly the
     circular recon the lock exists to catch.
@@ -450,7 +468,9 @@ def record_semantic_review(
         seen_paths = {
             item for prior in entries.values() for item in prior.get("evidence_paths") or []
         }
-        novel = bool(set(clean_evidence_paths) - seen_paths) or decisive
+        recorded_findings = _recorded_findings(eng_dir)
+        new_finding = recorded_findings > int(data.get("findings") or 0)
+        novel = bool(set(clean_evidence_paths) - seen_paths) or decisive or new_finding
         # Reset the no-progress counter when the review produced something new
         # or pivoted to a new attack path; otherwise keep it growing as a stuck
         # repetition.
@@ -484,6 +504,7 @@ def record_semantic_review(
                 "count": total_stuck,
                 "reason": "five technique no-progress reviews without a pivot or evidence",
             }
+        data["findings"] = max(recorded_findings, int(data.get("findings") or 0))
         return {
             "count": count,
             "warning": total_stuck >= 3,
