@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import state
+from .skill_policy import _VULNERABILITY_ROUTES, _normalize
 
 # ---------------------------------------------------------------------------
 # Pydantic v2 Models
@@ -129,6 +130,27 @@ class RecordHypothesisArgsModel(BaseModel):
             "evidence file paths; globs and semicolon-separated values are not accepted."
         ),
     )
+
+    @field_validator("confidence", "port", mode="before")
+    @classmethod
+    def _coerce_numeric_to_token(cls, value: Any) -> Any:
+        """Accept a numeric confidence or port and coerce it to its string form."""
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
+
+    @field_validator("vuln_class", mode="after")
+    @classmethod
+    def _normalise_vuln_class(cls, value: str) -> str:
+        """Map a human-readable vuln_class to its canonical route key."""
+        canonical = _normalize(value)
+        if not canonical:
+            return value
+        if canonical not in _VULNERABILITY_ROUTES:
+            raise ValueError(
+                "unknown vuln_class; valid classes are: " + ", ".join(sorted(_VULNERABILITY_ROUTES))
+            )
+        return canonical
 
 
 class ExecArgsModel(BaseModel):
