@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.3.4
+
+### Fixed
+
+- Reporting close: a command whose receipt authenticates the submitted findings satisfies the close even when it ran under `VULN_RESEARCH`, and the refusal names the exact command that would satisfy it.
+- Evidence identity: a saved evidence file cited by more than one receipt stays verifiable while it holds a version that some signed receipt recorded, and a genuine authentication failure names both conflicting citations with a remedy. Submission and the close now share one rule instead of two independent checks.
+- Hypothesis-to-finding check requires overlap with a finding's authenticated proof rather than a strict subset, so a hypothesis that records everything it investigated no longer blocks its own close.
+- Report rendering lists declared evidence paths alongside receipt-authenticated proof, so the reported evidence matches what the finding declared.
+- Hypothesis board: rewrites are confined to the records they own, so an update can no longer duplicate records or drop the template's field-format comment, and the integrity retry says which record and phase failed.
+- Phase gate: a hypothesis recorded without an explicit phase is evaluated against the phase in effect on every path, rather than only when it is explicitly linked to a task.
+- Task preconditions: the active-task requirement applies to target-touching execution only, so host-local analysis and verification still run after the last task closes, and the refusal names the remedy.
+- Host-local guards: DOM-API-shaped text in a locally executed script is no longer read as a target literal, the heuristic that blocked local scripts for containing words such as `probe` is gone, and the guard's own read-only diagnostics are reachable from the raw terminal.
+- Coverage: scoping bootstrap pre-keys the coverage matrix from the engagement's declared obligations, and the close gate and that seeding share one key validator, so a close no longer demands obligation keys the agent had to invent.
+- Bursts: a malformed command list is rejected before admission and leaves no receipt behind.
+- Guard friction rows are written to their own file, so a guard block can no longer invalidate a queued edit to the agent-maintained feedback table.
+- The semantic anti-stuck lock keys on evidence novelty rather than the presence of cited evidence, so reviews that produce fresh findings no longer hold a lock.
+- Findings: resubmitting the same vulnerability updates one record, folding in the union of receipts and evidence paths, and the read path applies the same identity rule.
+- Tool arguments: the record tools accept a numeric confidence or port and normalise variant vulnerability-class spellings, and an unknown class is rejected with the accepted values listed.
+- Messages and contracts: a proof without literal HTTP response bytes states that the finding still counts and how to remedy it; an execution record keeps the command the caller requested and notes an injected status-capture flag; the exec-burst description documents the session-binding rule and where the id is read; the skill-bind payload states when a repeat call is required.
+- The tool registry serialises its argument-error payload instead of raising when a validator reports a value error.
+
 ## 3.3.3
 
 ### Added
