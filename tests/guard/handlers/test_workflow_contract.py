@@ -317,7 +317,6 @@ def test_reporting_exit_allows_exploitation_history_in_audit_mode(
         _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
-
 def test_reporting_exit_accepts_hypothesis_with_superset_runtime_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -434,6 +433,7 @@ def test_reporting_close_accepts_receipt_backed_vuln_research_proof(
     )
     _validate_phase_exit(engagement, "PT-050", "[x]")
 
+
 def test_bootstrap_pre_keys_the_coverage_matrix_from_declared_obligations(
     tmp_path: Path,
 ) -> None:
@@ -480,7 +480,6 @@ def test_seeded_coverage_keys_match_the_close_gate_vocabulary() -> None:
     assert errors and "accepted keys: post /api/v1/auth/login" in errors[0]
 
 
-
 def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
     tmp_path: Path,
 ) -> None:
@@ -509,7 +508,7 @@ def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> 
     proof = engagement / "evidence" / "executions" / "probe.txt"
     proof.parent.mkdir(parents=True)
     proof.write_text(
-        "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"ok\": true}\n",
+        'HTTP/1.1 200 OK\nContent-Type: application/json\n\n{"ok": true}\n',
         encoding="utf-8",
     )
     relative = ["evidence/executions/probe.txt"]

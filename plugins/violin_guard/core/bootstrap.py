@@ -147,10 +147,7 @@ def _seed_coverage_matrix(eng_dir: Path, scope_data: dict) -> None:
     """
     obligations = [
         str(item).strip()
-        for item in ((scope_data or {}).get("engagement") or {}).get(
-            "coverage_obligations"
-        )
-        or []
+        for item in ((scope_data or {}).get("engagement") or {}).get("coverage_obligations") or []
         if str(item).strip()
     ]
     if not obligations:
@@ -227,13 +224,9 @@ def init_engagement(
     if matrix_created_here:
         scope_path = eng_dir / "scope" / "scope.yaml"
         scope_data = (
-            yaml.safe_load(scope_path.read_text(encoding="utf-8"))
-            if scope_path.is_file()
-            else {}
+            yaml.safe_load(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
         )
-        _seed_coverage_matrix(
-            eng_dir, scope_data if isinstance(scope_data, dict) else {}
-        )
+        _seed_coverage_matrix(eng_dir, scope_data if isinstance(scope_data, dict) else {})
 
     if result.errors or result.warnings:
         result.add_error("init-engagement produced an incomplete or non-compliant engagement")
