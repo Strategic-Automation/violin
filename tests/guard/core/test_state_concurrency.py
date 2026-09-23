@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import concurrent.futures
-import json
 
 from plugins.violin_guard.core.engagement import state
 
 
 def test_concurrent_credit_spends_are_serialized(tmp_path):
     eng = tmp_path / "engagement"
-    sync = eng / "state" / "sync.json"
-    sync.parent.mkdir(parents=True)
-    sync.write_text(json.dumps({"credit": 50}), encoding="utf-8")
+    state._mutate_runtime(eng, lambda runtime: setattr(runtime.sync, "credit", 50))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
         results = list(pool.map(lambda _: state.spend_sync_credit(eng, "RECON"), range(25)))
