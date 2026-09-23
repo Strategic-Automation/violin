@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from plugins.violin_guard.core import state
 
 
@@ -60,3 +62,71 @@ def test_evidence_paths_reset_counter_even_with_blank_outcome(tmp_path) -> None:
     )
     assert result["count"] == 0
     assert not result["warning"]
+
+
+def test_five_fresh_evidence_reviews_never_engage_the_lock(tmp_path) -> None:
+    for number in range(5):
+        result = _review(
+            tmp_path,
+            outcome="progress",
+            evidence_paths=[f"evidence/recon/response-{number}.txt"],
+        )
+        assert result["count"] == 0, f"review {number} should reset the counter"
+        assert not result["warning"]
+        assert not result["locked"]
+    assert state.semantic_lock(tmp_path) is None
+
+
+def test_repeating_an_old_evidence_path_still_counts_as_unproductive(tmp_path) -> None:
+    shared = ["evidence/recon/response.txt"]
+    _review(tmp_path, outcome="progress", evidence_paths=shared)
+    for number in range(5):
+        result = _review(tmp_path, outcome="progress", evidence_paths=shared)
+        assert result["count"] == number + 1
+        assert result["locked"] is (number == 4), f"lock state wrong at iteration {number}"
+    assert state.semantic_lock(tmp_path) is not None
+
+
+_FINDING = {
+    "created_at": "2026-09-23T10:54:32.038013+00:00",
+    "engagement_id": "benchmark-run-test",
+    "evidence_paths": ["evidence/recon/login.txt"],
+    "execution_ids": [],
+    "finding_id": "FIND-001",
+    "receipt_paths": ["evidence/receipts/review-1.json"],
+    "schema_version": 1,
+    "severity": "Critical",
+    "status": "validated",
+    "summary": "Default credentials accepted at POST /api/v1/auth/login.",
+    "title": "Default administrative credentials accepted at login",
+}
+
+
+def _record_finding(eng, title):
+    """File one canonical finding record the way the store does."""
+    directory = eng / "evidence"
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / "findings.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({**_FINDING, "title": title}) + "\n")
+
+
+def test_new_findings_keep_prose_outcome_reviews_productive(tmp_path) -> None:
+    """A batch that filed a finding is progress even when it describes it in prose."""
+    for index in range(6):
+        _review(tmp_path, outcome=f"H-00{index} confirmed; H-01{index} rejected (401)")
+        _record_finding(tmp_path, f"Finding {index}: endpoint /api/v1/thing{index} vulnerable")
+    assert state.semantic_lock(tmp_path) is None
+    assert not _review(tmp_path)["warning"]
+
+
+def test_new_finding_resets_a_counter_that_re_cited_evidence_grew(tmp_path) -> None:
+    """Re-citing an already-seen path must not mask a newly filed finding."""
+    shared = ["evidence/recon/batch-one.json"]
+    # The first review is genuinely novel; the five that follow re-cite the same path.
+    for _ in range(6):
+        _review(tmp_path, outcome="reviewed", evidence_paths=shared)
+    assert state.semantic_lock(tmp_path)
+    _record_finding(tmp_path, "Finding filed after the re-cited reviews")
+    result = _review(tmp_path, outcome="reviewed", evidence_paths=shared)
+    assert result["count"] == 0
+    assert state.semantic_lock(tmp_path) is None

@@ -133,6 +133,7 @@ def _validated_handler(definition: ToolDefinition) -> Callable[..., str]:
                     "errors": exc.errors(include_input=False, include_url=False),
                 },
                 ensure_ascii=False,
+                default=str,
             )
         return definition.handler(values, **kwargs)
 

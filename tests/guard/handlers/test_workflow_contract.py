@@ -7,11 +7,20 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plugins.violin_guard.core import bootstrap, findings, hypotheses, ptt, receipt_integrity, state
+from plugins.violin_guard.core import (
+    bootstrap,
+    findings,
+    history,
+    hypotheses,
+    ptt,
+    receipt_integrity,
+    state,
+)
 from plugins.violin_guard.core.phases import Phase
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
 from plugins.violin_guard.handlers.ptt_gates import (
+    _coverage_key_errors,
     _methodology_gate_errors,
     _redact_sensitive_note,
     _validate_phase_exit,
@@ -308,6 +317,169 @@ def test_reporting_exit_allows_exploitation_history_in_audit_mode(
         _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
+def test_reporting_exit_accepts_hypothesis_with_superset_runtime_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#181: a hypothesis whose runtime_evidence is a strict superset of its finding's
+    receipt-authenticated evidence still closes. The gate requires OVERLAP (the finding
+    cites at least one runtime-evidence path), not a strict subset, so a hypothesis that
+    records everything it rested on is not penalised."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    scope = engagement / "scope" / "scope.yaml"
+    scope.write_text(
+        scope.read_text(encoding="utf-8") + "\nengagement:\n  audit_mode: true\n",
+        encoding="utf-8",
+    )
+    history_md = engagement / "state" / "history.md"
+    history_md.write_text(
+        "# Command History\n"
+        "- 2026-08-11T12:05:00Z | phase=exploitation | exit_code=0 | command=curl y\n",
+        encoding="utf-8",
+    )
+    for name in ("proof.txt", "extra.txt"):
+        path = engagement / "evidence" / "exploitation" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("decisive runtime proof\n", encoding="utf-8")
+    # Hypothesis records BOTH files; the finding's receipt authenticates only one.
+    hypotheses.update_hypothesis(
+        engagement / "hypotheses.md",
+        id="001",
+        title="Validated issue",
+        status="Validated",
+        runtime_evidence="evidence/exploitation/proof.txt, evidence/exploitation/extra.txt",
+    )
+    receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "reporting-proof",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"stdout": "evidence/exploitation/proof.txt"},
+        },
+        engagement,
+    )
+    receipt_path = engagement / "evidence/executions/reporting-proof.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    findings.submit_finding(
+        engagement,
+        title="Validated issue",
+        severity="High",
+        summary="Reproduced with authenticated runtime evidence.",
+        receipt_paths=["evidence/executions/reporting-proof.json"],
+    )
+    _validate_phase_exit(engagement, "PT-050", "[x]")  # no exception despite superset
+
+
+def test_reporting_close_accepts_receipt_backed_vuln_research_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#175: validation PoCs legitimately run under VULN_RESEARCH, so a receipt-backed
+    one satisfies the reporting close — while a receipt-less one is refused by naming
+    the exact command whose receipt would satisfy it."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    scope = engagement / "scope" / "scope.yaml"
+    scope.write_text(
+        scope.read_text(encoding="utf-8") + "\nengagement:\n  audit_mode: true\n",
+        encoding="utf-8",
+    )
+    command_text = "curl -sS http://10.10.10.10/validate"
+    evidence = engagement / "evidence" / "vuln_research" / "proof.txt"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text("decisive validation proof\n", encoding="utf-8")
+    hypotheses.update_hypothesis(
+        engagement / "hypotheses.md",
+        id="001",
+        title="Validated issue",
+        status="Validated",
+        runtime_evidence="evidence/vuln_research/proof.txt",
+    )
+    receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "validation-proof",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"stdout": "evidence/vuln_research/proof.txt"},
+        },
+        engagement,
+    )
+    receipt_path = engagement / "evidence/executions/validation-proof.json"
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    findings.submit_finding(
+        engagement,
+        title="Validated issue",
+        severity="High",
+        summary="Reproduced with authenticated validation evidence.",
+        receipt_paths=["evidence/executions/validation-proof.json"],
+    )
+    history.append_history(engagement, command_text, "VULN_RESEARCH", 0)
+
+    with pytest.raises(ValueError) as failure:
+        _validate_phase_exit(engagement, "PT-050", "[x]")
+    assert command_text in str(failure.value)
+
+    history.append_history(
+        engagement,
+        command_text,
+        "VULN_RESEARCH",
+        0,
+        receipt_path="evidence/executions/validation-proof.json",
+    )
+    _validate_phase_exit(engagement, "PT-050", "[x]")
+
+
+def test_bootstrap_pre_keys_the_coverage_matrix_from_declared_obligations(
+    tmp_path: Path,
+) -> None:
+    """#123: a bootstrapped engagement starts from its real obligation keys, not placeholders."""
+    engagement = tmp_path / "engagement"
+    scope_path = engagement / "scope" / "scope.yaml"
+    scope_path.parent.mkdir(parents=True, exist_ok=True)
+    scope_path.write_text(
+        yaml.safe_dump(
+            {
+                "targets": {"ip_addresses": ["10.10.10.10"], "in_scope_urls": []},
+                "rules_of_engagement": {"allowed_actions": ["recon"], "forbidden_actions": []},
+                "engagement": {
+                    "coverage_obligations": ["POST /api/v1/auth/login", "GET /api/users"]
+                },
+                "authorisation": {"confirmed": True},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+
+    matrix = yaml.safe_load(
+        (engagement / "state" / "coverage-matrix.yaml").read_text(encoding="utf-8")
+    )
+    coverage = matrix["coverage"]
+    assert set(coverage) == {"post /api/v1/auth/login", "get /api/users"}
+    assert {cell["status"] for cell in coverage.values()} == {"pending"}
+
+
+def test_seeded_coverage_keys_match_the_close_gate_vocabulary() -> None:
+    """#123: the writer (bootstrap) and the reader (close gate) agree on the keys, and an
+    unrecognised key names the accepted vocabulary instead of surfacing at close."""
+    obligations = ["POST /api/v1/auth/login"]
+    seeded = {"post /api/v1/auth/login": {"status": "pending", "evidence_or_reason": ""}}
+    assert _coverage_key_errors(seeded, obligations) == []
+
+    errors = _coverage_key_errors(
+        {"post /api/v1/auth/other": {"status": "pending", "evidence_or_reason": ""}},
+        obligations,
+    )
+    assert errors and "accepted keys: post /api/v1/auth/login" in errors[0]
+
+
 def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
     tmp_path: Path,
 ) -> None:
@@ -328,6 +500,122 @@ def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
     )
     with pytest.raises(ValueError, match="not_applicable without evidence file"):
         _validate_phase_exit(engagement, "PT-030", "[x]")
+
+
+def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> None:
+    """#124: the warning must say the finding still counts as proof and name the remedy."""
+    engagement = tmp_path / "engagement"
+    proof = engagement / "evidence" / "executions" / "probe.txt"
+    proof.parent.mkdir(parents=True)
+    proof.write_text(
+        'HTTP/1.1 200 OK\nContent-Type: application/json\n\n{"ok": true}\n',
+        encoding="utf-8",
+    )
+    relative = ["evidence/executions/probe.txt"]
+    assert findings._proof_byte_warnings(engagement, relative, []) == []
+
+    proof.write_text("HTTP/1.1 401 Unauthorized\n", encoding="utf-8")
+    warnings = findings._proof_byte_warnings(engagement, relative, [])
+    assert warnings
+    assert "still accepted as proof" in warnings[0]
+    assert "violin_exec" in warnings[0]
+
+
+def test_resubmitting_a_finding_updates_one_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#177: a resubmission with stronger evidence folds into the existing record."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    execution_dir = engagement / "evidence" / "executions"
+    execution_dir.mkdir(parents=True, exist_ok=True)
+
+    def _seal(execution_id: str, body: str, name: str) -> str:
+        proof = execution_dir / name
+        proof.write_text(body, encoding="utf-8")
+        record = receipt_integrity.seal_execution_receipt(
+            {
+                "execution_id": execution_id,
+                "status": "completed",
+                "exit_code": 0,
+                "evidence_paths": {"stdout": proof.relative_to(engagement).as_posix()},
+            },
+            engagement,
+        )
+        path = execution_dir / f"{name}.json"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        return path.relative_to(engagement).as_posix()
+
+    first_receipt = _seal(
+        "first-run", "HTTP/1.1 200 OK\nContent-Type: text/html\n\nvulnerable\n", "first"
+    )
+    second_receipt = _seal(
+        "second-run",
+        'HTTP/1.1 200 OK\nContent-Type: application/json\n\n{"admin": true}\n',
+        "second",
+    )
+    stronger_evidence = "evidence/executions/second"
+
+    initial = findings.submit_finding(
+        engagement,
+        title="IDOR on order lookup",
+        severity="High",
+        summary="Order lookup returns another tenant's order.",
+        receipt_paths=[first_receipt],
+    )
+    updated = findings.submit_finding(
+        engagement,
+        title="IDOR on order lookup",
+        severity="High",
+        summary="Order lookup returns another tenant's order.",
+        receipt_paths=[second_receipt],
+        evidence_paths=[stronger_evidence],
+    )
+
+    records = findings.load_findings(engagement)
+    assert len(records) == 1
+    assert updated["finding_id"] == initial["finding_id"]
+    assert updated["duplicate"] is True
+    assert set(records[0]["receipt_paths"]) == {first_receipt, second_receipt}
+    assert stronger_evidence in records[0]["evidence_paths"]
+
+
+def test_resubmitting_a_different_vulnerability_keeps_two_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The identity rule must not fold two distinct claims into one."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    proof = engagement / "evidence" / "executions" / "one"
+    proof.parent.mkdir(parents=True, exist_ok=True)
+    proof.write_text("HTTP/1.1 200 OK\nContent-Type: text/html\n\nvulnerable\n", encoding="utf-8")
+    receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "run-1",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"stdout": proof.relative_to(engagement).as_posix()},
+        },
+        engagement,
+    )
+    receipt_path = proof.parent / "one.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    relative = receipt_path.relative_to(engagement).as_posix()
+
+    for title in ("IDOR on order lookup", "Stored XSS in the comment field"):
+        findings.submit_finding(
+            engagement,
+            title=title,
+            severity="High",
+            summary="Distinct claim.",
+            receipt_paths=[relative],
+        )
+
+    assert len(findings.load_findings(engagement)) == 2
 
 
 def test_bootstrap_creates_coverage_matrix_template(tmp_path: Path) -> None:
@@ -709,3 +997,60 @@ def test_vuln_research_exit_accepts_challenge_cells_with_artifact(tmp_path: Path
         encoding="utf-8",
     )
     _validate_phase_exit(engagement, "PT-030", "[x]")  # no exception
+
+
+def test_reporting_exit_closes_when_two_receipts_cite_one_evidence_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #174: one saved file cited by two batches must stay closable."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"c" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    evidence = engagement / "evidence" / "exploitation" / "proof.txt"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text("HTTP/1.1 200 OK\ntoken leaked\n", encoding="utf-8")
+    hypotheses.update_hypothesis(
+        engagement / "hypotheses.md",
+        id="001",
+        title="Validated issue",
+        status="Validated",
+        runtime_evidence="evidence/exploitation/proof.txt",
+    )
+
+    def write_batch(execution_id: str, body: str) -> str:
+        """Run one batch that overwrites the shared evidence path, then seal it."""
+        evidence.write_text(body, encoding="utf-8")
+        receipt = receipt_integrity.seal_execution_receipt(
+            {
+                "execution_id": execution_id,
+                "status": "completed",
+                "exit_code": 0,
+                "evidence_paths": {"stdout": "evidence/exploitation/proof.txt"},
+            },
+            engagement,
+        )
+        receipt_path = engagement / "evidence" / "executions" / f"{execution_id}.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        return f"evidence/executions/{execution_id}.json"
+
+    first = write_batch("batch-one", "HTTP/1.1 200 OK\ntoken leaked\n")
+    second = write_batch("batch-two", "HTTP/1.1 200 OK\ntoken leaked again\n")
+    for index, receipt_path in enumerate((first, second), 1):
+        findings.submit_finding(
+            engagement,
+            title=f"Shared evidence {index}",
+            severity="High",
+            summary="Cited the saved evidence file the other batch also wrote.",
+            receipt_paths=[receipt_path],
+        )
+
+    _validate_phase_exit(engagement, "PT-050", "[x]")  # both citations hold
+
+    evidence.write_text("HTTP/1.1 200 OK\nforged\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="has changed evidence") as excinfo:
+        _validate_phase_exit(engagement, "PT-050", "[x]")
+    message = str(excinfo.value)
+    assert "batch-one" in message and "batch-two" in message
+    assert "REMEDY" in message

@@ -406,6 +406,23 @@ def rebind_pending_sync(
     return mutate_json(path, rebind)
 
 
+def _recorded_findings(eng_dir: Path) -> int:
+    """How many findings this engagement has recorded so far.
+
+    A review that produced a finding is progress even when it re-cites an
+    already-seen evidence path or describes the result in prose instead of the
+    literal ``validated``/``rejected`` outcome - punishing that is what made the
+    anti-stuck hint fire on productive batches. Imported here because
+    ``findings`` imports this module at import time.
+    """
+    from . import findings
+
+    try:
+        return len(findings.load_findings(eng_dir))
+    except (OSError, ValueError, KeyError):
+        return 0
+
+
 def record_semantic_review(
     eng_dir: str | Path,
     *,
@@ -422,26 +439,21 @@ def record_semantic_review(
     """Track evidence-backed technique-pivot progress and the anti-stuck lock.
 
     The anti-stuck lock is meant to catch *circular* recon — repeating the same
-    path without learning.  It therefore counts *distinct technique pivots*
-    (each ``technique`` key, tracked via ``violin_record_hypothesis`` / the
-    ``technique`` argument), not raw ``violin_review_batch`` calls.  A review
-    resets the no-progress counter when it is either:
-
-    * **evidence-backed** — ``outcome`` is progress/validated/rejected *and*
-      the batch carried completed execution evidence, or
-    * **a genuine pivot** — ``next_technique`` differs from the current
-      ``technique`` (a new attack path), which is exactly the behavior the
-      lock exists to encourage.
-
-    Low-evidence iterative CTF recon therefore never accumulates toward a lock
-    as long as each step pivots to a new technique or records evidence.
+    path without learning.  It therefore counts evidence *novelty*, not raw
+    ``violin_review_batch`` calls.  A review resets the no-progress counter only
+    when it actually produced something new — a fresh evidence path not seen on
+    any previously recorded technique, a decisive ``outcome``
+    (``validated`` or ``rejected``), a finding recorded since the previous review,
+    or a genuine pivot where ``next_technique``
+    differs from the current ``technique`` (a new attack path).  Repeating
+    already-recorded evidence keeps the counter growing, which is exactly the
+    circular recon the lock exists to catch.
     """
 
     path = _state_dir(eng_dir) / _SEMANTIC_FILE
     key = "|".join((task_id, hypothesis_id, skill, technique.strip().lower()))
     clean_evidence_paths = [path_item for path_item in evidence_paths if path_item]
-    has_evidence = bool(clean_evidence_paths)
-    positive = has_evidence or outcome.strip().lower() in {"validated", "rejected"}
+    decisive = outcome.strip().lower() in {"validated", "rejected"}
     pivoted = bool(
         next_technique.strip().lower()
         and next_technique.strip().lower() != technique.strip().lower()
@@ -450,9 +462,20 @@ def record_semantic_review(
     def record(data: dict[str, Any]) -> dict[str, Any]:
         entries = data.setdefault("entries", {})
         entry = entries.get(key, {"count": 0})
-        # Reset the per-technique no-progress counter on evidence-backed output
-        # or a real pivot; otherwise increment it as a stuck repetition.
-        count = 0 if (positive or pivoted) else int(entry.get("count") or 0) + 1
+        # Evidence novelty: a path counts as new only if it was not already
+        # recorded on any technique in this engagement (tracked via each
+        # entry's ``evidence_paths``).  Re-citing the same evidence is circular.
+        seen_paths = {
+            item for prior in entries.values() for item in prior.get("evidence_paths") or []
+        }
+        recorded_findings = _recorded_findings(eng_dir)
+        new_finding = recorded_findings > int(data.get("findings") or 0)
+        novel = bool(set(clean_evidence_paths) - seen_paths) or decisive or new_finding
+        # Reset the no-progress counter when the review produced something new
+        # or pivoted to a new attack path; otherwise keep it growing as a stuck
+        # repetition.
+        productive = novel or pivoted
+        count = 0 if productive else int(entry.get("count") or 0) + 1
         entry.update(
             {
                 "count": count,
@@ -467,18 +490,21 @@ def record_semantic_review(
         entries[key] = entry
         lock = data.get("lock") or {}
         # Whole-engagement stuck signal: total no-progress reviews across all
-        # keys. Pivots and evidence reset it, so a busy CTF loop stays open.
+        # keys. Novel evidence resets it, so a busy CTF loop stays open; a pivot
+        # alone neither rescues an active lock nor re-arms it without a research
+        # attempt (see below).
         total_stuck = sum(
             int(item.get("count") or 0) for item in entries.values() if not item.get("pivoted")
         )
-        if has_evidence or (lock and data.get("research_attempts") and pivoted):
+        if novel or (lock and data.get("research_attempts") and pivoted):
             data.pop("lock", None)
-        elif total_stuck >= 5 and not pivoted and not has_evidence:
+        elif total_stuck >= 5 and not pivoted and not novel:
             data["lock"] = {
                 "key": key,
                 "count": total_stuck,
                 "reason": "five technique no-progress reviews without a pivot or evidence",
             }
+        data["findings"] = max(recorded_findings, int(data.get("findings") or 0))
         return {
             "count": count,
             "warning": total_stuck >= 3,

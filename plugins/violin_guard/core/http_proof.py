@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import shlex
 
-from .bash_ast import parse_bash_segments
+from .bash_ast import CommandSegment, parse_bash_segments
 
 _HTTP_URL_RE = re.compile(r"https?://\S+", re.I)
 
@@ -51,32 +51,95 @@ def has_capture_flag(command: str, client: str) -> bool:
     return False
 
 
+def _segment_spans(command: str, segments: list[CommandSegment]) -> list[tuple[int, int] | None]:
+    """Locate each parsed segment in the original command text, in order."""
+    spans: list[tuple[int, int] | None] = []
+    search_start = 0
+    for segment in segments:
+        start = command.find(segment.raw_text, search_start)
+        if start < 0:
+            spans.append(None)
+            continue
+        end = start + len(segment.raw_text)
+        spans.append((start, end))
+        search_start = end
+    return spans
+
+
+def _pipes_into(separator: str) -> bool:
+    """Whether the text between two parsed commands pipes stdout into the next one.
+
+    A pipeline stage's stdout belongs to its consumer, so a capture flag must not
+    be injected there: ``curl -s ... | python3 -c 'json.load(sys.stdin)'`` would
+    otherwise decode headers as JSON and silently degrade the probe. ``||`` is the
+    logical-or operator - it runs the next command but does not consume this one's
+    stdout - so it is not a pipe.
+    """
+    return "|" in separator and "||" not in separator
+
+
+def _inside_command_substitution(command: str, position: int) -> bool:
+    """Whether ``position`` sits inside an unclosed ``$(...)`` or backtick expansion.
+
+    ``TOKEN=$(curl -s ...)`` captures the response into a shell variable, so the
+    probe's stdout is consumed by the assignment rather than by the receipt.
+    """
+    prefix = command[:position]
+    if prefix.count("`") % 2:
+        return True
+    return prefix.rfind("$(") >= 0 and prefix.count("(") > prefix.count(")")
+
+
+def _stdout_is_captured(
+    command: str,
+    span: tuple[int, int],
+    following: tuple[int, int] | None,
+) -> bool:
+    """Whether a probe's stdout is consumed somewhere other than the receipt.
+
+    The injected status flag exists so the *captured evidence* carries a literal
+    ``HTTP/1.x`` line. When stdout is piped into a program or captured by a shell
+    variable, the prepended headers go to that consumer and corrupt it
+    (``json.load``/``jq`` on a body with headers prepended) while telling the
+    receipt nothing extra. A redirect to a file is *not* one of those cases: the
+    file is the evidence, so the status line belongs in it.
+    """
+    if following is not None and _pipes_into(command[span[1] : following[0]]):
+        return True
+    return _inside_command_substitution(command, span[0])
+
+
 def normalize_http_proof_flags(command: str) -> str:
     """Inject the client-specific flag into an HTTP probe missing status capture.
 
     Returns the original command unchanged unless it is an HTTP probe to an
     http(s) URL using curl/wget with no status-capture flag, in which case
     the flag is inserted immediately after the client token without rebuilding
-    or re-quoting the rest of the command.
+    or re-quoting the rest of the command. Probes whose stdout is consumed by a
+    pipe, a command substitution or a file redirect are left alone, because the
+    captured status would corrupt that consumer instead of reaching the receipt
+    (see ``_stdout_is_captured``).
     """
+    segments = parse_bash_segments(command)
+    spans = _segment_spans(command, segments)
     insertions: list[tuple[int, str]] = []
-    search_start = 0
-    for segment in parse_bash_segments(command):
+    for index, segment in enumerate(segments):
         client = segment.executable.casefold().removesuffix(".exe")
         if client not in _CLIENT_TOKEN_RE or not _HTTP_URL_RE.search(segment.raw_text):
             continue
         if has_capture_flag(segment.raw_text, client):
             continue
-        segment_start = command.find(segment.raw_text, search_start)
-        if segment_start < 0:
+        span = spans[index]
+        if span is None:
             continue
+        following = spans[index + 1] if index + 1 < len(spans) else None
+        if _stdout_is_captured(command, span, following):
+            continue
+        start = span[0]
         client_match = _CLIENT_TOKEN_RE[client].search(segment.raw_text)
         if client_match is None:
             continue
-        insertions.append(
-            (segment_start + client_match.end(), f" {_INJECTED_CAPTURE_FLAG[client]}")
-        )
-        search_start = segment_start + len(segment.raw_text)
+        insertions.append((start + client_match.end(), f" {_INJECTED_CAPTURE_FLAG[client]}"))
 
     rewritten = command
     for position, value in reversed(insertions):

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -45,6 +46,42 @@ def test_structured_argv_preserves_argument_boundaries(tmp_path):
 
     assert receipt["exit_code"] == 0
     assert receipt["stdout_preview"].strip() == value
+
+
+def test_status_capture_rewrite_surfaces_the_requested_command(tmp_path):
+    """#87: the receipt explains the flag the guard injected, and keeps the command asked for."""
+    eng = _engagement(tmp_path)
+    receipt = execution.execute(
+        "curl -sS http://10.10.10.10/api/orders",
+        argv=[sys.executable, "-c", "print('probe')"],
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=10,
+        label="proof-rewrite",
+        ptt_task_id="PT-001",
+    )
+
+    assert " -i " in f" {receipt['command']} "
+    assert " -i " not in f" {receipt['requested_command']} "
+    assert receipt["command_note"] == "status capture injected for HTTP proof"
+    manifest = eng / receipt["evidence_paths"]["manifest"]
+    recorded = json.loads(manifest.read_text(encoding="utf-8"))
+    assert recorded["requested_command"] == receipt["requested_command"]
+    assert recorded["command"] == receipt["command"]
+
+
+def test_unchanged_command_carries_no_rewrite_note(tmp_path):
+    eng = _engagement(tmp_path)
+    receipt = execution.execute(
+        "echo violin-test",
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=10,
+        label="no-rewrite",
+    )
+
+    assert "requested_command" not in receipt
+    assert "command_note" not in receipt
 
 
 def test_failed_to_start_is_audited_without_execution_credit(tmp_path, monkeypatch):

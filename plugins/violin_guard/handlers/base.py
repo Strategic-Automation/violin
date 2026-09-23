@@ -10,9 +10,14 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from ..core import state
-from ..core.skill_policy import skill_spec
-from ..core.skill_receipts import HermesSkillViewAdapter, complete_delivery, prepare_delivery
+from ..core import hypotheses, state
+from ..core.skill_policy import routable_context, skill_spec
+from ..core.skill_receipts import (
+    HermesSkillViewAdapter,
+    complete_delivery,
+    get_binding,
+    prepare_delivery,
+)
 from ..gates import command as cmd_module
 from ..gates.command import CheckCommandArgs
 
@@ -47,6 +52,37 @@ def _json(status_name: str, **payload) -> str:
     return json.dumps({"schema_version": 2, "status": status_name, **payload})
 
 
+def _hypothesis_route_context(eng_dir: str | Path, hypothesis_id: str) -> tuple[str, str]:
+    """Return the routable (vuln_class, candidate_source) a hypothesis records."""
+
+    record = hypotheses.find_by_id(_eng_path(str(eng_dir)) / "hypotheses.md", hypothesis_id)
+    if record is None:
+        return "", ""
+    return routable_context(record.vuln_class, record.candidate_source)
+
+
+def _bound_route_context(eng_dir: str | Path, task_id: str) -> tuple[str, str]:
+    """Resolve a task's routing context from the hypothesis its binding records.
+
+    ``violin_record_ptt`` routes from the hypothesis ``vuln_class``, but a caller
+    that passes no context resolves from the phase default instead, so the same
+    task demanded two different skills depending on which tool asked. Reading the
+    bound hypothesis here gives every caller one answer; the phase default stays
+    as the fallback for a task with no binding.
+    """
+
+    hypothesis_id = str((get_binding(eng_dir, task_id) or {}).get("hypothesis_id") or "").strip()
+    if not hypothesis_id:
+        return "", ""
+    return _hypothesis_route_context(eng_dir, hypothesis_id)
+
+
+_REPEAT_CALL_NOTE = (
+    "the transition is not applied yet - call violin_record_ptt again with the identical "
+    "arguments to apply it"
+)
+
+
 def _prepare_skill_reservation_payload(
     eng_dir: str | Path,
     *,
@@ -59,6 +95,8 @@ def _prepare_skill_reservation_payload(
     extra_fields: dict[str, Any] | None = None,
     adapter_cls: Any = HermesSkillViewAdapter,
 ) -> tuple[Any, str, str | None]:
+    if not vulnerability_class and not candidate_source:
+        vulnerability_class, candidate_source = _bound_route_context(eng_dir, task_id)
     digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
     reservation = prepare_delivery(
         eng_dir,
@@ -76,6 +114,7 @@ def _prepare_skill_reservation_payload(
         early_resp = _json(
             "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
             transition_applied=False,
+            next_step=_REPEAT_CALL_NOTE,
             **(extra_fields or {}),
             skill={
                 "name": skill,
@@ -93,6 +132,7 @@ def _prepare_skill_reservation_payload(
         early_resp = _json(
             "skill_preparing",
             transition_applied=False,
+            next_step=_REPEAT_CALL_NOTE,
             **(extra_fields or {}),
             skill={"name": skill, "digest": digest},
         )
@@ -111,23 +151,30 @@ def _result(result) -> dict[str, list[str]]:
 
 
 def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
-    """Append a framework_feedback.md row when the guard blocks or reviews.
+    """Append a guard-authored friction row to state/guard_feedback.md when the
+    guard blocks or reviews.
 
-    Only writes when state/framework_feedback.md already exists — engagement
-    initialization creates it. Engagements without the file are untouched.
-    Recording here means friction is captured at the moment it happens, with
-    zero agent bookkeeping, so the agent never has to reconstruct what was
-    blocked from memory at the end of the run.
+    Guard rows live in their own file under their own heading — a distinct
+    column schema from the agent-maintained framework_feedback.md table — so a
+    guard-side write can never invalidate an agent edit queued against
+    framework_feedback.md. Only writes for feedback-enabled engagements:
+    engagement initialization creates state/framework_feedback.md, which marks
+    the engagement as opted in. Recording here means friction is captured at
+    the moment it happens, with zero agent bookkeeping, so the agent never has
+    to reconstruct what was blocked from memory at the end of the run.
     """
-    feedback = eng_dir / "state" / "framework_feedback.md"
-    if not feedback.exists() or result.exit_code() == 0:
+    feedback_marker = eng_dir / "state" / "framework_feedback.md"
+    if not feedback_marker.exists() or result.exit_code() == 0:
         return
     rows = [("Guard Block", err) for err in result.errors]
     if result.exit_code() == 2:
         rows.extend([("Guard Review", warn) for warn in result.warnings])
     if not rows:
         return
-    existing = feedback.read_text(encoding="utf-8", errors="replace")
+    guard_file = eng_dir / "state" / "guard_feedback.md"
+    existing = (
+        guard_file.read_text(encoding="utf-8", errors="replace") if guard_file.exists() else ""
+    )
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = []
     for category, issue in rows:
@@ -141,7 +188,18 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
         )
     if not lines:
         return
-    with state.lock_file(feedback), feedback.open("a", encoding="utf-8") as fh:
+    with state.lock_file(guard_file), guard_file.open("a", encoding="utf-8") as fh:
+        if not existing:
+            fh.write(
+                "# Violin Guard Friction Log\n"
+                "\n"
+                "Automated guard block/review records. This file is distinct from the "
+                "agent-maintained state/framework_feedback.md table by design: the guard "
+                "never writes into the file the agent patches.\n"
+                "\n"
+                "| Timestamp | Category | Issue | Impact | Prevention |\n"
+                "|---|---|---|---|---|\n"
+            )
         fh.write("\n".join(lines) + "\n")
 
 

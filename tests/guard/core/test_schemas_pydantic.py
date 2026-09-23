@@ -48,6 +48,43 @@ def test_record_hypothesis_allows_research_attempted():
     assert model.research_attempted is True
 
 
+def test_record_hypothesis_accepts_numeric_confidence():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "confidence": 0.9},
+    )
+    assert model.confidence == "0.9"
+    str_model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "confidence": "0.9"},
+    )
+    assert str_model.confidence == model.confidence
+
+
+def test_record_hypothesis_accepts_integer_port():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "port": 443},
+    )
+    assert model.port == "443"
+
+
+def test_record_hypothesis_normalises_variant_vuln_class():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "vuln_class": "IDOR"},
+    )
+    assert model.vuln_class == "idor"
+
+
+def test_record_hypothesis_rejects_unknown_vuln_class_with_valid_list():
+    with pytest.raises(ValidationError, match="unknown vuln_class.*valid classes are"):
+        schemas.validate_args(
+            schemas.RecordHypothesisArgsModel,
+            {"eng_dir": "/tmp/eng", "vuln_class": "Mass assignment"},
+        )
+
+
 @pytest.mark.parametrize(
     "model_type,required,default_status",
     [
@@ -90,3 +127,12 @@ def test_review_payload_contract(model_type, required, default_status):
             model_type.model_validate(
                 {name: value for name, value in required.items() if name != key}
             )
+
+
+def test_exec_burst_publishes_the_session_binding_rule():
+    """#186: the binding rule and where the id is read are published, not discovered."""
+    description = schemas.EXEC_BURST_SCHEMA["description"]
+    assert "different session" in description
+    assert "violin_status.skill.session_id" in description
+    field = schemas.ExecBurstArgsModel.model_fields["session_id"]
+    assert "violin_status.skill.session_id" in (field.description or "")

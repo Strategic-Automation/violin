@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..core import hypotheses, ptt, state
+from ..core import ptt, state
 from ..core.phases import requires_hypothesis
 from ..core.skill_receipts import (
     HermesSkillViewAdapter,
@@ -13,6 +13,7 @@ from ..core.skill_receipts import (
 )
 from .base import (
     _eng_path,
+    _hypothesis_route_context,
     _json,
     _prepare_skill_reservation_payload,
     _serialize_errors,
@@ -102,17 +103,9 @@ def _validate_record_ptt_inputs(
     vulnerability_class = ""
     candidate_source = ""
     if hypothesis_id:
-        normalized = hypothesis_id.removeprefix("H-").zfill(3)
-        matched = next(
-            (
-                hyp
-                for hyp in hypotheses.parse_hypotheses(_eng_path(args["eng_dir"]) / "hypotheses.md")
-                if hyp.id == normalized
-            ),
-            None,
+        vulnerability_class, candidate_source = _hypothesis_route_context(
+            args["eng_dir"], hypothesis_id
         )
-        vulnerability_class = matched.vuln_class if matched else ""
-        candidate_source = matched.candidate_source if matched else ""
 
     return task, note, skill, technique, phase, hypothesis_id, vulnerability_class, candidate_source
 

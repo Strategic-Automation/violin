@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import state
+from .skill_policy import _VULNERABILITY_ROUTES, _normalize
 
 # ---------------------------------------------------------------------------
 # Pydantic v2 Models
@@ -130,6 +131,27 @@ class RecordHypothesisArgsModel(BaseModel):
         ),
     )
 
+    @field_validator("confidence", "port", mode="before")
+    @classmethod
+    def _coerce_numeric_to_token(cls, value: Any) -> Any:
+        """Accept a numeric confidence or port and coerce it to its string form."""
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
+
+    @field_validator("vuln_class", mode="after")
+    @classmethod
+    def _normalise_vuln_class(cls, value: str) -> str:
+        """Map a human-readable vuln_class to its canonical route key."""
+        canonical = _normalize(value)
+        if not canonical:
+            return value
+        if canonical not in _VULNERABILITY_ROUTES:
+            raise ValueError(
+                "unknown vuln_class; valid classes are: " + ", ".join(sorted(_VULNERABILITY_ROUTES))
+            )
+        return canonical
+
 
 class ExecArgsModel(BaseModel):
     """Authorize and execute one target command using any installed non-interactive Kali/Parrot CLI tool; there is no binary allowlist. Commands execute under POSIX shell (/bin/sh, dash on Debian/Ubuntu containers). Builtins like 'source' do not exist in POSIX shell ('source: not found'); use '. file.env' or 'export $(cat file.env)' / 'export $(grep -v "^#" file | xargs)' to load environment variables. Multi-command syntax (&&, ;) is supported, but bash-isms (source, [[ ]], <()) will fail. Requires one unambiguous [~] PTT task. Scope, phase, hypothesis, history, evidence, timeout, and sync gates still apply, and runtime requirements such as installation, root, hardware, services, GUI, or a TTY are not bypassed. The tool appends exact command history but never updates PTT progress. Hard BLOCK and sync_required never create a process."""
@@ -252,7 +274,7 @@ class HeartbeatDoneArgsModel(BaseModel):
 
 
 class ExecBurstArgsModel(BaseModel):
-    """Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Sync credit limits per phase apply (Recon: 10, Vuln Research: 10, Exploitation/Post-Exploitation/PRIVESC/FLAGS: 20 per sync window) and are shared across execution tools. If a burst is denied with 'insufficient sync credit for burst: need N, have M', split the command set into smaller bursts (size <= M) and review the batch via violin_review_batch to refresh sync credit. Use for recon and exploit/race batches; never raw terminal for targets."""
+    """Single-approval bounded command batch. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Sync credit limits per phase apply (Recon: 10, Vuln Research: 10, Exploitation/Post-Exploitation/PRIVESC/FLAGS: 20 per sync window) and are shared across execution tools. If a burst is denied with 'insufficient sync credit for burst: need N, have M', split the command set into smaller bursts (size <= M) and review the batch via violin_review_batch to refresh sync credit. A burst is denied with 'skill receipt binding belongs to a different session' when session_id does not match the session that viewed the skill, so read the value from violin_status.skill.session_id instead of inventing a label. Use for recon and exploit/race batches; never raw terminal for targets."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -277,12 +299,28 @@ class ExecBurstArgsModel(BaseModel):
         ),
     )
     scope: str = Field("", description="path to scope.yaml")
-    session_id: str = Field("", description="session/goal label for skill-load gating")
+    session_id: str = Field(
+        "",
+        description=(
+            "session bound to the skill-load gate; read it from "
+            "violin_status.skill.session_id - a burst is denied when it differs from the "
+            "session that viewed the skill"
+        ),
+    )
     label: str = Field("", description="optional batch label for logging")
     backend: Literal["auto", "local", "docker"] = "auto"
     timeout_seconds: int = Field(180, ge=1, le=1800)
     cwd: str = Field("", description="Engagement-relative working directory")
     continue_on_error: bool = False
+    evidence_outputs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "engagement-relative evidence files this batch writes (same paths you would pass "
+            "to violin_exec); each command's receipt declares them so violin_submit_finding "
+            "can authenticate the files. Bursts are approved as one batch, so declare the "
+            "union of the files the batch produces."
+        ),
+    )
 
 
 class ExecStatusArgsModel(BaseModel):

@@ -15,7 +15,13 @@ import bashlex.errors
 # bashlex raises these on input it cannot parse. Callers deliberately fall back to a
 # naive word split rather than failing the command: an unparseable line must still be
 # classified by the terminal policy gate, because a parse error is not a safe default.
-_BASH_PARSE_ERRORS: tuple[type[BaseException], ...] = (bashlex.errors.ParsingError,)
+# A syntax error arrives as ParsingError, but a construct bashlex recognises and has
+# not implemented - arithmetic expansion, $((...)) - arrives as NotImplementedError.
+# Both are the parser declining the input, so both must take the same fallback.
+_BASH_PARSE_ERRORS: tuple[type[BaseException], ...] = (
+    bashlex.errors.ParsingError,
+    NotImplementedError,
+)
 
 # Interpreters whose -c / -e argument is a nested script whose tokens are
 # executed and therefore ARE connection targets (unlike quoted text labels).
@@ -161,6 +167,54 @@ class _CommandVisitor(bashlex.ast.nodevisitor):
         return ""
 
 
+# A command the AST parser declines still has to yield its contained commands:
+# ``for i in 1 2 3; do n=$((i+1)); curl "$B/items/$n"; done`` is one unparseable
+# unit, but the loop body holds the requests. Splitting on control operators and
+# block keywords keeps ``for`` from becoming the executable of the whole script,
+# which would hide every command inside it from the callers that classify
+# commands and correlate requests.
+_FALLBACK_BREAKS: frozenset[str] = frozenset(
+    {";", "&&", "||", "|", "&", "do", "then", "else", "elif", "fi", "done", "esac"}
+)
+
+
+def _fallback_tokens(command: str) -> list[str]:
+    """Tokenise without an AST, keeping shell operators as their own tokens."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError:
+        return command.split()
+
+
+def _segment_from_words(words: list[str]) -> list[CommandSegment]:
+    if not words:
+        return []
+    raw_text = " ".join(words)
+    return [
+        CommandSegment(
+            raw_text=raw_text,
+            words=list(words),
+            executable=_CommandVisitor._extract_executable(words),
+        )
+    ]
+
+
+def _fallback_segments(command: str) -> list[CommandSegment]:
+    """Best-effort segments for a command the AST parser declined."""
+    segments: list[CommandSegment] = []
+    words: list[str] = []
+    for token in _fallback_tokens(command):
+        if token in _FALLBACK_BREAKS:
+            segments.extend(_segment_from_words(words))
+            words = []
+            continue
+        words.append(token)
+    segments.extend(_segment_from_words(words))
+    return segments
+
+
 def parse_bash_segments(command: str) -> list[CommandSegment]:
     """Parse shell command into AST segments using bashlex.
 
@@ -181,6 +235,10 @@ def parse_bash_segments(command: str) -> list[CommandSegment]:
             visitor.visit(node)
         if visitor.segments:
             return visitor.segments
+
+    segments = _fallback_segments(command)
+    if segments:
+        return segments
 
     words = command.split()
     exec_name = _CommandVisitor._extract_executable(words)

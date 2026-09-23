@@ -128,10 +128,6 @@ def _shell_consumes_heredoc(head: str) -> bool:
     return False
 
 
-_SUSPICIOUS_SCRIPT_RE = re.compile(
-    r"\b(?:attack|exploit|fuzz|payload|poc|probe|recon|scan|scanner)\b",
-    re.IGNORECASE,
-)
 _LOCAL_FILE_SUFFIXES = KNOWN_FILE_EXTENSIONS
 
 
@@ -210,6 +206,9 @@ def _has_target_literal_in_segment(seg: CommandSegment) -> bool:
     return False
 
 
+_READ_ONLY_ADMIN_SUBCOMMANDS = frozenset({"check-command", "generate-closeout", "validate-scope"})
+
+
 def _violin_admin_subcommand(seg: CommandSegment) -> str:
     """Return the local Violin administration subcommand, if any."""
     if seg.executable not in {"python", "python3"}:
@@ -232,22 +231,6 @@ def _dynamic_init_host(seg: CommandSegment) -> bool:
             host = word.partition("=")[2]
             return "$" in host or "`" in host
     return False
-
-
-def _is_local_compilation_or_test(seg: CommandSegment) -> bool:
-    """Return True if the command is a local syntax compile check or test framework invocation."""
-    words = seg.words
-    lower_words = [word.lower() for word in words]
-    if "-m" in lower_words:
-        idx = lower_words.index("-m")
-        if idx + 1 < len(lower_words) and lower_words[idx + 1] in {
-            "py_compile",
-            "pytest",
-            "unittest",
-            "doctest",
-        }:
-            return True
-    return "py_compile" in seg.raw_text or "pytest" in lower_words or "unittest" in lower_words
 
 
 def _is_local_package_import_check(seg: CommandSegment) -> bool:
@@ -285,7 +268,9 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
                 "shell or file indirection"
             )
         return None
-    if admin_subcommand == "generate-closeout":
+    if admin_subcommand in _READ_ONLY_ADMIN_SUBCOMMANDS:
+        # Read-only diagnostics are parsed and evaluated, never executed, so a
+        # target literal in their arguments cannot reach the network.
         return None
 
     if (
@@ -316,14 +301,6 @@ def _block_terminal_segment(seg: CommandSegment) -> str | None:
 
     if executable not in _LOCAL_COMMANDS and _has_target_literal_in_segment(seg):
         return _message("target host literal detected in the raw terminal command")
-
-    if (
-        executable in _SCRIPT_INTERPRETERS
-        and "-c" not in seg.words
-        and _SUSPICIOUS_SCRIPT_RE.search(segment_text)
-        and not _is_local_compilation_or_test(seg)
-    ):
-        return _message("assessment script detected in the raw terminal command")
 
     return None
 

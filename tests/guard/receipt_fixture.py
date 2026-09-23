@@ -13,16 +13,36 @@ from plugins.violin_guard.core.skill_receipts import (
 )
 
 
-def bind_active_task(engagement: Path, session_id: str = "test") -> None:
+def bind_active_task(
+    engagement: Path,
+    session_id: str = "test",
+    *,
+    skill: str = "pentest",
+    hypothesis_id: str | None = None,
+    vulnerability_class: str | None = None,
+    candidate_source: str | None = None,
+) -> None:
     state.record_session_id(engagement, session_id)
     active = ptt.find_active_task(ptt.parse_ptt(engagement / "state" / "ptt.md"))
     assert active is not None
     digest = "sha256:" + "a" * 64
     reserved = prepare_delivery(
-        engagement, session_id=session_id, skill="pentest", bundle_digest=digest, phase=active.phase
+        engagement,
+        session_id=session_id,
+        skill=skill,
+        bundle_digest=digest,
+        phase=active.phase,
+        vulnerability_class=vulnerability_class,
+        candidate_source=candidate_source,
     )
     if reserved.owner:
         reserved = complete_delivery(
             engagement, reserved, SkillViewResult(True, content="test skill")
         )
-    bind_task(engagement, task_id=active.id, delivery_id=reserved.id, technique="test")
+    bind_task(
+        engagement,
+        task_id=active.id,
+        delivery_id=reserved.id,
+        hypothesis_id=hypothesis_id,
+        technique="test",
+    )

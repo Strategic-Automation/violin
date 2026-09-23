@@ -141,10 +141,11 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
             "can be validated."
         )
 
-    # 4. PTT active task
+    # 4. PTT active task (target-touching execution only)
     ptt_path = eng_dir / "state" / "ptt.md"
     ptt_validation = ptt.validate_ptt(ptt.parse_ptt(ptt_path))
-    result.errors.extend(ptt_validation.errors)
+    if args.account_sync:
+        result.errors.extend(ptt_validation.errors)
     result.warnings.extend(ptt_validation.warnings)
     active_task = None
     active_task_hyp_id = None

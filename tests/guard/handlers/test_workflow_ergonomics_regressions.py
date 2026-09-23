@@ -156,6 +156,8 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(
         )
     )
     assert created["status"] == "skill_prepared"
+    assert created["transition_applied"] is False
+    assert "call violin_record_ptt again" in created["next_step"]
     created = json.loads(
         service.handle_record_ptt(
             {
@@ -183,6 +185,8 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(
     }
     closed = json.loads(service.handle_record_ptt(close_args))
     assert closed["status"] == "skill_prepared"
+    assert closed["transition_applied"] is False
+    assert "call violin_record_ptt again" in closed["next_step"]
     closed = json.loads(service.handle_record_ptt(close_args))
     assert closed["task_closed"] is True
 
