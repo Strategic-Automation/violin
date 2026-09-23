@@ -285,6 +285,36 @@ def test_execute_code_local_find_paths_are_not_foreign_targets(tmp_path) -> None
         )
 
 
+def test_execute_code_dom_api_pattern_text_is_not_a_foreign_target(tmp_path) -> None:
+    """Identifier-shaped pattern text must not read as a target literal (#178)."""
+    eng = _engagement(tmp_path)
+    source = _code(eng) + (
+        "bundle = open('evidence/executions/app.js', encoding='utf-8').read()\n"
+        "for sink in ['window.location', 'document.location', 'location.href']:\n"
+        "    print(sink, bundle.count(sink))\n"
+    )
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="dom-api",
+        )
+        is None
+    )
+
+
+def test_execute_code_rejects_a_bare_foreign_ip_literal(tmp_path) -> None:
+    """The endpoint rule must still refuse an out-of-scope address literal."""
+    eng = _engagement(tmp_path)
+    source = _code(eng) + "host = '10.10.10.11'\n"
+    blocked = _pre_tool_call_hook(
+        tool_name="execute_code", args={"code": source}, tool_call_id="bare-ip"
+    )
+    assert blocked["action"] == "block"
+    assert "differ from declared target" in blocked["message"]
+
+
 def test_execute_code_completion_without_intent_is_an_audit_error(tmp_path) -> None:
     eng = _engagement(tmp_path)
     with pytest.raises(ValueError, match="intent receipt is missing"):

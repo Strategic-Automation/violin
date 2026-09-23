@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import ipaddress
 import json
 import math
 import re
@@ -223,6 +224,8 @@ def validate_source(source: object) -> tuple[dict[str, str] | None, str | None]:
         value = node.value
         if _is_local_path_literal(value):
             continue  # Local filename and path strings are not network targets.
+        if not _names_network_endpoint(value):
+            continue  # Identifier-shaped text is not a network endpoint.
         for candidate in extract_target_candidates(f"probe {value}"):
             normalized = normalize_target(candidate)
             if normalized not in {declared, "localhost", "127.0.0.1", "0.0.0.0", "::1"}:
@@ -250,6 +253,25 @@ def _is_local_path_literal(value: str) -> bool:
     if "\\" in stripped:
         return True
     return any(lowered.endswith(ext) for ext in _LOCAL_PATH_EXTENSIONS)
+
+
+def _names_network_endpoint(value: str) -> bool:
+    """True when a literal names a network endpoint the guard can identify.
+
+    A URL scheme or an IP address identifies an endpoint. Identifier-shaped text
+    (DOM API names, module paths, search patterns) does not, and a bare hostname
+    cannot be told apart from one, so it is left to the command gate that sees
+    what is actually contacted.
+    """
+    if "://" in value or value.lstrip().startswith("//"):
+        return True
+    for word in value.split():
+        try:
+            ipaddress.ip_address(normalize_target(word))
+        except ValueError:
+            continue
+        return True
+    return False
 
 
 def source_digest(source: object) -> str:
