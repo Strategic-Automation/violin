@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -11,12 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from ..core.engagement import hypotheses, state
-from ..core.skills.skill_policy import routable_context, skill_spec
+from ..core.skills.skill_policy import routable_context, skill_spec, validate_skill_selection
 from ..core.skills.skill_receipts import (
     HermesSkillViewAdapter,
     complete_delivery,
+    finish_skill_view,
     get_binding,
     prepare_delivery,
+    reserve_skill_view,
+    skill_content_digest,
 )
 from ..gates import command as cmd_module
 from ..gates.command import CheckCommandArgs
@@ -94,50 +96,110 @@ def _prepare_skill_reservation_payload(
     candidate_source: str | None = None,
     extra_fields: dict[str, Any] | None = None,
     adapter_cls: Any = HermesSkillViewAdapter,
-) -> tuple[Any, str, str | None]:
+) -> tuple[Any, str | None, str | None]:
     if not vulnerability_class and not candidate_source:
         vulnerability_class, candidate_source = _bound_route_context(eng_dir, task_id)
-    digest = "sha256:" + hashlib.sha256(f"policy:{skill}".encode()).hexdigest()
-    reservation = prepare_delivery(
+    policy = validate_skill_selection(
+        skill, phase, vulnerability_class or None, candidate_source or None
+    )
+    if policy.mismatch_reasons:
+        raise ValueError("; ".join(policy.mismatch_reasons))
+
+    spec = skill_spec(skill)
+    session_id = state.resolve_session_id(eng_dir) or session_fallback
+    view_reservation = reserve_skill_view(
         eng_dir,
-        session_id=state.resolve_session_id(eng_dir) or session_fallback,
+        session_id=session_id,
         skill=skill,
-        bundle_digest=digest,
         phase=phase,
         vulnerability_class=vulnerability_class or None,
         candidate_source=candidate_source or None,
     )
-    if reservation.owner:
+    if not view_reservation.owner:
+        if view_reservation.status == "preparing":
+            early_resp = _json(
+                "skill_preparing",
+                transition_applied=False,
+                next_step=_REPEAT_CALL_NOTE,
+                **(extra_fields or {}),
+                skill={"name": skill, "digest": None},
+            )
+            return None, None, early_resp
+        reservation = prepare_delivery(
+            eng_dir,
+            session_id=session_id,
+            skill=skill,
+            content_digest=view_reservation.content_digest,
+            phase=phase,
+            vulnerability_class=vulnerability_class or None,
+            candidate_source=candidate_source or None,
+        )
+        return reservation, reservation.content_digest, None
+
+    slot_open = True
+    try:
         viewed = adapter_cls().view(skill, task_id=task_id)
+        if not viewed.ready:
+            finish_skill_view(eng_dir, view_reservation)
+            slot_open = False
+            early_resp = _json(
+                "skill_unavailable",
+                transition_applied=False,
+                next_step=_REPEAT_CALL_NOTE,
+                **(extra_fields or {}),
+                skill={
+                    "name": skill,
+                    "digest": None,
+                    "content": "",
+                    "error": viewed.error,
+                    "delivery_id": None,
+                    "source": spec.source if spec else None,
+                    "install_hint": spec.install_hint if spec else None,
+                    "trust": spec.trust if spec else None,
+                },
+            )
+            return None, None, early_resp
+
+        digest = skill_content_digest(viewed.content)
+        reservation = prepare_delivery(
+            eng_dir,
+            session_id=session_id,
+            skill=skill,
+            content_digest=digest,
+            phase=phase,
+            vulnerability_class=vulnerability_class or None,
+            candidate_source=candidate_source or None,
+        )
+        if not reservation.owner:
+            finish_skill_view(eng_dir, view_reservation)
+            slot_open = False
+            return reservation, digest, None
         completed = complete_delivery(eng_dir, reservation, viewed)
-        spec = skill_spec(skill)
+        finish_skill_view(eng_dir, view_reservation)
+        slot_open = False
+        digest = completed.content_digest
         early_resp = _json(
-            "skill_prepared" if completed.status == "delivered" else "skill_unavailable",
+            "skill_prepared",
             transition_applied=False,
             next_step=_REPEAT_CALL_NOTE,
             **(extra_fields or {}),
             skill={
                 "name": skill,
                 "digest": digest,
-                "content": viewed.content,
+                "content": viewed.content if viewed.ready else "",
                 "error": viewed.error,
-                "delivery_id": reservation.id,
+                "delivery_id": completed.id,
                 "source": spec.source if spec else None,
                 "install_hint": spec.install_hint if spec else None,
                 "trust": spec.trust if spec else None,
             },
         )
-        return reservation, digest, early_resp
-    if reservation.status == "preparing":
-        early_resp = _json(
-            "skill_preparing",
-            transition_applied=False,
-            next_step=_REPEAT_CALL_NOTE,
-            **(extra_fields or {}),
-            skill={"name": skill, "digest": digest},
-        )
-        return reservation, digest, early_resp
-    return reservation, digest, None
+        return completed, digest, early_resp
+    except Exception:
+        # A failed owner must release the slot so the next request can retry.
+        if slot_open:
+            finish_skill_view(eng_dir, view_reservation)
+        raise
 
 
 def _result(result) -> dict[str, list[str]]:

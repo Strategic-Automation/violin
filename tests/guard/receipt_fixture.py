@@ -10,6 +10,7 @@ from plugins.violin_guard.core.skills.skill_receipts import (
     bind_task,
     complete_delivery,
     prepare_delivery,
+    skill_content_digest,
 )
 
 
@@ -25,12 +26,12 @@ def bind_active_task(
     state.record_session_id(engagement, session_id)
     active = ptt.find_active_task(ptt.parse_ptt(engagement / "state" / "ptt.md"))
     assert active is not None
-    digest = "sha256:" + "a" * 64
+    digest = skill_content_digest("test skill")
     reserved = prepare_delivery(
         engagement,
         session_id=session_id,
         skill=skill,
-        bundle_digest=digest,
+        content_digest=digest,
         phase=active.phase,
         vulnerability_class=vulnerability_class,
         candidate_source=candidate_source,
