@@ -308,6 +308,63 @@ def test_reporting_exit_allows_exploitation_history_in_audit_mode(
         _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
+def test_reporting_exit_closes_when_two_receipts_cite_one_evidence_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #174: one saved file cited by two batches must stay closable."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"c" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    evidence = engagement / "evidence" / "exploitation" / "proof.txt"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text("HTTP/1.1 200 OK\ntoken leaked\n", encoding="utf-8")
+    hypotheses.update_hypothesis(
+        engagement / "hypotheses.md",
+        id="001",
+        title="Validated issue",
+        status="Validated",
+        runtime_evidence="evidence/exploitation/proof.txt",
+    )
+
+    def write_batch(execution_id: str, body: str) -> str:
+        """Run one batch that overwrites the shared evidence path, then seal it."""
+        evidence.write_text(body, encoding="utf-8")
+        receipt = receipt_integrity.seal_execution_receipt(
+            {
+                "execution_id": execution_id,
+                "status": "completed",
+                "exit_code": 0,
+                "evidence_paths": {"stdout": "evidence/exploitation/proof.txt"},
+            },
+            engagement,
+        )
+        receipt_path = engagement / "evidence" / "executions" / f"{execution_id}.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        return f"evidence/executions/{execution_id}.json"
+
+    first = write_batch("batch-one", "HTTP/1.1 200 OK\ntoken leaked\n")
+    second = write_batch("batch-two", "HTTP/1.1 200 OK\ntoken leaked again\n")
+    for index, receipt_path in enumerate((first, second), 1):
+        findings.submit_finding(
+            engagement,
+            title=f"Shared evidence {index}",
+            severity="High",
+            summary="Cited the saved evidence file the other batch also wrote.",
+            receipt_paths=[receipt_path],
+        )
+
+    _validate_phase_exit(engagement, "PT-050", "[x]")  # both citations hold
+
+    evidence.write_text("HTTP/1.1 200 OK\nforged\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="has changed evidence") as excinfo:
+        _validate_phase_exit(engagement, "PT-050", "[x]")
+    message = str(excinfo.value)
+    assert "batch-one" in message and "batch-two" in message
+    assert "REMEDY" in message
+
+
 def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
     tmp_path: Path,
 ) -> None:
