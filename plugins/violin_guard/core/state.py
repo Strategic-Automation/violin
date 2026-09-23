@@ -15,6 +15,7 @@ from typing import Any
 from filelock import FileLock
 
 from .bash_ast import parse_bash_segments
+from .phases import normalize_phase, suppresses_heartbeat
 from .targets import extract_target_candidates
 
 # Constants
@@ -337,6 +338,109 @@ def mark_pending_sync(
         }
 
     mutate_json(path, mark)
+
+
+def commit_execution_start(
+    eng_dir: str | Path,
+    command: str,
+    command_phase: str,
+    ptt_task_id: str,
+    execution_id: str,
+    sync_reservation: str | None = None,
+) -> tuple[int, bool, int, bool]:
+    """Account one launched execution exactly once across retryable state writes.
+
+    Sync credit, pending review, and the execution-ID ledger share sync.json's
+    atomic replacement. Command count and last-check metadata share counts.json.
+    The workflow lock makes the two document updates a single serialized
+    workflow operation; the execution ID makes a retry after the first write
+    resume the second without charging or appending the pending command twice.
+    """
+    if not execution_id:
+        raise ValueError("execution accounting requires an execution_id")
+    if not ptt_task_id:
+        raise ValueError("pending execution requires a captured active PTT task")
+
+    root = resolve_eng_dir(eng_dir)
+    sync_path = _sync_path(root)
+    counts_path = _counts_path(root)
+    with workflow_lock(root):
+
+        def account_sync(data: dict[str, Any]) -> tuple[int, bool]:
+            accounts = data.setdefault("execution_accounts", {})
+            prior = accounts.get(execution_id)
+            if prior:
+                return max(0, int(data.get("credit", 0))), bool(prior.get("reserved"))
+
+            consumed = False
+            if sync_reservation:
+                reservation = (data.get("reservations") or {}).get(sync_reservation)
+                if not reservation or int(reservation.get("remaining", 0)) < 1:
+                    raise ValueError("sync reservation is missing or exhausted")
+                reservation["remaining"] = int(reservation["remaining"]) - 1
+                if reservation["remaining"] == 0:
+                    data["reservations"].pop(sync_reservation, None)
+                remaining = max(0, int(data.get("credit", 0)))
+                consumed = True
+            else:
+                remaining = max(0, int(data.get("credit", sync_credit_limit(command_phase))) - 1)
+                data["credit"] = remaining
+
+            pending = data.get("pending") or {}
+            commands = list(pending.get("commands") or [])
+            if pending.get("command") and not commands:
+                commands = [
+                    {"command": pending["command"], "phase": pending.get("phase", command_phase)}
+                ]
+            commands.append(
+                {
+                    "command": command,
+                    "phase": command_phase,
+                    "execution_id": execution_id,
+                }
+            )
+            data["pending"] = {
+                "batch_id": pending.get("batch_id") or str(uuid.uuid4()),
+                "commands": commands,
+                "phase": command_phase,
+                "created_at": pending.get("created_at")
+                or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "ptt_task_id": pending.get("ptt_task_id") or ptt_task_id,
+                "ptt_reviewed": False,
+                "credit_limit": pending.get("credit_limit") or sync_credit_limit(command_phase),
+            }
+            accounts[execution_id] = {
+                "command": command,
+                "phase": command_phase,
+                "reserved": consumed,
+                "accounted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+            return remaining, consumed
+
+        remaining, consumed = mutate_json(sync_path, account_sync)
+
+        def account_count(data: dict[str, Any]) -> tuple[int, bool]:
+            execution_ids = data.setdefault("execution_ids", [])
+            if execution_id in execution_ids:
+                return int(data.get("commands", 0)), False
+            data["commands"] = int(data.get("commands", 0)) + 1
+            execution_ids.append(execution_id)
+            data["last_check"] = {
+                "command": command,
+                "phase": command_phase,
+                "execution_id": execution_id,
+                "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+            return data["commands"], True
+
+        count, counted = mutate_json(counts_path, account_count)
+        phase_enum = normalize_phase(command_phase)
+        if counted and count % COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
+            set_heartbeat_pending(
+                root,
+                f"Reached {count} executed target commands. Review engagement files for drift.",
+            )
+        return remaining, consumed, count, counted
 
 
 def clear_pending_sync(eng_dir: str | Path) -> None:

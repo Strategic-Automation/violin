@@ -225,21 +225,42 @@ def _find_execution_manifest(engagement: Path, execution_id: str) -> Path | None
     return None
 
 
-def _finalize_background(
+def _finalize_execution(
     *,
     engagement: Path,
     manifest_path: Path,
-    command: str,
-    phase: str,
     exit_code: int,
     status_name: str,
+    timed_out: bool = False,
+    cancelled: bool = False,
+    output_limited: bool = False,
 ) -> dict[str, Any]:
+    """Persist a terminal intent, then idempotently publish history and receipt.
+
+    The intent makes the chosen outcome recoverable if the process exits after
+    history is appended but before its signed receipt is atomically replaced.
+    """
     with state.lock_file(manifest_path):
         record = state.read_json(manifest_path)
         if record.get("history_recorded"):
             return record
-        if record.get("cancel_requested"):
-            status_name = "cancelled"
+        terminal = record.get("terminal")
+        if not isinstance(terminal, dict):
+            if record.get("cancel_requested"):
+                status_name = "cancelled"
+                cancelled = True
+            terminal = {
+                "status": status_name,
+                "completed_at": _utc_now(),
+                "exit_code": exit_code,
+                "timed_out": timed_out or status_name == "timed_out",
+                "cancelled": cancelled or status_name == "cancelled",
+                "output_limited": output_limited or status_name == "output_limited",
+            }
+            record["terminal"] = terminal
+            record["status"] = "finalizing"
+            state.atomic_json(manifest_path, record)
+
         stderr_rel = record.get("evidence_paths", {}).get("stderr")
         if stderr_rel:
             stderr_p = engagement / stderr_rel
@@ -247,28 +268,42 @@ def _finalize_background(
                 with contextlib.suppress(OSError):
                     stderr_p.unlink()
                 record.setdefault("evidence_paths", {})["stderr"] = None
-        receipt = {
-            **record,
-            "status": status_name,
-            "completed_at": _utc_now(),
-            "exit_code": exit_code,
-            "timed_out": status_name == "timed_out",
-            "cancelled": status_name == "cancelled",
-            "output_limited": status_name == "output_limited",
-            "history_recorded": False,
-        }
-        declared_outputs = receipt.get("declared_evidence_outputs") or []
-        receipt["missing_evidence_outputs"] = [
-            value for value in declared_outputs if not (engagement / value).is_file()
+        missing_outputs = [
+            value
+            for value in record.get("declared_evidence_outputs") or []
+            if not (engagement / value).is_file()
         ]
-        receipt["evidence_complete"] = not receipt["missing_evidence_outputs"]
-        append_history(
-            engagement,
-            command,
-            phase,
-            exit_code,
-            receipt["evidence_paths"]["manifest"],
-        )
+        terminal.setdefault("missing_evidence_outputs", missing_outputs)
+        terminal.setdefault("evidence_complete", not terminal["missing_evidence_outputs"])
+        record["terminal"] = terminal
+        state.atomic_json(manifest_path, record)
+        command = str(record.get("command") or "")
+        phase = str(record.get("phase") or "")
+        execution_id = str(record.get("execution_id") or "")
+
+    # The durable terminal intent and manifest lock are released before taking
+    # the history lock. Retries find the same intent and history append is keyed
+    # by execution_id, so two finalizers cannot create duplicate entries.
+    append_history(
+        engagement,
+        command,
+        phase,
+        int(terminal["exit_code"]),
+        str(record.get("evidence_paths", {}).get("manifest") or ""),
+        status=str(terminal["status"]),
+        execution_id=execution_id,
+    )
+
+    with state.lock_file(manifest_path):
+        record = state.read_json(manifest_path)
+        if record.get("history_recorded"):
+            return record
+        terminal = record.get("terminal")
+        if not isinstance(terminal, dict):
+            raise RuntimeError("execution terminal intent disappeared during finalization")
+        receipt = {key: value for key, value in record.items() if key != "terminal"}
+        receipt.update(terminal)
+        receipt["receipt_kind"] = "execution"
         receipt["history_recorded"] = True
         receipt = seal_execution_receipt(receipt, engagement)
         state.atomic_json(manifest_path, receipt)
@@ -282,8 +317,6 @@ def _monitor_background(
     manifest_path: Path,
     stdout_path: Path,
     stderr_path: Path,
-    command: str,
-    phase: str,
     timeout: int,
 ) -> None:
     deadline = time.monotonic() + timeout
@@ -309,13 +342,14 @@ def _monitor_background(
     except subprocess.TimeoutExpired:
         _terminate_process(proc)
         exit_code = proc.wait(timeout=5)
-    _finalize_background(
+    _finalize_execution(
         engagement=engagement,
         manifest_path=manifest_path,
-        command=command,
-        phase=phase,
         exit_code=exit_code,
         status_name=status_name,
+        timed_out=status_name == "timed_out",
+        cancelled=status_name == "cancelled",
+        output_limited=status_name == "output_limited",
     )
 
 
@@ -324,23 +358,19 @@ def _commit_started_command(
     command: str,
     phase: str,
     ptt_task_id: str,
+    execution_id: str,
     sync_reservation: str | None = None,
-) -> tuple[int, bool]:
+) -> tuple[int, bool, int, bool]:
     if state.is_local_bookkeeping_command(command):
-        return state.sync_credit_remaining(str(engagement), phase), False
-    if sync_reservation:
-        state.record_ok_check(str(engagement), command, phase)
-        remaining = state.consume_reserved_sync_credit(str(engagement), sync_reservation)
-        state.mark_pending_sync(str(engagement), command, phase, ptt_task_id)
-        count = state.tick_command(str(engagement))
-        phase_enum = normalize_phase(phase)
-        if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
-            state.set_heartbeat_pending(
-                str(engagement),
-                f"Reached {count} executed target commands. Review engagement files for drift.",
-            )
-        return remaining, True
-    return _commit_guard_state(engagement, command, phase, ptt_task_id), False
+        return (
+            state.sync_credit_remaining(str(engagement), phase),
+            False,
+            state.read_counts(str(engagement))["commands"],
+            False,
+        )
+    return state.commit_execution_start(
+        str(engagement), command, phase, ptt_task_id, execution_id, sync_reservation
+    )
 
 
 def _start_background_monitor(
@@ -351,21 +381,11 @@ def _start_background_monitor(
     manifest_path: Path,
     stdout_path: Path,
     stderr_path: Path,
-    command: str,
-    phase: str,
-    ptt_task_id: str,
-    sync_reservation: str | None,
     timeout: int,
     execution_id: str,
+    accounting: tuple[int, bool, int, bool],
 ) -> dict[str, Any]:
-    state.atomic_json(manifest_path, record)
-    try:
-        remaining, consumed = _commit_started_command(
-            engagement, command, phase, ptt_task_id, sync_reservation
-        )
-    except Exception:
-        _terminate_process(proc)
-        raise
+    remaining, consumed, _, _ = accounting
     threading.Thread(
         target=_monitor_background,
         kwargs={
@@ -374,8 +394,6 @@ def _start_background_monitor(
             "manifest_path": manifest_path,
             "stdout_path": stdout_path,
             "stderr_path": stderr_path,
-            "command": command,
-            "phase": phase,
             "timeout": timeout,
         },
         daemon=True,
@@ -443,6 +461,9 @@ def execute(
         "phase": phase,
         "cwd": str(workdir),
         "started_at": started_at,
+        "intent_at": started_at,
+        "ptt_task_id": ptt_task_id,
+        "sync_reservation": sync_reservation,
         "pid": None,
         "background": background,
         "timeout_seconds": timeout,
@@ -465,6 +486,7 @@ def execute(
     cancelled = False
     proc: subprocess.Popen | None = None
     failure_status = ""
+    accounting: tuple[int, bool, int, bool] | None = None
 
     try:
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
@@ -496,7 +518,20 @@ def execute(
                 pid_create_time=created,
                 deadline_at=deadline_at.isoformat().replace("+00:00", "Z"),
             )
-            state.atomic_json(manifest_path, record)
+            with state.lock_file(manifest_path):
+                current = state.read_json(manifest_path)
+                if current.get("cancel_requested"):
+                    record["cancel_requested"] = True
+                    record["cancel_requested_at"] = current.get("cancel_requested_at")
+                state.atomic_json(manifest_path, record)
+            accounting = _commit_started_command(
+                engagement,
+                command,
+                phase,
+                ptt_task_id,
+                execution_id,
+                sync_reservation,
+            )
 
             if background:
                 return _start_background_monitor(
@@ -506,12 +541,9 @@ def execute(
                     manifest_path=manifest_path,
                     stdout_path=stdout_path,
                     stderr_path=stderr_path,
-                    command=command,
-                    phase=phase,
-                    ptt_task_id=ptt_task_id,
-                    sync_reservation=sync_reservation,
                     timeout=timeout,
                     execution_id=execution_id,
+                    accounting=accounting,
                 )
 
             deadline = time.monotonic() + timeout
@@ -553,20 +585,20 @@ def execute(
                 _terminate_process(proc)
         stderr_path.write_text(f"executor error: {exc}\n", encoding="utf-8")
 
-    completed_at = _utc_now()
-    if stderr_path.exists() and stderr_path.stat().st_size == 0:
-        for attempt in range(5):
-            try:
-                stderr_path.unlink()
-                break
-            except OSError:
-                time.sleep(0.02 * (attempt + 1))
-        if not stderr_path.exists():
-            record.setdefault("evidence_paths", {})["stderr"] = None
-
-    receipt = {
-        **record,
-        "status": failure_status
+    if proc is not None and accounting is None:
+        accounting = _commit_started_command(
+            engagement,
+            command,
+            phase,
+            ptt_task_id,
+            execution_id,
+            sync_reservation,
+        )
+    receipt = _finalize_execution(
+        engagement=engagement,
+        manifest_path=manifest_path,
+        exit_code=exit_code,
+        status_name=failure_status
         or (
             "cancelled"
             if cancelled
@@ -576,35 +608,15 @@ def execute(
             if output_limited
             else "completed"
         ),
-        "completed_at": completed_at,
-        "exit_code": exit_code,
-        "timed_out": timed_out,
-        "cancelled": cancelled,
-        "output_limited": output_limited,
-        "missing_evidence_outputs": [
-            value for value in declared_outputs if not (engagement / value).is_file()
-        ],
-    }
-    receipt["evidence_complete"] = not receipt["missing_evidence_outputs"]
-    receipt = seal_execution_receipt(receipt, engagement)
-    state.atomic_json(manifest_path, receipt)
-
-    append_history(
-        engagement,
-        command,
-        phase,
-        exit_code,
-        rel_manifest,
-        status=str(receipt["status"]),
+        timed_out=timed_out,
+        cancelled=cancelled,
+        output_limited=output_limited,
     )
-
-    if proc is None:
-        remaining = state.sync_credit_remaining(str(engagement), phase)
-        consumed = False
-    else:
-        remaining, consumed = _commit_started_command(
-            engagement, command, phase, ptt_task_id, sync_reservation
-        )
+    remaining, consumed = (
+        (accounting[0], accounting[1])
+        if accounting is not None
+        else (state.sync_credit_remaining(str(engagement), phase), False)
+    )
 
     return {
         **receipt,
@@ -648,7 +660,34 @@ def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
         record = state.read_json(manifest_path)
     if not record:
         raise ValueError("execution not found")
-    if record.get("background") and record.get("status") == "running":
+    if record.get("status") == "finalizing":
+        terminal = record.get("terminal") or {}
+        return _finalize_execution(
+            engagement=engagement,
+            manifest_path=manifest_path,
+            exit_code=int(terminal.get("exit_code", -1)),
+            status_name=str(terminal.get("status") or "lost"),
+            timed_out=bool(terminal.get("timed_out")),
+            cancelled=bool(terminal.get("cancelled")),
+            output_limited=bool(terminal.get("output_limited")),
+        )
+    if record.get("status") == "starting":
+        # A persisted intent without a process identity is ambiguous after a
+        # short launch window. Charge it conservatively before recording lost.
+        intent_at = record.get("intent_at") or record.get("started_at")
+        if isinstance(intent_at, str):
+            with contextlib.suppress(ValueError):
+                age = datetime.now(UTC) - datetime.fromisoformat(intent_at.replace("Z", "+00:00"))
+                if age < timedelta(seconds=5):
+                    return record
+        _reconcile_execution_accounting(engagement, record)
+        return _finalize_execution(
+            engagement=engagement,
+            manifest_path=manifest_path,
+            exit_code=-1,
+            status_name="lost",
+        )
+    if record.get("status") == "running":
         proc = _matching_process(record)
         if proc is None:
             # A live monitor can be finalizing a normally exited process at
@@ -659,26 +698,52 @@ def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
             with state.lock_file(manifest_path):
                 refreshed = state.read_json(manifest_path)
             if refreshed.get("status") != "running":
+                if refreshed.get("status") == "finalizing":
+                    terminal = refreshed.get("terminal") or {}
+                    return _finalize_execution(
+                        engagement=engagement,
+                        manifest_path=manifest_path,
+                        exit_code=int(terminal.get("exit_code", -1)),
+                        status_name=str(terminal.get("status") or "lost"),
+                        timed_out=bool(terminal.get("timed_out")),
+                        cancelled=bool(terminal.get("cancelled")),
+                        output_limited=bool(terminal.get("output_limited")),
+                    )
                 return refreshed
-            record = _finalize_background(
+            _reconcile_execution_accounting(engagement, record)
+            record = _finalize_execution(
                 engagement=engagement,
                 manifest_path=manifest_path,
-                command=record["command"],
-                phase=record["phase"],
                 exit_code=-1,
                 status_name="lost",
             )
         elif _deadline_expired(record):
             _terminate_tracked_process(proc)
-            record = _finalize_background(
+            _reconcile_execution_accounting(engagement, record)
+            record = _finalize_execution(
                 engagement=engagement,
                 manifest_path=manifest_path,
-                command=record["command"],
-                phase=record["phase"],
                 exit_code=-1,
                 status_name="timed_out",
+                timed_out=True,
             )
     return record
+
+
+def _reconcile_execution_accounting(engagement: Path, record: dict[str, Any]) -> None:
+    """Finish launch accounting after a process identity was durably recorded."""
+    execution_id = str(record.get("execution_id") or "")
+    ptt_task_id = str(record.get("ptt_task_id") or "")
+    if not execution_id or not ptt_task_id:
+        return
+    _commit_started_command(
+        engagement,
+        str(record.get("command") or ""),
+        str(record.get("phase") or ""),
+        ptt_task_id,
+        execution_id,
+        str(record.get("sync_reservation") or "") or None,
+    )
 
 
 def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
@@ -688,14 +753,30 @@ def cancel(eng_dir: str, execution_id: str) -> dict[str, Any]:
     if record.get("status") not in {"starting", "running"}:
         return {**record, "cancel_requested": False, "message": "execution is not running"}
 
+    if record.get("status") == "starting" and not record.get("pid"):
+        manifest_path = engagement / record["evidence_paths"]["manifest"]
+        with state.lock_file(manifest_path):
+            current = state.read_json(manifest_path)
+            if current.get("status") == "starting" and not current.get("pid"):
+                current["cancel_requested"] = True
+                current["cancel_requested_at"] = _utc_now()
+                state.atomic_json(manifest_path, current)
+                return {**current, "message": "cancellation requested during launch"}
+            record = current
+        if record.get("status") not in {"starting", "running"}:
+            return {
+                **record,
+                "cancel_requested": False,
+                "message": "execution is not running",
+            }
+
     proc = _matching_process(record)
     if proc is None:
         manifest_path = engagement / record["evidence_paths"]["manifest"]
-        return _finalize_background(
+        _reconcile_execution_accounting(engagement, record)
+        return _finalize_execution(
             engagement=engagement,
             manifest_path=manifest_path,
-            command=record["command"],
-            phase=record["phase"],
             exit_code=-1,
             status_name="lost",
         )
