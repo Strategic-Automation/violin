@@ -502,6 +502,7 @@ def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
         _validate_phase_exit(engagement, "PT-030", "[x]")
 
 
+
 def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> None:
     """#124: the warning must say the finding still counts as proof and name the remedy."""
     engagement = tmp_path / "engagement"
@@ -519,6 +520,103 @@ def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> 
     assert warnings
     assert "still accepted as proof" in warnings[0]
     assert "violin_exec" in warnings[0]
+
+def test_resubmitting_a_finding_updates_one_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#177: a resubmission with stronger evidence folds into the existing record."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    execution_dir = engagement / "evidence" / "executions"
+    execution_dir.mkdir(parents=True, exist_ok=True)
+
+    def _seal(execution_id: str, body: str, name: str) -> str:
+        proof = execution_dir / name
+        proof.write_text(body, encoding="utf-8")
+        record = receipt_integrity.seal_execution_receipt(
+            {
+                "execution_id": execution_id,
+                "status": "completed",
+                "exit_code": 0,
+                "evidence_paths": {"stdout": proof.relative_to(engagement).as_posix()},
+            },
+            engagement,
+        )
+        path = execution_dir / f"{name}.json"
+        path.write_text(json.dumps(record), encoding="utf-8")
+        return path.relative_to(engagement).as_posix()
+
+    first_receipt = _seal(
+        "first-run", "HTTP/1.1 200 OK\nContent-Type: text/html\n\nvulnerable\n", "first"
+    )
+    second_receipt = _seal(
+        "second-run",
+        'HTTP/1.1 200 OK\nContent-Type: application/json\n\n{"admin": true}\n',
+        "second",
+    )
+    stronger_evidence = "evidence/executions/second"
+
+    initial = findings.submit_finding(
+        engagement,
+        title="IDOR on order lookup",
+        severity="High",
+        summary="Order lookup returns another tenant's order.",
+        receipt_paths=[first_receipt],
+    )
+    updated = findings.submit_finding(
+        engagement,
+        title="IDOR on order lookup",
+        severity="High",
+        summary="Order lookup returns another tenant's order.",
+        receipt_paths=[second_receipt],
+        evidence_paths=[stronger_evidence],
+    )
+
+    records = findings.load_findings(engagement)
+    assert len(records) == 1
+    assert updated["finding_id"] == initial["finding_id"]
+    assert updated["duplicate"] is True
+    assert set(records[0]["receipt_paths"]) == {first_receipt, second_receipt}
+    assert stronger_evidence in records[0]["evidence_paths"]
+
+
+def test_resubmitting_a_different_vulnerability_keeps_two_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The identity rule must not fold two distinct claims into one."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    proof = engagement / "evidence" / "executions" / "one"
+    proof.parent.mkdir(parents=True, exist_ok=True)
+    proof.write_text("HTTP/1.1 200 OK\nContent-Type: text/html\n\nvulnerable\n", encoding="utf-8")
+    receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "run-1",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"stdout": proof.relative_to(engagement).as_posix()},
+        },
+        engagement,
+    )
+    receipt_path = proof.parent / "one.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    relative = receipt_path.relative_to(engagement).as_posix()
+
+    for title in ("IDOR on order lookup", "Stored XSS in the comment field"):
+        findings.submit_finding(
+            engagement,
+            title=title,
+            severity="High",
+            summary="Distinct claim.",
+            receipt_paths=[relative],
+        )
+
+    assert len(findings.load_findings(engagement)) == 2
+
 
 
 def test_bootstrap_creates_coverage_matrix_template(tmp_path: Path) -> None:

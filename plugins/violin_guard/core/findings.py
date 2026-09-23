@@ -21,13 +21,23 @@ def _store_path(engagement: Path) -> Path:
     return engagement / FINDINGS_PATH
 
 
+def _identity(title: str) -> str:
+    """One finding per vulnerability: a claim's title is its identity.
+
+    The evidence set is deliberately not part of the identity, so attaching a
+    stronger proof to a claim updates that claim instead of filing a second one.
+    """
+    return title.strip().casefold()
+
+
 def load_findings(eng_dir: str | Path) -> list[dict[str, Any]]:
-    """Load the canonical append-only finding records for an engagement."""
+    """Load one canonical record per vulnerability for an engagement."""
     engagement = state.resolve_eng_dir(eng_dir)
     path = _store_path(engagement)
     if not path.is_file():
         return []
     records: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
@@ -36,9 +46,14 @@ def load_findings(eng_dir: str | Path) -> list[dict[str, Any]]:
         except json.JSONDecodeError as exc:
             raise ValueError(f"{FINDINGS_PATH}:{line_number}: invalid JSON") from exc
         try:
-            records.append(schemas.FindingRecordModel.model_validate(value).model_dump())
+            record = schemas.FindingRecordModel.model_validate(value).model_dump()
         except ValueError as exc:
             raise ValueError(f"{FINDINGS_PATH}:{line_number}: invalid finding record") from exc
+        identity = _identity(str(record.get("title") or ""))
+        if identity in seen:
+            continue  # a duplicate written before the store became one record per vulnerability
+        seen.add(identity)
+        records.append(record)
     return records
 
 
@@ -196,58 +211,53 @@ def submit_finding(
         set(verified_paths),
     )
 
-    warnings = _proof_byte_warnings(engagement, verified_paths, saved_evidence)
-
     store = _store_path(engagement)
     with state.workflow_lock(engagement), state.lock_file(store):
         records = load_findings(engagement)
-        signature = {
-            "title": title.strip().casefold(),
-            "receipt_paths": normalized_receipts,
-        }
-        existing = next(
+        index = next(
             (
-                record
-                for record in records
-                if {
-                    "title": str(record.get("title") or "").strip().casefold(),
-                    "receipt_paths": record.get("receipt_paths"),
-                }
-                == signature
+                position
+                for position, stored in enumerate(records)
+                if _identity(str(stored.get("title") or "")) == _identity(title)
             ),
             None,
         )
-        if existing:
-            return {
-                **existing,
-                "duplicate": True,
-                "receipt_validation": "verified",
-                "warnings": _proof_byte_warnings(
-                    engagement, [], existing.get("evidence_paths") or []
-                ),
-            }
-
+        previous = records[index] if index is not None else {}
         record = {
             "schema_version": 1,
-            "finding_id": _next_finding_id(records),
+            "finding_id": previous.get("finding_id") or _next_finding_id(records),
             "title": title.strip(),
             "severity": severity,
             "summary": summary.strip(),
             "status": "validated",
-            "receipt_paths": normalized_receipts,
-            "evidence_paths": saved_evidence,
-            "execution_ids": execution_ids,
-            "created_at": datetime.now(UTC).isoformat(),
+            "receipt_paths": list(
+                dict.fromkeys([*previous.get("receipt_paths", ()), *normalized_receipts])
+            ),
+            "evidence_paths": list(
+                dict.fromkeys([*previous.get("evidence_paths", ()), *saved_evidence])
+            ),
+            "execution_ids": list(
+                dict.fromkeys([*previous.get("execution_ids", ()), *execution_ids])
+            ),
+            "created_at": previous.get("created_at") or datetime.now(UTC).isoformat(),
             "engagement_id": engagement.name,
         }
+        if index is None:
+            records.append(record)
+        else:
+            records[index] = record
         state.ensure_dir(store.parent)
-        with store.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        state.atomic_text(
+            store,
+            "".join(
+                json.dumps(stored, ensure_ascii=False, sort_keys=True) + "\n" for stored in records
+            ),
+        )
         return {
             **record,
-            "duplicate": False,
+            "duplicate": index is not None,
             "receipt_validation": "verified",
-            "warnings": warnings,
+            "warnings": _proof_byte_warnings(engagement, verified_paths, record["evidence_paths"]),
         }
 
 
