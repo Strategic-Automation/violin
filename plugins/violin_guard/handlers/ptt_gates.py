@@ -59,6 +59,37 @@ def _validate_disposition_entry(name: str, entry: Any) -> list[str]:
     return []
 
 
+def _coverage_key_errors(entries: Any, obligations: list[Any]) -> list[str]:
+    """Validate coverage-matrix cells against the engagement obligation vocabulary.
+
+    Shared by the VULN_RESEARCH close gate and the bootstrap write path, so an
+    unrecognised obligation key fails immediately and lists the accepted keys.
+    A cell is recognized if its lowercased key or evidence text maps to at least
+    one obligation. Returns error strings; empty means the key mapping is sound.
+    """
+    accepted = {
+        str(obligation).strip().lower()
+        for obligation in (obligations or [])
+        if str(obligation).strip()
+    }
+    if not accepted or not isinstance(entries, dict) or not entries:
+        return []
+    errors: list[str] = []
+    for name, entry in entries.items():
+        cell = (
+            f"{str(name).strip().lower()} "
+            f"{str((entry or {}).get('evidence_or_reason') or '').strip().lower()}"
+            if isinstance(entry, dict)
+            else str(name).strip().lower()
+        )
+        if not any(obligation in cell for obligation in accepted):
+            errors.append(
+                f"{name} (unrecognised obligation key; accepted keys: "
+                f"{', '.join(sorted(accepted))})"
+            )
+    return errors
+
+
 def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
     """Block phase completion while required evidence or dispositions are incomplete."""
     if status != "[x]":
@@ -119,6 +150,7 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                             )
                     for name, entry in entries.items():
                         unresolved_coverage.extend(_validate_disposition_entry(name, entry))
+                    unresolved_coverage.extend(_coverage_key_errors(entries, obligations))
                     if unresolved_coverage:
                         hints = [
                             "how to fix: each obligation must map to a coverage-matrix cell",
