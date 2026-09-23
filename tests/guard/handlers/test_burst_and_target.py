@@ -379,6 +379,48 @@ def test_exec_burst_missing_commands_file(eng):
     assert "commands file not found" in data["error"], data
 
 
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        # The JSON text of an array, not the array itself — an accidental
+        # double-encoding that was previously executed as one shell command
+        # (exit 127) with a receipt written for the non-burst.
+        json.dumps(["nmap -sV 10.10.10.10", "gobuster dir -u http://10.10.10.10"]),
+        # A list whose element is not a string.
+        ["nmap -sV 10.10.10.10", 123],
+    ],
+    ids=["double-encoded-json-string", "non-string-element"],
+)
+def test_exec_burst_rejects_malformed_commands(eng, monkeypatch, malformed):
+    """A commands argument that is not a list of strings is rejected before any
+    command is admitted, so no receipt is written for the malformed burst.
+
+    Previously the JSON text of an array was executed as one shell command, an
+    accidental double-encoding that produced an exit-127 failure and still
+    wrote a receipt. Admission now rejects the shape with the expected type
+    named, before any command is executed or any receipt is created.
+    """
+    rec = _patch_burst(monkeypatch, str(eng))
+    data = json.loads(
+        service.handle_exec_burst(
+            {
+                "eng_dir": str(eng),
+                "scope": str(eng / "scope" / "scope.yaml"),
+                "phase": "recon",
+                "commands": malformed,
+                "session_id": "ts",
+                "skill_loaded_file": str(eng / "state" / ".skill-loaded-ts"),
+                "label": "malformed",
+            }
+        )
+    )
+    assert data["status"] == "error", data
+    assert "list of strings" in data["error"], data
+    # Rejected at admission: no command was executed, so no receipt is written.
+    assert rec["commands"] == []
+    assert list((eng / "evidence" / "executions").glob("*.json")) == []
+
+
 def test_exec_burst_rejects_absolute_commands_file(eng):
     path = eng / "commands.txt"
     path.write_text("nmap -sV 10.10.10.10\n", encoding="utf-8")

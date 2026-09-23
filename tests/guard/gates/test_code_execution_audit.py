@@ -99,6 +99,43 @@ def _complete_execute_code_result(
     return manifest, intent, completed, source
 
 
+def _no_active_task_engagement(tmp_path: Path) -> Path:
+    eng = _engagement(tmp_path)
+    ptt = eng / "state" / "ptt.md"
+    ptt.write_text(
+        ptt.read_text(encoding="utf-8").replace("| PT-010 | [~] |", "| PT-010 | [ ] |"),
+        encoding="utf-8",
+    )
+    return eng
+
+
+def test_local_execute_code_runs_with_no_active_ptt_task(tmp_path) -> None:
+    eng = _no_active_task_engagement(tmp_path)
+    source = _code(eng) + "print('local audit work')\n"
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="no-active-task-local",
+        )
+        is None
+    )
+
+
+def test_target_touching_execute_code_still_requires_active_ptt_task(tmp_path) -> None:
+    eng = _no_active_task_engagement(tmp_path)
+    source = _code(eng) + "import requests\nrequests.get('https://10.10.10.10')\n"
+    blocked = _pre_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": source},
+        session_id="test",
+        tool_call_id="no-active-task-target",
+    )
+    assert blocked["action"] == "block"
+    assert "violin_record_ptt" in blocked["message"]
+
+
 def test_execute_code_requires_valid_metadata(tmp_path) -> None:
     blocked = _pre_tool_call_hook(
         tool_name="execute_code",
@@ -124,7 +161,35 @@ def test_execute_code_missing_fields_surfaces_header_schema(tmp_path) -> None:
     )
     assert blocked["action"] == "block"
     assert "Header format" in blocked["message"]
-    assert "session_id via violin_status" in blocked["message"]
+    # An unusable header must restate the documented header with an example line.
+    assert '# violin: {"eng_dir":"/engagements/' in blocked["message"]
+
+
+def test_execute_code_accepts_documented_two_field_header(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    code = (
+        '# violin: {"eng_dir":"'
+        + str(eng).replace("\\", "\\\\")
+        + '","phase":"RECON"}\nprint("local audit work")\n'
+    )
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": code},
+            session_id="test",
+            tool_call_id="documented-two-field",
+        )
+        is None
+    )
+    intent = json.loads(
+        next((eng / "evidence" / "executions").glob("*-execute-code.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    # target and session_id are filled from engagement state.
+    assert intent["target"] == "10.10.10.10"
+    assert intent["session_id"] == "test"
+    assert intent["execution_class"] == "local_analysis"
 
 
 def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
@@ -283,6 +348,36 @@ def test_execute_code_local_find_paths_are_not_foreign_targets(tmp_path) -> None
         assert blocked.get("action") != "block" or "differ from declared target" not in blocked.get(
             "message", ""
         )
+
+
+def test_execute_code_dom_api_pattern_text_is_not_a_foreign_target(tmp_path) -> None:
+    """Identifier-shaped pattern text must not read as a target literal (#178)."""
+    eng = _engagement(tmp_path)
+    source = _code(eng) + (
+        "bundle = open('evidence/executions/app.js', encoding='utf-8').read()\n"
+        "for sink in ['window.location', 'document.location', 'location.href']:\n"
+        "    print(sink, bundle.count(sink))\n"
+    )
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="dom-api",
+        )
+        is None
+    )
+
+
+def test_execute_code_rejects_a_bare_foreign_ip_literal(tmp_path) -> None:
+    """The endpoint rule must still refuse an out-of-scope address literal."""
+    eng = _engagement(tmp_path)
+    source = _code(eng) + "host = '10.10.10.11'\n"
+    blocked = _pre_tool_call_hook(
+        tool_name="execute_code", args={"code": source}, tool_call_id="bare-ip"
+    )
+    assert blocked["action"] == "block"
+    assert "differ from declared target" in blocked["message"]
 
 
 def test_execute_code_completion_without_intent_is_an_audit_error(tmp_path) -> None:

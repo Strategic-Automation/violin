@@ -143,23 +143,30 @@ def _result(result) -> dict[str, list[str]]:
 
 
 def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
-    """Append a framework_feedback.md row when the guard blocks or reviews.
+    """Append a guard-authored friction row to state/guard_feedback.md when the
+    guard blocks or reviews.
 
-    Only writes when state/framework_feedback.md already exists — engagement
-    initialization creates it. Engagements without the file are untouched.
-    Recording here means friction is captured at the moment it happens, with
-    zero agent bookkeeping, so the agent never has to reconstruct what was
-    blocked from memory at the end of the run.
+    Guard rows live in their own file under their own heading — a distinct
+    column schema from the agent-maintained framework_feedback.md table — so a
+    guard-side write can never invalidate an agent edit queued against
+    framework_feedback.md. Only writes for feedback-enabled engagements:
+    engagement initialization creates state/framework_feedback.md, which marks
+    the engagement as opted in. Recording here means friction is captured at
+    the moment it happens, with zero agent bookkeeping, so the agent never has
+    to reconstruct what was blocked from memory at the end of the run.
     """
-    feedback = eng_dir / "state" / "framework_feedback.md"
-    if not feedback.exists() or result.exit_code() == 0:
+    feedback_marker = eng_dir / "state" / "framework_feedback.md"
+    if not feedback_marker.exists() or result.exit_code() == 0:
         return
     rows = [("Guard Block", err) for err in result.errors]
     if result.exit_code() == 2:
         rows.extend([("Guard Review", warn) for warn in result.warnings])
     if not rows:
         return
-    existing = feedback.read_text(encoding="utf-8", errors="replace")
+    guard_file = eng_dir / "state" / "guard_feedback.md"
+    existing = (
+        guard_file.read_text(encoding="utf-8", errors="replace") if guard_file.exists() else ""
+    )
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = []
     for category, issue in rows:
@@ -173,7 +180,18 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
         )
     if not lines:
         return
-    with state.lock_file(feedback), feedback.open("a", encoding="utf-8") as fh:
+    with state.lock_file(guard_file), guard_file.open("a", encoding="utf-8") as fh:
+        if not existing:
+            fh.write(
+                "# Violin Guard Friction Log\n"
+                "\n"
+                "Automated guard block/review records. This file is distinct from the "
+                "agent-maintained state/framework_feedback.md table by design: the guard "
+                "never writes into the file the agent patches.\n"
+                "\n"
+                "| Timestamp | Category | Issue | Impact | Prevention |\n"
+                "|---|---|---|---|---|\n"
+            )
         fh.write("\n".join(lines) + "\n")
 
 

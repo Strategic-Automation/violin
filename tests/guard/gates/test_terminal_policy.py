@@ -350,18 +350,46 @@ def test_init_engagement_rejects_indirect_scope_host(raw_command: str) -> None:
     assert "pass --host directly" in result["message"]
 
 
-def test_other_guard_commands_do_not_inherit_bootstrap_exception() -> None:
+def test_read_only_guard_diagnostics_are_reachable_from_the_raw_terminal() -> None:
+    """The guard's own diagnostics must run from the raw terminal (#82)."""
+    for subcommand in ("check-command", "validate-scope"):
+        result = _pre_tool_call_hook(
+            tool_name="terminal",
+            args={
+                "command": (
+                    f"python3 scripts/violin_guard.py {subcommand} "
+                    "--target 10.10.10.10 --command whoami"
+                )
+            },
+        )
+        assert result is None or result.get("action") != "block", subcommand
+
+
+def test_mutating_guard_commands_do_not_inherit_the_diagnostic_exception() -> None:
     result = _pre_tool_call_hook(
         tool_name="terminal",
         args={
             "command": (
-                "python3 scripts/violin_guard.py check-command "
-                "--target 10.10.10.10 --command whoami"
+                "python3 scripts/violin_guard.py record-ptt --target 10.10.10.10 --task PT-1"
             )
         },
     )
 
     assert result["action"] == "block"
+
+
+def test_host_local_read_only_script_is_not_an_assessment_script() -> None:
+    """A local script that only reads saved evidence is not assessment traffic (#178)."""
+    command = "\n".join(
+        [
+            "python3 - <<'PY'",
+            "print('probe', open('evidence/executions/app.js').read().count('probe'))",
+            "PY",
+        ]
+    )
+    result = _pre_tool_call_hook(tool_name="terminal", args={"command": command})
+
+    assert result is None or result.get("action") != "block"
 
 
 def test_non_python_command_cannot_impersonate_bootstrap_exception() -> None:
