@@ -448,9 +448,7 @@ def record_semantic_review(
         # recorded on any technique in this engagement (tracked via each
         # entry's ``evidence_paths``).  Re-citing the same evidence is circular.
         seen_paths = {
-            item
-            for prior in entries.values()
-            for item in prior.get("evidence_paths") or []
+            item for prior in entries.values() for item in prior.get("evidence_paths") or []
         }
         novel = bool(set(clean_evidence_paths) - seen_paths) or decisive
         # Reset the no-progress counter when the review produced something new

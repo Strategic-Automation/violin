@@ -370,8 +370,7 @@ def test_mutating_guard_commands_do_not_inherit_the_diagnostic_exception() -> No
         tool_name="terminal",
         args={
             "command": (
-                "python3 scripts/violin_guard.py record-ptt "
-                "--target 10.10.10.10 --task PT-1"
+                "python3 scripts/violin_guard.py record-ptt --target 10.10.10.10 --task PT-1"
             )
         },
     )

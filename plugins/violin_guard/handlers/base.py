@@ -165,9 +165,7 @@ def _log_guard_friction(eng_dir: Path, result, command: str) -> None:
         return
     guard_file = eng_dir / "state" / "guard_feedback.md"
     existing = (
-        guard_file.read_text(encoding="utf-8", errors="replace")
-        if guard_file.exists()
-        else ""
+        guard_file.read_text(encoding="utf-8", errors="replace") if guard_file.exists() else ""
     )
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines = []
