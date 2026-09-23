@@ -13,7 +13,7 @@ from ..core.skill_policy import resolve_skill_route
 from ..core.skill_receipts import binding_readiness
 from ..core.targets import resolve_target
 from ..gates import command
-from .base import _eng_path, _json, _serialize_errors
+from .base import _bound_route_context, _eng_path, _json, _serialize_errors
 
 
 @_serialize_errors
@@ -183,7 +183,10 @@ def handle_status(args, **kwargs):
         if active and session_id
         else (None, "no active task or session")
     )
-    route = resolve_skill_route(current_phase or "RECON")
+    vulnerability_class, candidate_source = (
+        _bound_route_context(eng_dir, active.id) if active else ("", "")
+    )
+    route = resolve_skill_route(current_phase or "RECON", vulnerability_class, candidate_source)
 
     blockers = _evaluate_status_blockers(
         eng_dir,

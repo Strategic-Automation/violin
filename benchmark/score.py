@@ -16,6 +16,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmark.proof import match_finding  # noqa: E402
+from plugins.violin_guard.core.disposition_policy import (  # noqa: E402
+    EXPECTED_METHODOLOGY_GATES,
+    evaluate_dispositions,
+)
 from plugins.violin_guard.core.findings import load_findings  # noqa: E402
 
 GOLDEN_PATH = REPO_ROOT / "benchmark" / "private" / "duck-store-golden.json"
@@ -58,25 +62,31 @@ def _saved_receipt_public_key(engagement: Path) -> str | None:
     return str(key) if key else None
 
 
-def _disposition_metric(path: Path, root_key: str) -> dict[str, Any]:
+def _disposition_metric(
+    path: Path,
+    root_key: str,
+    *,
+    obligations: list[Any] | tuple[Any, ...] = (),
+    required_names: set[str] | frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     if not path.is_file():
         return {"complete": False, "completed": 0, "total": 0, "percent": 0.0}
     value = yaml.safe_load(path.read_text(encoding="utf-8"))
     entries = value.get(root_key) if isinstance(value, dict) else None
     if not isinstance(entries, dict) or not entries:
         return {"complete": False, "completed": 0, "total": 0, "percent": 0.0}
-    completed = sum(
-        str(entry.get("status") or "").casefold() in {"tested", "not_applicable", "blocked"}
-        and bool(str(entry.get("evidence_or_reason") or "").strip())
-        for entry in entries.values()
-        if isinstance(entry, dict)
+    evaluation = evaluate_dispositions(
+        entries,
+        obligations=obligations,
+        required_names=required_names,
     )
-    total = len(entries)
+    completed = evaluation.completed
+    total = evaluation.total
     return {
-        "complete": completed == total,
+        "complete": evaluation.complete,
         "completed": completed,
         "total": total,
-        "percent": round(completed / total * 100, 1),
+        "percent": round(completed / total * 100, 1) if total else 0.0,
     }
 
 
@@ -266,8 +276,29 @@ def score_engagement(
         if high_medium_indexes
         else 0.0,
     }
-    coverage = _disposition_metric(engagement / "state" / "coverage-matrix.yaml", "coverage")
-    methodology = _disposition_metric(engagement / "state" / "methodology-gates.yaml", "gates")
+    scope_path = engagement / "scope" / "scope.yaml"
+    scope_value = (
+        yaml.safe_load(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
+    )
+    scope_data = scope_value if isinstance(scope_value, dict) else {}
+    engagement_value = scope_data.get("engagement")
+    engagement_policy = engagement_value if isinstance(engagement_value, dict) else {}
+    obligations_value = engagement_policy.get("coverage_obligations")
+    coverage_obligations = obligations_value if isinstance(obligations_value, list) else []
+    coverage = _disposition_metric(
+        engagement / "state" / "coverage-matrix.yaml",
+        "coverage",
+        obligations=coverage_obligations,
+    )
+    methodology_required = bool(
+        engagement_policy.get("audit_mode") is True
+        and engagement_policy.get("require_methodology_gates") is True
+    )
+    methodology = _disposition_metric(
+        engagement / "state" / "methodology-gates.yaml",
+        "gates",
+        required_names=(EXPECTED_METHODOLOGY_GATES if methodology_required else frozenset()),
+    )
     protocol = _protocol_alignment(
         engagement,
         contract=contract,

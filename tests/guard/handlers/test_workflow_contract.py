@@ -16,11 +16,11 @@ from plugins.violin_guard.core import (
     receipt_integrity,
     state,
 )
+from plugins.violin_guard.core.disposition_policy import evaluate_dispositions
 from plugins.violin_guard.core.phases import Phase
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
 from plugins.violin_guard.handlers.ptt_gates import (
-    _coverage_key_errors,
     _methodology_gate_errors,
     _redact_sensitive_note,
     _validate_phase_exit,
@@ -471,12 +471,12 @@ def test_seeded_coverage_keys_match_the_close_gate_vocabulary() -> None:
     unrecognised key names the accepted vocabulary instead of surfacing at close."""
     obligations = ["POST /api/v1/auth/login"]
     seeded = {"post /api/v1/auth/login": {"status": "pending", "evidence_or_reason": ""}}
-    assert _coverage_key_errors(seeded, obligations) == []
+    assert not evaluate_dispositions(seeded, obligations=obligations).unrecognized_entries
 
-    errors = _coverage_key_errors(
+    errors = evaluate_dispositions(
         {"post /api/v1/auth/other": {"status": "pending", "evidence_or_reason": ""}},
-        obligations,
-    )
+        obligations=obligations,
+    ).unrecognized_entries
     assert errors and "accepted keys: post /api/v1/auth/login" in errors[0]
 
 
@@ -500,6 +500,51 @@ def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
     )
     with pytest.raises(ValueError, match="not_applicable without evidence file"):
         _validate_phase_exit(engagement, "PT-030", "[x]")
+
+
+def test_coverage_scoring_and_phase_close_share_disposition_policy(tmp_path: Path) -> None:
+    from benchmark.score import _disposition_metric
+
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    scope = engagement / "scope" / "scope.yaml"
+    scope.write_text(
+        scope.read_text(encoding="utf-8")
+        + "\nengagement:\n  audit_mode: true\n  coverage_obligations:\n"
+        "    - POST /api/v1/auth/login\n",
+        encoding="utf-8",
+    )
+    matrix = engagement / "state" / "coverage-matrix.yaml"
+    matrix.write_text(
+        "coverage:\n"
+        "  'post /api/v1/auth/login':\n"
+        "    status: tested\n"
+        "    evidence_or_reason: 'looks fine'\n",
+        encoding="utf-8",
+    )
+
+    metric = _disposition_metric(
+        matrix,
+        "coverage",
+        obligations=["POST /api/v1/auth/login"],
+    )
+    assert metric["complete"] is False
+    with pytest.raises(ValueError, match="tested without evidence"):
+        _validate_phase_exit(engagement, "PT-030", "[x]")
+
+    matrix.write_text(
+        "coverage:\n"
+        "  'post /api/v1/auth/login':\n"
+        "    status: tested\n"
+        "    evidence_or_reason: 'evidence/vuln-research/login.txt'\n",
+        encoding="utf-8",
+    )
+    metric = _disposition_metric(
+        matrix,
+        "coverage",
+        obligations=["POST /api/v1/auth/login"],
+    )
+    assert metric == {"complete": True, "completed": 1, "total": 1, "percent": 100.0}
 
 
 def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> None:
