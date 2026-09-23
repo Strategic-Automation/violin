@@ -44,6 +44,7 @@ from plugins.violin_guard.core.targets import extract_target_candidates
 from plugins.violin_guard.engine import execution
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.handlers import ptt_handlers
+from plugins.violin_guard.handlers.ptt_gates import _validate_phase_exit
 
 
 def _cp(code, out="", err=""):
