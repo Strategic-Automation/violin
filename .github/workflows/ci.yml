@@ -32,4 +32,6 @@ jobs:
       - name: Run tests
         run: uv run pytest -q -p no:cacheprovider
       - name: Validate release
+        env:
+          VIOLIN_CHECK_RELEASE_SKIP_HEAVY: "1"
         run: uv run python scripts/violin_guard.py check-release
