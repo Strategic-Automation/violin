@@ -20,6 +20,7 @@ from plugins.violin_guard.core.phases import Phase
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
 from plugins.violin_guard.handlers.ptt_gates import (
+    _coverage_key_errors,
     _methodology_gate_errors,
     _redact_sensitive_note,
     _validate_phase_exit,
@@ -316,6 +317,7 @@ def test_reporting_exit_allows_exploitation_history_in_audit_mode(
         _validate_phase_exit(engagement, "PT-050", "[x]")
 
 
+
 def test_reporting_exit_accepts_hypothesis_with_superset_runtime_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -431,6 +433,52 @@ def test_reporting_close_accepts_receipt_backed_vuln_research_proof(
         receipt_path="evidence/executions/validation-proof.json",
     )
     _validate_phase_exit(engagement, "PT-050", "[x]")
+
+def test_bootstrap_pre_keys_the_coverage_matrix_from_declared_obligations(
+    tmp_path: Path,
+) -> None:
+    """#123: a bootstrapped engagement starts from its real obligation keys, not placeholders."""
+    engagement = tmp_path / "engagement"
+    scope_path = engagement / "scope" / "scope.yaml"
+    scope_path.parent.mkdir(parents=True, exist_ok=True)
+    scope_path.write_text(
+        yaml.safe_dump(
+            {
+                "targets": {"ip_addresses": ["10.10.10.10"], "in_scope_urls": []},
+                "rules_of_engagement": {"allowed_actions": ["recon"], "forbidden_actions": []},
+                "engagement": {
+                    "coverage_obligations": ["POST /api/v1/auth/login", "GET /api/users"]
+                },
+                "authorisation": {"confirmed": True},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+
+    matrix = yaml.safe_load(
+        (engagement / "state" / "coverage-matrix.yaml").read_text(encoding="utf-8")
+    )
+    coverage = matrix["coverage"]
+    assert set(coverage) == {"post /api/v1/auth/login", "get /api/users"}
+    assert {cell["status"] for cell in coverage.values()} == {"pending"}
+
+
+def test_seeded_coverage_keys_match_the_close_gate_vocabulary() -> None:
+    """#123: the writer (bootstrap) and the reader (close gate) agree on the keys, and an
+    unrecognised key names the accepted vocabulary instead of surfacing at close."""
+    obligations = ["POST /api/v1/auth/login"]
+    seeded = {"post /api/v1/auth/login": {"status": "pending", "evidence_or_reason": ""}}
+    assert _coverage_key_errors(seeded, obligations) == []
+
+    errors = _coverage_key_errors(
+        {"post /api/v1/auth/other": {"status": "pending", "evidence_or_reason": ""}},
+        obligations,
+    )
+    assert errors and "accepted keys: post /api/v1/auth/login" in errors[0]
+
 
 
 def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
