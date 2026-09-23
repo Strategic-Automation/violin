@@ -274,6 +274,48 @@ def generate_findings_yaml(eng_dir: str | Path, *, force: bool = False) -> Path:
     return output
 
 
+def _evidence_lines(record: dict[str, Any]) -> list[str]:
+    """Render the per-finding Evidence section with both proof roles labelled.
+
+    Receipts authenticate that the cited command executed and name the files it
+    wrote; the declared ``evidence_paths`` carry the decisive response bytes the
+    finding rests on. Both sets are rendered, the difference between them is
+    stated when they are not identical (rather than dropping either), and a
+    finding with no declared evidence is visibly marked under the
+    ``evidence_complete`` semantics of #124.
+    """
+    receipts = list(record.get("receipt_paths") or [])
+    evidence = list(record.get("evidence_paths") or [])
+    lines = [
+        "### Evidence",
+        "",
+        "**Authenticating receipts (signed execution receipts):**",
+        "",
+        *[f"- `{path}`" for path in receipts],
+        "",
+        "**Declared evidence (decisive response bytes):**",
+        "",
+    ]
+    if evidence:
+        lines.extend(f"- `{path}`" for path in evidence)
+    else:
+        lines.append(
+            "> Note: no declared evidence_paths — evidence_complete: false "
+            "(proof carries no literal HTTP response bytes)."
+        )
+    lines.append("")
+    if set(evidence) != set(receipts):
+        lines.extend(
+            [
+                "> The declared evidence and the authenticating receipts are distinct "
+                "sets: the receipts prove the command executed, while the declared "
+                "evidence holds the decisive response bytes.",
+                "",
+            ]
+        )
+    return lines
+
+
 def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False) -> Path:
     """Render the human report from canonical structured finding records."""
     engagement = state.resolve_eng_dir(eng_dir)
@@ -315,10 +357,7 @@ def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False)
                 "",
                 record["summary"],
                 "",
-                "### Evidence",
-                "",
-                *[f"- `{path}`" for path in record["receipt_paths"]],
-                "",
+                *_evidence_lines(record),
             ]
         )
     state.ensure_dir(output.parent)
