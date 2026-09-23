@@ -318,8 +318,8 @@ def _evidence_lines(record: dict[str, Any]) -> list[str]:
         lines.extend(
             [
                 "> The declared evidence and the authenticating receipts are distinct "
-                "sets: the receipts prove the command executed, while the declared "
-                "evidence holds the decisive response bytes.",
+                + "sets: the receipts prove the command executed, while the declared "
+                + "evidence holds the decisive response bytes.",
                 "",
             ]
         )
