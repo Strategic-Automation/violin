@@ -16,7 +16,19 @@ from filelock import FileLock
 
 from ...core.commands.bash_ast import parse_bash_segments
 from ...core.commands.targets import extract_target_candidates
-from ...core.engagement.phases import normalize_phase, suppresses_heartbeat
+from ..runtime_state import (
+    ExecutionAccount,
+    HeartbeatState,
+    LastCheck,
+    PendingBatch,
+    PendingCommand,
+    RebindAuditEntry,
+    Reservation,
+    RuntimeState,
+    load_runtime_state,
+    timestamp,
+)
+from .phases import normalize_phase, suppresses_heartbeat
 
 # Constants
 
@@ -36,9 +48,7 @@ PHASE_SYNC_CREDIT = {
 LOCAL_TOOLS = {"echo", "true", "false", "printf", "pwd", "ls", "cat", "date"}
 
 _STATE_DIR = "state"
-_SYNC_FILE = "sync.json"
-_HEARTBEAT_FILE = "heartbeat.json"
-_COUNTS_FILE = "counts.json"
+_RUNTIME_FILE = "runtime.json"
 _SESSION_FILE = "session.json"
 _SEMANTIC_FILE = "semantic-progress.json"
 
@@ -228,11 +238,29 @@ def is_local_bookkeeping_command(command: str) -> bool:
     return not extract_target_candidates(command)
 
 
-# Sync credit / pending sync
+# Versioned executor runtime state
 
 
-def _sync_path(eng_dir: str | Path) -> Path:
-    return _state_dir(eng_dir) / _SYNC_FILE
+def _runtime_path(eng_dir: str | Path) -> Path:
+    return _state_dir(eng_dir) / _RUNTIME_FILE
+
+
+def _read_runtime(eng_dir: str | Path) -> RuntimeState:
+    path = _runtime_path(eng_dir)
+    with lock_file(path):
+        return load_runtime_state(path)
+
+
+def _mutate_runtime(eng_dir: str | Path, mutation) -> Any:
+    path = _runtime_path(eng_dir)
+    with lock_file(path):
+        runtime = load_runtime_state(path)
+        result = mutation(runtime)
+        # Revalidate the full document so nested mutations cannot bypass the
+        # typed persistence boundary. The replacement is one atomic commit.
+        validated = RuntimeState.model_validate(runtime.model_dump(mode="json"), strict=True)
+        atomic_json(path, validated.model_dump(mode="json"))
+        return result
 
 
 def sync_credit_limit(phase: str | None = None) -> int:
@@ -241,104 +269,95 @@ def sync_credit_limit(phase: str | None = None) -> int:
 
 
 def sync_credit_remaining(eng_dir: str | Path, phase: str | None = None) -> int:
-    data = read_json(_sync_path(eng_dir))
-    return max(0, data.get("credit", sync_credit_limit(phase)))
+    credit = _read_runtime(eng_dir).sync.credit
+    return max(0, credit if credit is not None else sync_credit_limit(phase))
 
 
 def spend_sync_credit(eng_dir: str | Path, phase: str) -> int:
-    path = _sync_path(eng_dir)
-
-    def spend(data: dict[str, Any]) -> int:
-        starting_credit = data.get("credit", sync_credit_limit(phase))
-        credit = max(0, starting_credit - 1)
-        data["credit"] = credit
+    def spend(runtime: RuntimeState) -> int:
+        starting_credit = runtime.sync.credit
+        credit = max(
+            0, (starting_credit if starting_credit is not None else sync_credit_limit(phase)) - 1
+        )
+        runtime.sync.credit = credit
         return credit
 
-    return mutate_json(path, spend)
+    return _mutate_runtime(eng_dir, spend)
 
 
 def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
     """Atomically reserve credit for a burst before any command starts."""
     if count < 1:
         raise ValueError("a sync reservation must contain at least one command")
-    path = _sync_path(eng_dir)
 
-    def reserve(data: dict[str, Any]) -> str:
-        credit = max(0, int(data.get("credit", sync_credit_limit(phase))))
+    def reserve(runtime: RuntimeState) -> str:
+        current = runtime.sync.credit
+        credit = max(0, current if current is not None else sync_credit_limit(phase))
         if credit < count:
             raise ValueError(f"insufficient sync credit for burst: need {count}, have {credit}")
         reservation_id = f"burst-{uuid.uuid4().hex}"
-        data["credit"] = credit - count
-        data.setdefault("reservations", {})[reservation_id] = {
-            "phase": phase,
-            "remaining": count,
-            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
+        runtime.sync.credit = credit - count
+        runtime.sync.reservations[reservation_id] = Reservation(
+            phase=phase, remaining=count, created_at=timestamp()
+        )
         return reservation_id
 
-    return mutate_json(path, reserve)
+    return _mutate_runtime(eng_dir, reserve)
 
 
 def consume_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
     """Consume one previously reserved slot without decrementing credit twice."""
-    path = _sync_path(eng_dir)
 
-    def consume(data: dict[str, Any]) -> int:
-        reservation = (data.get("reservations") or {}).get(reservation_id)
-        if not reservation or int(reservation.get("remaining", 0)) < 1:
+    def consume(runtime: RuntimeState) -> int:
+        reservation = runtime.sync.reservations.get(reservation_id)
+        if reservation is None or reservation.remaining < 1:
             raise ValueError("sync reservation is missing or exhausted")
-        reservation["remaining"] = int(reservation["remaining"]) - 1
-        if reservation["remaining"] == 0:
-            data["reservations"].pop(reservation_id, None)
-        return max(0, int(data.get("credit", 0)))
+        if reservation.remaining == 1:
+            del runtime.sync.reservations[reservation_id]
+        else:
+            runtime.sync.reservations[reservation_id] = reservation.model_copy(
+                update={"remaining": reservation.remaining - 1}
+            )
+        return max(0, runtime.sync.credit or 0)
 
-    return mutate_json(path, consume)
+    return _mutate_runtime(eng_dir, consume)
 
 
 def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
     """Return every unconsumed slot in a reservation to the sync window."""
-    path = _sync_path(eng_dir)
 
-    def release(data: dict[str, Any]) -> int:
-        reservation = (data.get("reservations") or {}).pop(reservation_id, None)
-        if reservation:
-            data["credit"] = int(data.get("credit", 0)) + max(
-                0, int(reservation.get("remaining", 0))
-            )
-        return max(0, int(data.get("credit", 0)))
+    def release(runtime: RuntimeState) -> int:
+        reservation = runtime.sync.reservations.pop(reservation_id, None)
+        if reservation is not None:
+            runtime.sync.credit = (runtime.sync.credit or 0) + reservation.remaining
+        return max(0, runtime.sync.credit or 0)
 
-    return mutate_json(path, release)
+    return _mutate_runtime(eng_dir, release)
 
 
 def mark_pending_sync(
-    eng_dir: str | Path,
-    command: str,
-    command_phase: str,
-    ptt_task_id: str,
+    eng_dir: str | Path, command: str, command_phase: str, ptt_task_id: str
 ) -> None:
-    path = _sync_path(eng_dir)
-
-    def mark(data: dict[str, Any]) -> None:
-        old = data.get("pending") or {}
-        commands = list(old.get("commands") or [])
-        if old.get("command") and not commands:
-            commands = [{"command": old["command"], "phase": old.get("phase", command_phase)}]
-        commands.append({"command": command, "phase": command_phase})
-        task_id = old.get("ptt_task_id") or ptt_task_id
+    def mark(runtime: RuntimeState) -> None:
+        old = runtime.sync.pending
+        commands = list(old.commands) if old else []
+        commands.append(PendingCommand(command=command, phase=command_phase))
+        task_id = old.ptt_task_id if old and old.ptt_task_id else ptt_task_id
         if not task_id:
             raise ValueError("pending execution requires a captured active PTT task")
-        data["pending"] = {
-            "batch_id": old.get("batch_id") or str(uuid.uuid4()),
-            "commands": commands,
-            "phase": command_phase,
-            "created_at": old.get("created_at")
-            or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "ptt_task_id": task_id,
-            "ptt_reviewed": False,
-            "credit_limit": old.get("credit_limit") or sync_credit_limit(command_phase),
-        }
+        runtime.sync.pending = PendingBatch(
+            batch_id=old.batch_id if old else str(uuid.uuid4()),
+            commands=commands,
+            phase=command_phase,
+            created_at=old.created_at if old else timestamp(),
+            ptt_task_id=task_id,
+            ptt_reviewed=False,
+            credit_limit=(
+                old.credit_limit if old and old.credit_limit else sync_credit_limit(command_phase)
+            ),
+        )
 
-    mutate_json(path, mark)
+    _mutate_runtime(eng_dir, mark)
 
 
 def commit_execution_start(
@@ -349,120 +368,110 @@ def commit_execution_start(
     execution_id: str,
     sync_reservation: str | None = None,
 ) -> tuple[int, bool, int, bool]:
-    """Account one launched execution exactly once across retryable state writes.
-
-    Sync credit, pending review, and the execution-ID ledger share sync.json's
-    atomic replacement. Command count and last-check metadata share counts.json.
-    The workflow lock makes the two document updates a single serialized
-    workflow operation; the execution ID makes a retry after the first write
-    resume the second without charging or appending the pending command twice.
-    """
+    """Atomically account one launched execution once in the versioned runtime document."""
     if not execution_id:
         raise ValueError("execution accounting requires an execution_id")
     if not ptt_task_id:
         raise ValueError("pending execution requires a captured active PTT task")
 
-    root = resolve_eng_dir(eng_dir)
-    sync_path = _sync_path(root)
-    counts_path = _counts_path(root)
-    with workflow_lock(root):
+    phase_enum = normalize_phase(command_phase)
 
-        def account_sync(data: dict[str, Any]) -> tuple[int, bool]:
-            accounts = data.setdefault("execution_accounts", {})
-            prior = accounts.get(execution_id)
-            if prior:
-                return max(0, int(data.get("credit", 0))), bool(prior.get("reserved"))
-
+    def account(runtime: RuntimeState) -> tuple[int, bool, int, bool]:
+        prior = runtime.sync.execution_accounts.get(execution_id)
+        if prior is None:
             consumed = False
             if sync_reservation:
-                reservation = (data.get("reservations") or {}).get(sync_reservation)
-                if not reservation or int(reservation.get("remaining", 0)) < 1:
+                reservation = runtime.sync.reservations.get(sync_reservation)
+                if reservation is None or reservation.remaining < 1:
                     raise ValueError("sync reservation is missing or exhausted")
-                reservation["remaining"] = int(reservation["remaining"]) - 1
-                if reservation["remaining"] == 0:
-                    data["reservations"].pop(sync_reservation, None)
-                remaining = max(0, int(data.get("credit", 0)))
+                if reservation.remaining == 1:
+                    del runtime.sync.reservations[sync_reservation]
+                else:
+                    runtime.sync.reservations[sync_reservation] = reservation.model_copy(
+                        update={"remaining": reservation.remaining - 1}
+                    )
+                remaining = max(0, runtime.sync.credit or 0)
                 consumed = True
             else:
-                remaining = max(0, int(data.get("credit", sync_credit_limit(command_phase))) - 1)
-                data["credit"] = remaining
+                credit = runtime.sync.credit
+                remaining = max(
+                    0,
+                    (credit if credit is not None else sync_credit_limit(command_phase)) - 1,
+                )
+                runtime.sync.credit = remaining
 
-            pending = data.get("pending") or {}
-            commands = list(pending.get("commands") or [])
-            if pending.get("command") and not commands:
-                commands = [
-                    {"command": pending["command"], "phase": pending.get("phase", command_phase)}
-                ]
+            pending = runtime.sync.pending
+            commands = list(pending.commands) if pending else []
             commands.append(
-                {
-                    "command": command,
-                    "phase": command_phase,
-                    "execution_id": execution_id,
-                }
+                PendingCommand(
+                    command=command,
+                    phase=command_phase,
+                    execution_id=execution_id,
+                )
             )
-            data["pending"] = {
-                "batch_id": pending.get("batch_id") or str(uuid.uuid4()),
-                "commands": commands,
-                "phase": command_phase,
-                "created_at": pending.get("created_at")
-                or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "ptt_task_id": pending.get("ptt_task_id") or ptt_task_id,
-                "ptt_reviewed": False,
-                "credit_limit": pending.get("credit_limit") or sync_credit_limit(command_phase),
-            }
-            accounts[execution_id] = {
-                "command": command,
-                "phase": command_phase,
-                "reserved": consumed,
-                "accounted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            }
-            return remaining, consumed
+            runtime.sync.pending = PendingBatch(
+                batch_id=pending.batch_id if pending else str(uuid.uuid4()),
+                commands=commands,
+                phase=command_phase,
+                created_at=pending.created_at if pending else timestamp(),
+                ptt_task_id=(
+                    pending.ptt_task_id if pending and pending.ptt_task_id else ptt_task_id
+                ),
+                ptt_reviewed=False,
+                credit_limit=(
+                    pending.credit_limit
+                    if pending and pending.credit_limit
+                    else sync_credit_limit(command_phase)
+                ),
+            )
+            runtime.sync.execution_accounts[execution_id] = ExecutionAccount(
+                command=command,
+                phase=command_phase,
+                reserved=consumed,
+                accounted_at=timestamp(),
+            )
+        else:
+            remaining = max(0, runtime.sync.credit or 0)
+            consumed = prior.reserved
 
-        remaining, consumed = mutate_json(sync_path, account_sync)
-
-        def account_count(data: dict[str, Any]) -> tuple[int, bool]:
-            execution_ids = data.setdefault("execution_ids", [])
-            if execution_id in execution_ids:
-                return int(data.get("commands", 0)), False
-            data["commands"] = int(data.get("commands", 0)) + 1
-            execution_ids.append(execution_id)
-            data["last_check"] = {
-                "command": command,
-                "phase": command_phase,
-                "execution_id": execution_id,
-                "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            }
-            return data["commands"], True
-
-        count, counted = mutate_json(counts_path, account_count)
-        phase_enum = normalize_phase(command_phase)
+        counted = execution_id not in runtime.counts.execution_ids
+        if counted:
+            runtime.counts.commands += 1
+            runtime.counts.execution_ids.append(execution_id)
+            runtime.counts.last_check = LastCheck(
+                command=command,
+                phase=command_phase,
+                at=timestamp(),
+                execution_id=execution_id,
+            )
+        count = runtime.counts.commands
         if counted and count % COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
-            set_heartbeat_pending(
-                root,
-                f"Reached {count} executed target commands. Review engagement files for drift.",
+            runtime.heartbeat = HeartbeatState(
+                pending=True,
+                reason=f"Reached {count} executed target commands. Review engagement files for drift.",
+                created_at=timestamp(),
             )
         return remaining, consumed, count, counted
 
+    return _mutate_runtime(eng_dir, account)
+
 
 def clear_pending_sync(eng_dir: str | Path) -> None:
-    path = _sync_path(eng_dir)
+    def clear(runtime: RuntimeState) -> None:
+        runtime.sync.pending = None
+        runtime.sync.credit = None
+        runtime.sync.reservations.clear()
 
-    def clear(data: dict[str, Any]) -> None:
-        data.pop("pending", None)
-        data.pop("credit", None)
-        data.pop("reservations", None)
-
-    mutate_json(path, clear)
+    _mutate_runtime(eng_dir, clear)
 
 
 def has_pending_sync(eng_dir: str | Path) -> bool:
-    data = read_json(_sync_path(eng_dir))
-    return "pending" in data
+    return _read_runtime(eng_dir).sync.pending is not None
 
 
-def get_pending_sync(eng_dir: str | Path) -> dict | None:
-    data = read_json(_sync_path(eng_dir))
-    return data.get("pending")
+def get_pending_sync(eng_dir: str | Path) -> dict[str, Any] | None:
+    pending = _read_runtime(eng_dir).sync.pending
+    return pending.model_dump(mode="json", exclude_none=True) if pending else None
 
 
 def rebind_pending_sync(
@@ -474,41 +483,40 @@ def rebind_pending_sync(
     note: str,
 ) -> dict[str, Any]:
     """Rebind a completed pending batch without certifying its PTT review."""
-    path = _sync_path(eng_dir)
 
-    def rebind(data: dict[str, Any]) -> dict[str, Any]:
-        pending = data.get("pending")
-        if not pending:
+    def rebind(runtime: RuntimeState) -> dict[str, Any]:
+        pending = runtime.sync.pending
+        if pending is None:
             raise ValueError("no pending execution batch")
-        batch_id = str(pending.get("batch_id") or "")
-        if batch_id != expected_batch_id:
+        if pending.batch_id != expected_batch_id:
             raise ValueError(
-                f"stale batch id {expected_batch_id!r}; current pending batch is {batch_id!r}"
+                f"stale batch id {expected_batch_id!r}; current pending batch is {pending.batch_id!r}"
             )
-        captured = str(pending.get("ptt_task_id") or "")
-        if captured != current_task_id:
+        if pending.ptt_task_id != current_task_id:
             raise ValueError(
-                f"current task {current_task_id!r} does not match batch task {captured!r}"
+                f"current task {current_task_id!r} does not match batch task {pending.ptt_task_id!r}"
             )
         if current_task_id == replacement_task_id:
             raise ValueError("replacement task must differ from the current batch task")
+        entry = RebindAuditEntry(
+            timestamp=timestamp(),
+            batch_id=pending.batch_id,
+            old_task_id=current_task_id,
+            new_task_id=replacement_task_id,
+            note=note.strip(),
+        )
+        runtime.sync.rebind_audit.append(entry)
+        runtime.sync.pending = pending.model_copy(
+            update={
+                "ptt_task_id": replacement_task_id,
+                "ptt_reviewed": False,
+                "ptt_note": None,
+                "ptt_reviewed_at": None,
+            }
+        )
+        return entry.model_dump(mode="json")
 
-        entry = {
-            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "batch_id": batch_id,
-            "old_task_id": current_task_id,
-            "new_task_id": replacement_task_id,
-            "note": note.strip(),
-        }
-        data.setdefault("rebind_audit", []).append(entry)
-        pending["ptt_task_id"] = replacement_task_id
-        pending["ptt_reviewed"] = False
-        pending.pop("ptt_note", None)
-        pending.pop("ptt_reviewed_at", None)
-        data["pending"] = pending
-        return entry
-
-    return mutate_json(path, rebind)
+    return _mutate_runtime(eng_dir, rebind)
 
 
 def _recorded_findings(eng_dir: Path) -> int:
@@ -643,99 +651,63 @@ def semantic_lock(eng_dir: str | Path) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# Heartbeat
+# Heartbeat and counters share one versioned runtime document
 # ---------------------------------------------------------------------------
-
-
-def _heartbeat_path(eng_dir: str | Path) -> Path:
-    return _state_dir(eng_dir) / _HEARTBEAT_FILE
 
 
 def set_heartbeat_pending(eng_dir: str | Path, reason: str) -> None:
-    path = _heartbeat_path(eng_dir)
+    def mark(runtime: RuntimeState) -> None:
+        runtime.heartbeat = HeartbeatState(pending=True, reason=reason, created_at=timestamp())
 
-    def mark(data: dict[str, Any]) -> None:
-        data["pending"] = True
-        data["reason"] = reason
-        data["created_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-    mutate_json(path, mark)
+    _mutate_runtime(eng_dir, mark)
 
 
 def clear_heartbeat_pending(eng_dir: str | Path) -> None:
-    path = _heartbeat_path(eng_dir)
+    def clear(runtime: RuntimeState) -> None:
+        runtime.heartbeat.pending = False
+        runtime.heartbeat.reason = None
 
-    def clear(data: dict[str, Any]) -> None:
-        data["pending"] = False
-        data.pop("reason", None)
-
-    mutate_json(path, clear)
+    _mutate_runtime(eng_dir, clear)
 
 
 def has_heartbeat_pending(eng_dir: str | Path) -> bool:
-    data = read_json(_heartbeat_path(eng_dir))
-    return data.get("pending", False)
+    return _read_runtime(eng_dir).heartbeat.pending
 
 
 def get_heartbeat_reason(eng_dir: str | Path) -> str | None:
-    data = read_json(_heartbeat_path(eng_dir))
-    return data.get("reason")
-
-
-# ---------------------------------------------------------------------------
-# Command / message counters
-# ---------------------------------------------------------------------------
-
-
-def _counts_path(eng_dir: str | Path) -> Path:
-    return _state_dir(eng_dir) / _COUNTS_FILE
+    return _read_runtime(eng_dir).heartbeat.reason
 
 
 def read_counts(eng_dir: str | Path) -> dict[str, int]:
-    data = read_json(_counts_path(eng_dir))
-    return {
-        "commands": data.get("commands", 0),
-        "messages": data.get("messages", 0),
-    }
+    counts = _read_runtime(eng_dir).counts
+    return {"commands": counts.commands, "messages": counts.messages}
 
 
 def tick_command(eng_dir: str | Path) -> int:
-    path = _counts_path(eng_dir)
+    def tick(runtime: RuntimeState) -> int:
+        runtime.counts.commands += 1
+        return runtime.counts.commands
 
-    def tick(data: dict[str, Any]) -> int:
-        data["commands"] = data.get("commands", 0) + 1
-        return data["commands"]
-
-    return mutate_json(path, tick)
+    return _mutate_runtime(eng_dir, tick)
 
 
 def tick_message(eng_dir: str | Path) -> int:
-    path = _counts_path(eng_dir)
+    def tick(runtime: RuntimeState) -> int:
+        runtime.counts.messages += 1
+        return runtime.counts.messages
 
-    def tick(data: dict[str, Any]) -> int:
-        data["messages"] = data.get("messages", 0) + 1
-        return data["messages"]
-
-    # Windows can briefly deny the replace/read sequence immediately after a
-    # prior hook writes this same file.  Lifecycle hooks intentionally do not
-    # fail the model turn, so retry here rather than silently dropping a tick.
     for attempt in range(3):
         try:
-            return mutate_json(path, tick)
+            return _mutate_runtime(eng_dir, tick)
         except OSError:
             if attempt == 2:
                 raise
             time.sleep(0.02 * (attempt + 1))
+    raise RuntimeError("unreachable")
 
 
 def record_ok_check(eng_dir: str | Path, command: str, phase: str) -> None:
-    path = _counts_path(eng_dir)
+    def record(runtime: RuntimeState) -> None:
+        runtime.counts.last_check = LastCheck(command=command, phase=phase, at=timestamp())
 
-    def record(data: dict[str, Any]) -> None:
-        data["last_check"] = {
-            "command": command,
-            "phase": phase,
-            "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
-
-    mutate_json(path, record)
+    _mutate_runtime(eng_dir, record)

@@ -296,10 +296,11 @@ def test_invalid_review_batch_leaves_sync_lock_active(
     elif mutation == "task":
         args["id"] = "PT-011"
     elif mutation == "phase":
-        sync_path = eng / "state" / "sync.json"
-        sync_data = state.read_json(sync_path)
-        sync_data["pending"]["commands"][0]["phase"] = "EXPLOITATION"
-        state.atomic_json(sync_path, sync_data)
+
+        def change_pending_phase(runtime):
+            runtime.sync.pending.commands[0].phase = "EXPLOITATION"
+
+        state._mutate_runtime(eng, change_pending_phase)
 
     result = json.loads(service.handle_review_batch(args))
 

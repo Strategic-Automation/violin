@@ -250,11 +250,10 @@ def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
     pending_command = pending["commands"][0]["command"]
     assert "duration_ms=" not in pending_command
     assert execution_history.history_contains(eng, pending_command)
-    accounting = state.read_json(eng / "state" / "sync.json")["execution_accounts"][
-        completed["audit_id"]
-    ]
+    runtime = state.read_json(eng / "state" / "runtime.json")
+    accounting = runtime["sync"]["execution_accounts"][completed["audit_id"]]
     assert accounting["command"] == pending_command
-    assert completed["audit_id"] in state.read_json(eng / "state" / "counts.json")["execution_ids"]
+    assert completed["audit_id"] in runtime["counts"]["execution_ids"]
     counts_before_retry = state.read_counts(eng)
     remaining_before_retry = state.sync_credit_remaining(eng, "RECON")
     state.commit_execution_start(
