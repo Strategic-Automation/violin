@@ -124,7 +124,35 @@ def test_execute_code_missing_fields_surfaces_header_schema(tmp_path) -> None:
     )
     assert blocked["action"] == "block"
     assert "Header format" in blocked["message"]
-    assert "session_id via violin_status" in blocked["message"]
+    # An unusable header must restate the documented header with an example line.
+    assert '# violin: {"eng_dir":"/engagements/' in blocked["message"]
+
+
+def test_execute_code_accepts_documented_two_field_header(tmp_path) -> None:
+    eng = _engagement(tmp_path)
+    code = (
+        '# violin: {"eng_dir":"'
+        + str(eng).replace("\\", "\\\\")
+        + '","phase":"RECON"}\nprint("local audit work")\n'
+    )
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": code},
+            session_id="test",
+            tool_call_id="documented-two-field",
+        )
+        is None
+    )
+    intent = json.loads(
+        next((eng / "evidence" / "executions").glob("*-execute-code.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    # target and session_id are filled from engagement state.
+    assert intent["target"] == "10.10.10.10"
+    assert intent["session_id"] == "test"
+    assert intent["execution_class"] == "local_analysis"
 
 
 def test_execute_code_is_validated_and_recorded(tmp_path) -> None:

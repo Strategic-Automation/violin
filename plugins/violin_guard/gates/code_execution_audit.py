@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from ..core import history, state
 from ..core.ptt import find_active_task, parse_ptt
 from ..core.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
@@ -25,12 +27,22 @@ from ..core.targets import (
     KNOWN_FILE_EXTENSIONS,
     extract_target_candidates,
     normalize_target,
+    resolve_target,
 )
 from ..engine.execution import PREVIEW_BYTES, _commit_guard_state
 from . import command
 
 _HEADER = re.compile(r"^\s*#\s*violin:\s*(\{.*\})\s*$")
+_DOCUMENTED_FIELDS = frozenset({"eng_dir", "phase"})
 _REQUIRED_FIELDS = frozenset({"eng_dir", "phase", "target", "session_id"})
+_HEADER_FORM = '# violin: {"eng_dir":"<path>","phase":"<phase>"}'
+_HEADER_ERROR = (
+    "execute_code requires the first-line metadata header 'eng_dir' and 'phase' "
+    "(target and session_id are filled from engagement state). "
+    "Header format (line 1 of code): "
+    + _HEADER_FORM
+    + ' Example: # violin: {"eng_dir":"/engagements/<client>","phase":"RECON"}'
+)
 
 # Match the executor's 32 KiB preview budget so result manifests remain useful
 # without becoming an unbounded second copy of tool output.
@@ -133,6 +145,17 @@ _DYNAMIC_EXECUTION_CALLS = frozenset(
 )
 
 
+def _resolve_target(eng_dir: str) -> str:
+    """Return the engagement's single declared in-scope target from scope.yaml."""
+    scope_path = state.resolve_eng_dir(eng_dir) / "scope" / "scope.yaml"
+    with scope_path.open(encoding="utf-8") as handle:
+        scope_data = yaml.safe_load(handle) or {}
+    target = resolve_target(scope_data, None, None)
+    if not target:
+        raise ValueError("no single declared target in scope")
+    return target
+
+
 def parse_metadata(source: object) -> tuple[dict[str, str] | None, str | None]:
     """Parse the required first-line Violin JSON header from Python source."""
     if not isinstance(source, str) or not source.strip():
@@ -140,21 +163,25 @@ def parse_metadata(source: object) -> tuple[dict[str, str] | None, str | None]:
     first_line = source.splitlines()[0] if source.splitlines() else ""
     match = _HEADER.fullmatch(first_line)
     if not match:
-        return None, (
-            "execute_code requires first-line metadata: "
-            '# violin: {"eng_dir":"...","phase":"...","target":"...","session_id":"..."}'
-        )
+        return None, "execute_code requires first-line metadata: " + _HEADER_FORM
     try:
         raw = json.loads(match.group(1))
     except json.JSONDecodeError as exc:
         return None, f"execute_code metadata must be valid JSON: {exc.msg}"
-    if not isinstance(raw, dict) or set(raw) != _REQUIRED_FIELDS:
-        return (
-            None,
-            "execute_code metadata must contain exactly eng_dir, phase, target, and session_id. "
-            'Header format (line 1 of code): # violin: {"eng_dir":"<path>","phase":"<phase>","target":"<target>","session_id":"<session_id>"} '
-            "(obtain session_id via violin_status)",
-        )
+    if not isinstance(raw, dict):
+        return None, _HEADER_ERROR
+    if set(raw) == _DOCUMENTED_FIELDS:
+        try:
+            target = _resolve_target(raw["eng_dir"])
+            session_id = state.resolve_session_id(raw["eng_dir"])
+        except Exception:
+            return None, _HEADER_ERROR
+        if not target or not session_id:
+            return None, _HEADER_ERROR
+        raw["target"] = target
+        raw["session_id"] = session_id
+    elif set(raw) != _REQUIRED_FIELDS:
+        return None, _HEADER_ERROR
     if not all(isinstance(raw[name], str) and raw[name].strip() for name in _REQUIRED_FIELDS):
         return None, "execute_code metadata values must be non-empty strings"
     return {name: raw[name].strip() for name in _REQUIRED_FIELDS}, None
