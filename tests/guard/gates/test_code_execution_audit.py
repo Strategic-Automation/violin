@@ -99,6 +99,43 @@ def _complete_execute_code_result(
     return manifest, intent, completed, source
 
 
+def _no_active_task_engagement(tmp_path: Path) -> Path:
+    eng = _engagement(tmp_path)
+    ptt = eng / "state" / "ptt.md"
+    ptt.write_text(
+        ptt.read_text(encoding="utf-8").replace("| PT-010 | [~] |", "| PT-010 | [ ] |"),
+        encoding="utf-8",
+    )
+    return eng
+
+
+def test_local_execute_code_runs_with_no_active_ptt_task(tmp_path) -> None:
+    eng = _no_active_task_engagement(tmp_path)
+    source = _code(eng) + "print('local audit work')\n"
+    assert (
+        _pre_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            session_id="test",
+            tool_call_id="no-active-task-local",
+        )
+        is None
+    )
+
+
+def test_target_touching_execute_code_still_requires_active_ptt_task(tmp_path) -> None:
+    eng = _no_active_task_engagement(tmp_path)
+    source = _code(eng) + "import requests\nrequests.get('https://10.10.10.10')\n"
+    blocked = _pre_tool_call_hook(
+        tool_name="execute_code",
+        args={"code": source},
+        session_id="test",
+        tool_call_id="no-active-task-target",
+    )
+    assert blocked["action"] == "block"
+    assert "violin_record_ptt" in blocked["message"]
+
+
 def test_execute_code_requires_valid_metadata(tmp_path) -> None:
     blocked = _pre_tool_call_hook(
         tool_name="execute_code",

@@ -130,7 +130,9 @@ def validate_ptt(tasks: list[PttTask]) -> PttValidationResult:
             result.add_error(f"{task.id}: empty title")
 
     if active_count == 0:
-        result.add_error("no active task ([~]) — exactly one required")
+        result.add_error(
+            "no active task ([~]) — exactly one required; use violin_record_ptt to open or reuse one"
+        )
     elif active_count > 1:
         result.add_error(f"multiple active tasks ({active_count}) — exactly one required")
 
