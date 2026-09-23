@@ -413,6 +413,7 @@ def execute(
     # so saved evidence always carries a literal HTTP/1.x status line. Lives in
     # core.http_proof; applied before the receipt is sealed and before the
     # process runs so both the manifest and the executed argv record the fix.
+    requested_command = command
     command = normalize_http_proof_flags(command)
     engagement = _resolve_engagement(eng_dir)
     declared_outputs = _validate_evidence_outputs(engagement, evidence_outputs)
@@ -452,6 +453,11 @@ def execute(
         },
         "declared_evidence_outputs": declared_outputs,
     }
+    if command != requested_command:
+        # The probe was rewritten to capture its status line. Keep the command the
+        # caller asked for so the receipt explains the flag that was injected.
+        record["requested_command"] = requested_command
+        record["command_note"] = "status capture injected for HTTP proof"
     state.atomic_json(manifest_path, record)
 
     timed_out = False
