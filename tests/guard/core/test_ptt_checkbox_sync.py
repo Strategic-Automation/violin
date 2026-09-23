@@ -56,3 +56,45 @@ def test_update_task_auto_syncs_top_checkboxes(tmp_path: Path):
     synced = ptt_file.read_text(encoding="utf-8")
     assert "- [x] PT-101 Reconnaissance" in synced
     assert "- [ ] PT-102 Reporting" in synced
+
+
+def test_parse_ignores_fenced_and_non_task_tables(tmp_path: Path) -> None:
+    path = tmp_path / "ptt.md"
+    path.write_text(
+        "# PTT\n\n"
+        "## Notes\n\n"
+        "| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        "| PT-900 | [ ] | outside a phase | example |\n\n"
+        "## Phase: RECON\n\n"
+        "```markdown\n"
+        "| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        "| PT-901 | [ ] | fenced example | ignore |\n````\n\n"
+        "| Column | Description |\n|---|---|\n| PT-902 | prose table |\n\n"
+        "| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        "| PT-001 | [ ] | real row | evidence |\n",
+        encoding="utf-8",
+    )
+
+    assert [(task.id, task.phase) for task in ptt.parse_ptt(path)] == [("PT-001", "RECON")]
+
+
+def test_update_preserves_crlf_and_unowned_table_source(tmp_path: Path) -> None:
+    path = tmp_path / "ptt.md"
+    original = (
+        "# PTT\r\n\r\n"
+        "## Phase: RECON\r\n\r\n"
+        "| ID | Status | Task | Notes |\r\n"
+        "|---|---|---|---|\r\n"
+        "| PT-001 | [ ] | Real task | evidence |\r\n\r\n"
+        "## Notes\r\n\r\n"
+        "| ID | Status | Task | Notes |\r\n|---|---|---|---|\r\n"
+        "| PT-999 | [ ] | Example only | preserve |\r\n"
+    )
+    path.write_bytes(original.encode("utf-8"))
+
+    ptt.update_task(path, "PT-001", "[x]", "finished")
+
+    updated = path.read_bytes().decode("utf-8")
+    assert "| PT-001 | [x] | Real task | finished |\r\n" in updated
+    assert "| PT-999 | [ ] | Example only | preserve |\r\n" in updated
+    assert "\n" not in updated.replace("\r\n", "")

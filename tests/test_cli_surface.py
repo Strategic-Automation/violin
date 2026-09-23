@@ -23,7 +23,7 @@ SMOKE_SCRIPT = ROOT / "scripts" / "smoke-test.sh"
 
 def test_cli_dependency_modules_match_project_dependencies() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    import_aliases = {"pyyaml": "yaml"}
+    import_aliases = {"pyyaml": "yaml", "markdown-it-py": "markdown_it"}
     expected_modules = set()
     for dependency in project["dependencies"]:
         package_name = canonicalize_name(Requirement(dependency).name)

@@ -41,14 +41,18 @@ def ctf_eng(tmp_path):
 
     (scope_dir / "scope.yaml").write_text(_SCOPE_YAML, encoding="utf-8")
     (state_dir / "history.md").write_text("# History\n", encoding="utf-8")
-    (state_dir / "hypotheses.md").write_text("# Hypotheses\n", encoding="utf-8")
+    (eng / "hypotheses.md").write_text("# Hypotheses\n\n## Active Theories\n\n", encoding="utf-8")
 
     ptt_content = """# Pentesting Task Tree
 
 ## Phase: RECON
+| ID | Status | Task | Notes |
+|---|---|---|---|
 | PT-001 | [~] | Recon target service | initial note |
 
 ## Phase: EXPLOITATION
+| ID | Status | Task | Notes |
+|---|---|---|---|
 | PT-002 | [ ] | Exploit Cobbler CVE-2024-47533 | initial note |
 """
     (state_dir / "ptt.md").write_text(ptt_content, encoding="utf-8")

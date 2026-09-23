@@ -27,15 +27,16 @@ from plugins.violin_guard.core import hypotheses
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def _double_hash_board(path: Path) -> Path:
+def _canonical_board(path: Path) -> Path:
     path.write_text(
         "# Hypothesis Board\n\n"
         "## Engagement\n"
         "Target: https://duck-store.escape.tech\n\n"
-        "## H-001: Unauthenticated user enumeration + PII disclosure\n"
+        "## Active Theories\n\n"
+        "### H-001: Unauthenticated user enumeration + PII disclosure\n"
         "**Target:** GET /api/v1/users/\n"
         "**Status:** Candidate\n\n"
-        "## H-002: Privilege escalation via mass-assignment\n"
+        "### H-002: Privilege escalation via mass-assignment\n"
         "**Target:** PUT /api/v1/users/me/profile\n"
         "**Status:** Candidate\n",
         encoding="utf-8",
@@ -43,8 +44,8 @@ def _double_hash_board(path: Path) -> Path:
     return path
 
 
-def test_rewrite_does_not_duplicate_double_hash_board(tmp_path: Path) -> None:
-    board = _double_hash_board(tmp_path / "hypotheses.md")
+def test_rewrite_does_not_duplicate_canonical_records(tmp_path: Path) -> None:
+    board = _canonical_board(tmp_path / "hypotheses.md")
     records = hypotheses.parse_hypotheses(board)
     assert [record.id for record in records] == ["001", "002"]
 
@@ -57,9 +58,8 @@ def test_rewrite_does_not_duplicate_double_hash_board(tmp_path: Path) -> None:
     assert text.count("H-002:") == 1
 
 
-def test_update_phase_succeeds_on_double_hash_board(tmp_path: Path) -> None:
-    """The deadlock path: a phase update is what the VULN_RESEARCH gate demands."""
-    board = _double_hash_board(tmp_path / "hypotheses.md")
+def test_update_phase_succeeds_on_canonical_board(tmp_path: Path) -> None:
+    board = _canonical_board(tmp_path / "hypotheses.md")
 
     updated = hypotheses.update_hypothesis(board, id="H-002", phase="VULN_RESEARCH")
 
@@ -98,7 +98,7 @@ def test_canonical_template_keeps_its_authoring_comment(tmp_path: Path) -> None:
     assert len(hypotheses.parse_hypotheses(board)) == 1
 
 
-def test_rewrite_preserves_section_between_records(tmp_path: Path) -> None:
+def test_rewrite_does_not_read_records_outside_active_section(tmp_path: Path) -> None:
     board = tmp_path / "hypotheses.md"
     board.write_text(
         "# Hypothesis Board\n\n"
@@ -120,7 +120,8 @@ def test_rewrite_preserves_section_between_records(tmp_path: Path) -> None:
     assert "OBS-001" in text
     assert text.count("H-001:") == 1
     assert text.count("H-002:") == 1
-    assert [record.id for record in hypotheses.parse_hypotheses(board)] == ["001", "002"]
+    assert [record.id for record in hypotheses.parse_hypotheses(board)] == ["001"]
+    assert "### H-002: Open redirect" in text
 
 
 def test_rewrite_is_idempotent(tmp_path: Path) -> None:
@@ -156,3 +157,23 @@ def test_new_record_lands_in_host_section_before_following_sections(tmp_path: Pa
     assert text.index("### H-001: Open redirect") < text.index("## Observations (ungrouped)")
     assert "format example" in text
     assert "## Active Theories" in text
+
+
+def test_update_preserves_crlf_and_non_record_sections(tmp_path: Path) -> None:
+    board = tmp_path / "hypotheses.md"
+    original = (
+        "# Board\r\n\r\n"
+        "## Active Theories\r\n\r\n"
+        "### H-001: Candidate\r\n"
+        "- **Status:** Candidate\r\n\r\n"
+        "## Observations\r\n\r\n"
+        "- Keep this authored observation.\r\n"
+    )
+    board.write_bytes(original.encode("utf-8"))
+
+    hypotheses.update_hypothesis(board, id="001", title="Updated candidate", status="Likely")
+
+    updated = board.read_bytes().decode("utf-8")
+    assert "### H-001: Updated candidate\r\n- **Status:** Likely\r\n" in updated
+    assert "## Observations\r\n\r\n- Keep this authored observation.\r\n" in updated
+    assert "\n" not in updated.replace("\r\n", "")

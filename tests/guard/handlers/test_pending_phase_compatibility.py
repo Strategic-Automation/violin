@@ -36,7 +36,11 @@ def test_pending_phase_decisions(tmp_path: Path, caller, task_phase, pending, er
     state_dir.mkdir()
     path = state_dir / "ptt.md"
     path.write_text(
-        f"## Phase: {task_phase}\n| PT-001 | [~] | Active | |\n| PT-002 | [x] | Previous | |\n",
+        f"## Phase: {task_phase}\n\n"
+        "| ID | Status | Task | Notes |\n"
+        "|---|---|---|---|\n"
+        "| PT-001 | [~] | Active | |\n"
+        "| PT-002 | [x] | Previous | |\n",
         encoding="utf-8",
     )
     before = path.read_bytes()
@@ -61,7 +65,10 @@ def test_already_recorded_review_preserves_idempotent_phase_bypass(tmp_path):
     state_dir.mkdir()
     path = state_dir / "ptt.md"
     path.write_text(
-        "## Phase: RECON\n| PT-001 | [x] | Done | [reviewed-batch:batch] |\n",
+        "## Phase: RECON\n\n"
+        "| ID | Status | Task | Notes |\n"
+        "|---|---|---|---|\n"
+        "| PT-001 | [x] | Done | [reviewed-batch:batch] |\n",
         encoding="utf-8",
     )
     _, _, already_recorded = _validate_review_ptt_state(
