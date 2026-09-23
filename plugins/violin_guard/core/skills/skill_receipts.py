@@ -31,11 +31,15 @@ __all__ = [
     "get_delivery",
     "record_binding_turn",
     "record_delivery_turn",
+    "skill_content_digest",
     "prepare_delivery",
+    "SkillViewReservation",
+    "reserve_skill_view",
+    "finish_skill_view",
 ]
 
 _FILE_NAME = "skills.json"
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 3
 _MAX_DELIVERIES = 200
 _PREPARING_TTL_SECONDS = 300
 
@@ -46,6 +50,20 @@ def _now() -> str:
 
 def _digest(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def skill_content_digest(content: str) -> str:
+    """Return the SHA-256 digest of the exact UTF-8 skill text returned by Hermes."""
+
+    return _digest(content)
+
+
+def _is_sha256_digest(value: str) -> bool:
+    return (
+        len(value) == 71
+        and value.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in value[7:])
+    )
 
 
 def _preparing_expired(entry: dict[str, Any]) -> bool:
@@ -83,6 +101,7 @@ def _empty(session_id: str = "", generation: int = 0) -> dict[str, Any]:
         "context": {"session_id": session_id, "generation": generation},
         "deliveries": {},
         "bindings": {},
+        "view_reservations": {},
     }
 
 
@@ -100,6 +119,7 @@ def _load(path: Path) -> tuple[dict[str, Any], bool]:
     if not isinstance(raw.get("context"), dict) or not isinstance(raw.get("deliveries"), dict):
         return _empty(), True
     raw.setdefault("bindings", {})
+    raw.setdefault("view_reservations", {})
     return raw, False
 
 
@@ -127,8 +147,8 @@ def _context(data: dict[str, Any], session_id: str) -> tuple[str, int]:
     return str(context["session_id"]), int(context.get("generation") or 0)
 
 
-def _delivery_key(session_id: str, generation: int, skill: str, bundle_digest: str) -> str:
-    return _digest(f"{session_id}\0{generation}\0{skill}\0{bundle_digest}")
+def _delivery_key(session_id: str, generation: int, skill: str, content_digest: str) -> str:
+    return _digest(f"{session_id}\0{generation}\0{skill}\0{content_digest}")
 
 
 def _prune(data: dict[str, Any]) -> None:
@@ -149,11 +169,24 @@ class DeliveryReservation:
     id: str
     status: str
     skill: str
-    bundle_digest: str
+    content_digest: str
     session_id: str
     context_generation: int
     owner: bool
     owner_token: str = ""
+
+
+@dataclass(frozen=True)
+class SkillViewReservation:
+    id: str
+    session_id: str
+    context_generation: int
+    skill: str
+    owner: bool
+    status: str
+    owner_token: str = ""
+    delivery_id: str = ""
+    content_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -196,20 +229,20 @@ def prepare_delivery(
     *,
     session_id: str,
     skill: str,
-    bundle_digest: str,
+    content_digest: str,
     phase: str,
     vulnerability_class: str | None = None,
     candidate_source: str | None = None,
 ) -> DeliveryReservation:
     """Reserve exactly one delivery for a semantic receipt key.
 
-    Only the caller receiving ``owner=True`` may invoke Hermes and then call
-    :func:`complete_delivery`; concurrent callers see the same ``preparing``
-    receipt and never receive duplicate skill content.
+    Only the caller receiving ``owner=True`` may record the content returned by
+    Hermes; concurrent callers see the same ``preparing`` receipt and do not
+    deliver the content a second time.
     """
 
-    if not session_id.strip() or not bundle_digest.startswith("sha256:"):
-        raise ValueError("session_id and a sha256 bundle_digest are required")
+    if not session_id.strip() or not _is_sha256_digest(content_digest):
+        raise ValueError("session_id and a complete sha256 content_digest are required")
 
     policy = validate_skill_selection(skill, phase, vulnerability_class, candidate_source)
     if policy.mismatch_reasons:
@@ -217,14 +250,14 @@ def prepare_delivery(
 
     def reserve(data: dict[str, Any]) -> DeliveryReservation:
         current_session, generation = _context(data, session_id.strip())
-        identifier = _delivery_key(current_session, generation, skill, bundle_digest)
+        identifier = _delivery_key(current_session, generation, skill, content_digest)
         existing = data["deliveries"].get(identifier)
         if existing and existing.get("status") == "delivered":
             return DeliveryReservation(
                 identifier,
                 existing["status"],
                 skill,
-                bundle_digest,
+                content_digest,
                 current_session,
                 generation,
                 False,
@@ -234,7 +267,7 @@ def prepare_delivery(
                 identifier,
                 existing["status"],
                 skill,
-                bundle_digest,
+                content_digest,
                 current_session,
                 generation,
                 False,
@@ -244,7 +277,7 @@ def prepare_delivery(
         data["deliveries"][identifier] = {
             "id": identifier,
             "skill": skill,
-            "bundle_digest": bundle_digest,
+            "content_digest": content_digest,
             "session_id": current_session,
             "context_generation": generation,
             "status": "preparing",
@@ -259,7 +292,7 @@ def prepare_delivery(
             identifier,
             "preparing",
             skill,
-            bundle_digest,
+            content_digest,
             current_session,
             generation,
             True,
@@ -267,6 +300,68 @@ def prepare_delivery(
         )
 
     return _mutate(eng_dir, reserve)
+
+
+def _skill_view_key(session_id: str, generation: int, skill: str) -> str:
+    return _digest(f"{session_id}\0{generation}\0{skill}")
+
+
+def reserve_skill_view(
+    eng_dir: str | Path,
+    *,
+    session_id: str,
+    skill: str,
+    phase: str,
+    vulnerability_class: str | None = None,
+    candidate_source: str | None = None,
+) -> SkillViewReservation:
+    """Reserve one Hermes read; reuse only a content-addressed receipt for this context."""
+    if not session_id.strip():
+        raise ValueError("session_id is required")
+    policy = validate_skill_selection(skill, phase, vulnerability_class, candidate_source)
+    if policy.mismatch_reasons:
+        raise ValueError("; ".join(policy.mismatch_reasons))
+
+    def reserve(data: dict[str, Any]) -> SkillViewReservation:
+        current_session, generation = _context(data, session_id.strip())
+        key = _skill_view_key(current_session, generation, skill)
+        existing = data["view_reservations"].get(key)
+        if existing and not _preparing_expired(existing):
+            return SkillViewReservation(key, current_session, generation, skill, False, "preparing")
+        owner_token = uuid.uuid4().hex
+        now = _now()
+        data["view_reservations"][key] = {
+            "status": "preparing",
+            "session_id": current_session,
+            "context_generation": generation,
+            "skill": skill,
+            "created_at": now,
+            "updated_at": now,
+            "expires_at": _preparing_expires_at(),
+            "owner_token": owner_token,
+        }
+        return SkillViewReservation(
+            key, current_session, generation, skill, True, "preparing", owner_token
+        )
+
+    return _mutate(eng_dir, reserve)
+
+
+def finish_skill_view(
+    eng_dir: str | Path,
+    reservation: SkillViewReservation,
+) -> None:
+    """Release the exclusive slot after this request's Hermes view attempt."""
+
+    def finish(data: dict[str, Any]) -> None:
+        if not reservation.owner or not reservation.owner_token:
+            raise ValueError("only the skill view reservation owner may finish it")
+        entry = data["view_reservations"].get(reservation.id)
+        if not entry or entry.get("owner_token") != reservation.owner_token:
+            raise ValueError("skill view reservation owner is stale")
+        data["view_reservations"].pop(reservation.id, None)
+
+    _mutate(eng_dir, finish)
 
 
 def complete_delivery(
@@ -286,17 +381,22 @@ def complete_delivery(
             raise ValueError("only the reservation owner may complete delivery")
         if entry.get("owner_token") != reservation.owner_token:
             raise ValueError("delivery reservation owner is stale; prepare a new delivery")
+        content_digest = skill_content_digest(result.content) if result.ready else None
+        if entry.get("content_digest") != reservation.content_digest:
+            raise ValueError("delivery content digest does not match its reservation")
+        if result.ready and content_digest != reservation.content_digest:
+            raise ValueError("returned skill content does not match its reserved content digest")
         entry["status"] = "delivered" if result.ready else "failed"
         entry["updated_at"] = _now()
         entry["delivered_turn_id"] = delivered_turn_id if result.ready else None
-        entry["content_digest"] = _digest(result.content) if result.ready else None
+        entry["content_digest"] = content_digest
         entry["error"] = result.error if not result.ready else None
         data["deliveries"][reservation.id] = entry
         return DeliveryReservation(
             reservation.id,
             entry["status"],
             reservation.skill,
-            reservation.bundle_digest,
+            content_digest,
             reservation.session_id,
             reservation.context_generation,
             False,
@@ -339,7 +439,7 @@ def bind_task(
             "task_id": task_id,
             "delivery_id": delivery_id,
             "skill": delivery["skill"],
-            "bundle_digest": delivery["bundle_digest"],
+            "content_digest": delivery["content_digest"],
             "session_id": delivery["session_id"],
             "context_generation": delivery["context_generation"],
             "hypothesis_id": hypothesis_id or "",
@@ -376,8 +476,8 @@ def binding_readiness(
     delivery = (data.get("deliveries") or {}).get(binding.get("delivery_id"))
     if not delivery or delivery.get("status") != "delivered":
         return None, "the bound skill delivery is not ready"
-    if delivery.get("bundle_digest") != binding.get("bundle_digest"):
-        return None, "the bound skill digest no longer matches its delivery"
+    if delivery.get("content_digest") != binding.get("content_digest"):
+        return None, "the bound skill content digest no longer matches its delivery"
     return {
         **binding,
         "delivered_turn_id": delivery.get("delivered_turn_id"),

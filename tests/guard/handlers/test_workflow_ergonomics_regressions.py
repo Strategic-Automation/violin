@@ -12,7 +12,12 @@ from plugins.violin_guard.core.commands.targets import check_scope_targets
 from plugins.violin_guard.core.engagement import bootstrap, hypotheses, ptt, state
 from plugins.violin_guard.core.engagement.phases import Phase
 from plugins.violin_guard.core.evidence.history import append_history, check_history_staleness
-from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult
+from plugins.violin_guard.core.skills.skill_receipts import (
+    SkillViewResult,
+    get_binding,
+    get_delivery,
+    skill_content_digest,
+)
 from plugins.violin_guard.engine import execution
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import (
@@ -175,6 +180,13 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(
         )
     )
     assert created["task_created"] is True
+    binding = get_binding(eng, "PT-900")
+    assert binding is not None
+    digest = skill_content_digest("skill")
+    assert binding["content_digest"] == digest
+    delivery = get_delivery(eng, binding["delivery_id"])
+    assert delivery["content_digest"] == digest
+    assert f"[skill:pentest@{digest}]" in ptt_path.read_text(encoding="utf-8")
     # A fresh session must prepare again; do not rely on cross-task reuse here.
     state.record_session_id(eng, "close-session")
     close_args = {
