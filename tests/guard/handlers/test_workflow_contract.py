@@ -330,6 +330,25 @@ def test_vuln_research_exit_requires_evidence_for_not_applicable_coverage(
         _validate_phase_exit(engagement, "PT-030", "[x]")
 
 
+def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> None:
+    """#124: the warning must say the finding still counts as proof and name the remedy."""
+    engagement = tmp_path / "engagement"
+    proof = engagement / "evidence" / "executions" / "probe.txt"
+    proof.parent.mkdir(parents=True)
+    proof.write_text(
+        "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{\"ok\": true}\n",
+        encoding="utf-8",
+    )
+    relative = ["evidence/executions/probe.txt"]
+    assert findings._proof_byte_warnings(engagement, relative, []) == []
+
+    proof.write_text("HTTP/1.1 401 Unauthorized\n", encoding="utf-8")
+    warnings = findings._proof_byte_warnings(engagement, relative, [])
+    assert warnings
+    assert "still accepted as proof" in warnings[0]
+    assert "violin_exec" in warnings[0]
+
+
 def test_bootstrap_creates_coverage_matrix_template(tmp_path: Path) -> None:
     engagement = tmp_path / "engagement"
     assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
