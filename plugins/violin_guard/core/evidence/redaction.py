@@ -62,26 +62,24 @@ PROVIDER_TOKEN_RE = re.compile(
 )
 
 
-def redact_text(value: str) -> str:
-    """Perform comprehensive multi-pass secret redaction on arbitrary text."""
-    if not value:
-        return value
+def _redact(value: str, provider_replacement: str) -> str:
     redacted = PRIVATE_KEY_RE.sub(REDACTED_PRIVATE_KEY, value)
     redacted = BEARER_TOKEN_RE.sub(f"Bearer {REDACTED_TOKEN}", redacted)
     redacted = COOKIE_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", redacted)
     redacted = AUTHORIZATION_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", redacted)
     redacted = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", redacted)
     redacted = JWT_RE.sub(REDACTED_JWT, redacted)
-    return PROVIDER_TOKEN_RE.sub(REDACTED_TOKEN, redacted)
+    return PROVIDER_TOKEN_RE.sub(provider_replacement, redacted)
+
+
+def redact_text(value: str) -> str:
+    """Perform comprehensive multi-pass secret redaction on arbitrary text."""
+    if not value:
+        return value
+    return _redact(value, REDACTED_TOKEN)
 
 
 def redact_single_line(note: str) -> str:
     """Collapse note to a single line and redact credentials for tabular records."""
     one_line = " ".join(note.splitlines()).strip()
-    redacted = PRIVATE_KEY_RE.sub(REDACTED_PRIVATE_KEY, one_line)
-    redacted = BEARER_TOKEN_RE.sub(f"Bearer {REDACTED_TOKEN}", redacted)
-    redacted = COOKIE_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", redacted)
-    redacted = AUTHORIZATION_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", redacted)
-    redacted = SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}{REDACTED}", redacted)
-    redacted = JWT_RE.sub(REDACTED_JWT, redacted)
-    return PROVIDER_TOKEN_RE.sub(REDACTED_API_KEY, redacted)
+    return _redact(one_line, REDACTED_API_KEY)

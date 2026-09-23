@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from plugins.violin_guard.core.evidence.redaction import (
     REDACTED,
+    REDACTED_API_KEY,
     REDACTED_JWT,
     REDACTED_PRIVATE_KEY,
     REDACTED_TOKEN,
@@ -47,6 +48,14 @@ def test_redact_single_line_masks_passwords_and_cookies() -> None:
     assert "deadbeef9876543210" not in single_line
     assert REDACTED in single_line
     assert "Discovered administrative portal" in single_line
+
+
+def test_provider_token_marker_matches_redaction_context() -> None:
+    provider_token = "ghp_" + "a" * 24
+    value = f"provider credential {provider_token}"
+
+    assert redact_text(value) == f"provider credential {REDACTED_TOKEN}"
+    assert redact_single_line(value) == f"provider credential {REDACTED_API_KEY}"
 
 
 def test_redact_single_line_masks_authorization_and_provider_keys() -> None:
