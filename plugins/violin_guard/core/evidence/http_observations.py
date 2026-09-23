@@ -1,8 +1,8 @@
 """Small, machine-readable HTTP evidence contract.
 
-Batch probes may emit one JSON object per request using this shape::
+Batch probes may emit one JSON object per request/response flow using this shape::
 
-    {"type":"http_observation","method":"GET","url":"https://target/path","status":200}
+    {"type":"http_observation","flow_id":"flow-1","method":"GET","url":"https://target/path","status":200}
 
 Literal HTTP response status lines are also accepted for single-request raw
 captures. No prose or tool-specific output is inferred.
@@ -27,6 +27,7 @@ _HEADER_LINE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:")
 
 @dataclass(frozen=True)
 class HTTPObservation:
+    flow_id: str
     method: str
     url: URL
     status: int
@@ -34,21 +35,39 @@ class HTTPObservation:
 
 
 def parse_http_observations(content: str) -> tuple[HTTPObservation, ...]:
-    """Parse only explicitly structured JSONL HTTP observations."""
+    """Parse JSONL request/response flows, rejecting reused explicit IDs.
+
+    Legacy entries without IDs remain separate observations. Reused identifiers
+    make the artifact ambiguous, so no structured observations from it are returned.
+    """
     observations: list[HTTPObservation] = []
+    flow_ids: set[str] = set()
     for line in content.splitlines():
         candidate = line.strip()
         if not candidate.startswith("{"):
             continue
-        with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+        with contextlib.suppress(json.JSONDecodeError, KeyError, TypeError, ValueError):
             value = json.loads(candidate)
             if not isinstance(value, dict) or value.get("type") != "http_observation":
                 continue
+            flow_id = value.get("flow_id")
+            if flow_id is None:
+                flow_id = f"legacy-{len(observations)}"
+            elif (
+                not isinstance(flow_id, str)
+                or not flow_id
+                or len(flow_id) > 128
+                or any(ord(character) < 32 for character in flow_id)
+                or flow_id in flow_ids
+            ):
+                return ()
+            else:
+                flow_ids.add(flow_id)
             method = str(value["method"]).upper()
             url = URL(str(value["url"]))
             status = int(value["status"])
             if method in HTTP_METHODS and url.scheme in {"http", "https"} and 100 <= status <= 599:
-                observations.append(HTTPObservation(method, url, status, candidate))
+                observations.append(HTTPObservation(flow_id, method, url, status, candidate))
     return tuple(observations)
 
 

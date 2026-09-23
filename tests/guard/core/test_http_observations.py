@@ -55,7 +55,7 @@ def test_statuses_dict_form_still_expands_repetition_counts() -> None:
 
 def test_structured_observations_are_read_from_jsonl_only() -> None:
     body = (
-        '{"type":"http_observation","method":"GET","url":"https://a.test/x",'
+        '{"type":"http_observation","flow_id":"flow-a","method":"GET","url":"https://a.test/x",'
         '"status":200}\n'
         "GET https://a.test/x HTTP/1.1 200\n"
         '{"type":"other","method":"GET","url":"https://a.test/x","status":500}\n'
@@ -67,6 +67,16 @@ def test_structured_observations_are_read_from_jsonl_only() -> None:
         ("GET", "https://a.test/x", 200)
     ]
     assert parse_http_statuses(body) == (200, 200)
+
+
+def test_structured_observations_allow_legacy_ids_and_reject_reused_explicit_ids() -> None:
+    missing_id = '{"type":"http_observation","method":"GET","url":"https://a.test/x","status":200}'
+    duplicate_id = (
+        '{"type":"http_observation","flow_id":"same","method":"GET","url":"https://a.test/x","status":200}\n'
+        '{"type":"http_observation","flow_id":"same","method":"GET","url":"https://a.test/y","status":200}'
+    )
+    assert len(parse_http_observations(missing_id)) == 1
+    assert parse_http_observations(duplicate_id) == ()
 
 
 def test_parse_http_statuses_formats() -> None:

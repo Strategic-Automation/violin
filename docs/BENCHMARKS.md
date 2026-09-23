@@ -112,7 +112,7 @@ JSON object per request so the evaluator can correlate responses without parsing
 prose:
 
 ```json
-{"type":"http_observation","method":"POST","url":"https://target/api/login","status":401}
+{"type":"http_observation","flow_id":"login-attempt-1","method":"POST","url":"https://target/api/login","status":401}
 ```
 
 Include decisive response fields in the same JSON line when a result depends on them. Use
