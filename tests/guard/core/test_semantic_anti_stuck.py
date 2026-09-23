@@ -60,3 +60,26 @@ def test_evidence_paths_reset_counter_even_with_blank_outcome(tmp_path) -> None:
     )
     assert result["count"] == 0
     assert not result["warning"]
+
+
+def test_five_fresh_evidence_reviews_never_engage_the_lock(tmp_path) -> None:
+    for number in range(5):
+        result = _review(
+            tmp_path,
+            outcome="progress",
+            evidence_paths=[f"evidence/recon/response-{number}.txt"],
+        )
+        assert result["count"] == 0, f"review {number} should reset the counter"
+        assert not result["warning"]
+        assert not result["locked"]
+    assert state.semantic_lock(tmp_path) is None
+
+
+def test_repeating_an_old_evidence_path_still_counts_as_unproductive(tmp_path) -> None:
+    shared = ["evidence/recon/response.txt"]
+    _review(tmp_path, outcome="progress", evidence_paths=shared)
+    for number in range(5):
+        result = _review(tmp_path, outcome="progress", evidence_paths=shared)
+        assert result["count"] == number + 1
+        assert result["locked"] is (number == 4), f"lock state wrong at iteration {number}"
+    assert state.semantic_lock(tmp_path) is not None
