@@ -48,6 +48,43 @@ def test_record_hypothesis_allows_research_attempted():
     assert model.research_attempted is True
 
 
+def test_record_hypothesis_accepts_numeric_confidence():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "confidence": 0.9},
+    )
+    assert model.confidence == "0.9"
+    str_model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "confidence": "0.9"},
+    )
+    assert str_model.confidence == model.confidence
+
+
+def test_record_hypothesis_accepts_integer_port():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "port": 443},
+    )
+    assert model.port == "443"
+
+
+def test_record_hypothesis_normalises_variant_vuln_class():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {"eng_dir": "/tmp/eng", "vuln_class": "IDOR"},
+    )
+    assert model.vuln_class == "idor"
+
+
+def test_record_hypothesis_rejects_unknown_vuln_class_with_valid_list():
+    with pytest.raises(ValidationError, match="unknown vuln_class.*valid classes are"):
+        schemas.validate_args(
+            schemas.RecordHypothesisArgsModel,
+            {"eng_dir": "/tmp/eng", "vuln_class": "Mass assignment"},
+        )
+
+
 @pytest.mark.parametrize(
     "model_type,required,default_status",
     [
