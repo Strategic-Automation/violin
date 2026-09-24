@@ -15,6 +15,7 @@ from .state import ensure_dir, lock_file, resolve_eng_dir
 _COMMAND_MARKER = " | command="
 _COMMAND_LENGTH_MARKER = " | command_length="
 _RECEIPT_MARKER = " | receipt="
+_EXECUTION_MARKER = " | execution_id="
 
 
 def normalize_command(command: str) -> str:
@@ -37,8 +38,9 @@ def append_history(
     exit_code: int,
     receipt_path: str = "",
     status: str = "",
+    execution_id: str = "",
 ) -> None:
-    """Append one execution record to history.md under an advisory lock."""
+    """Append one execution record, idempotently when an execution ID is supplied."""
     path = _history_path(eng_dir)
     ensure_dir(path.parent)
     stamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -50,8 +52,23 @@ def append_history(
     )
     if receipt_path:
         line += f"{_RECEIPT_MARKER}{receipt_path}"
+    if execution_id:
+        line += f"{_EXECUTION_MARKER}{execution_id}"
     with lock_file(path), path.open("a", encoding="utf-8") as handle:
+        if execution_id and _has_execution_id(path, execution_id):
+            return
         handle.write(line + "\n")
+
+
+def _has_execution_id(path: Path, execution_id: str) -> bool:
+    """Check a history file for a completed entry with this execution identity."""
+    if not path.exists():
+        return False
+    suffix = f"{_EXECUTION_MARKER}{execution_id}"
+    return any(
+        line.rstrip("\r\n").endswith(suffix)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    )
 
 
 def history_contains(eng_dir: str | Path, command: str) -> bool:
