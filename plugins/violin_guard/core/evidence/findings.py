@@ -99,6 +99,22 @@ def _verified_receipt(
     return receipt, verified
 
 
+def _all_authenticated_paths(engagement: Path) -> set[str]:
+    """Evidence files sealed by any signed receipt in the engagement."""
+    receipt_root = (engagement / "evidence" / "executions").resolve()
+    authenticated: set[str] = set()
+    if not receipt_root.is_dir():
+        return authenticated
+    for receipt_file in sorted(receipt_root.glob("*.json")):
+        try:
+            receipt = state.read_json(receipt_file)
+            verified = receipt_integrity.verify_runtime_receipt(receipt, engagement)
+        except (ValueError, OSError):
+            continue
+        authenticated.update(path.relative_to(engagement).as_posix() for path in verified)
+    return authenticated
+
+
 def _verified_evidence_files(
     engagement: Path,
     evidence_paths: list[str],
@@ -108,6 +124,7 @@ def _verified_evidence_files(
     valid: list[str] = []
     evidence_root = (engagement / "evidence").resolve()
     receipt_root = (evidence_root / "executions").resolve()
+    fallback_authenticated: set[str] | None = None
     for value in dict.fromkeys(evidence_paths):
         relative = Path(str(value).strip())
         candidate = (engagement / relative).resolve()
@@ -126,10 +143,13 @@ def _verified_evidence_files(
             )
         normalized = candidate.relative_to(engagement).as_posix()
         if normalized not in authenticated_paths:
-            raise ValueError(
-                "evidence_paths must be authenticated by a cited execution receipt; "
-                "declare each saved file through violin_exec evidence_outputs"
-            )
+            if fallback_authenticated is None:
+                fallback_authenticated = _all_authenticated_paths(engagement)
+            if normalized not in fallback_authenticated:
+                raise ValueError(
+                    "evidence_paths must be authenticated by an execution receipt; "
+                    "declare each saved file through violin_exec evidence_outputs"
+                )
         valid.append(normalized)
     return valid
 
