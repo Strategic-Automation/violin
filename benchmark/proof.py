@@ -338,7 +338,10 @@ def _saved_evidence_bundles(
                 not path.is_file()
                 or path.is_symlink()
                 or not path.is_relative_to(trusted_root)
-                or path.suffix.lower() == ".json"
+                or (
+                    path.is_relative_to(trusted_root / "executions")
+                    and path.suffix.lower() == ".json"
+                )
             ):
                 continue
             producing_receipts = [
