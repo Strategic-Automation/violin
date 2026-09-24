@@ -150,33 +150,6 @@ def _signed_digests(
     return {str(value): str(digest) for value, digest in digests.items()}
 
 
-def _cited_versions(
-    engagement: Path, *, key: str | bytes | None, public_key: str | bytes | None
-) -> dict[str, dict[str, str]]:
-    """Map each evidence path to the digests signed receipts recorded for it.
-
-    Evidence identity is content: every signed batch authenticates the version
-    it wrote, so a path cited by two receipts is satisfied while it still holds
-    a version either of them recorded, instead of having to match them all.
-    """
-    versions: dict[str, dict[str, str]] = {}
-    receipts_root = engagement / "evidence" / "executions"
-    for candidate in sorted(receipts_root.glob("*.json")):
-        try:
-            record = json.loads(candidate.read_text(encoding="utf-8"))
-            digests = (
-                _signed_digests(record, key=key, public_key=public_key)
-                if isinstance(record, dict)
-                else {}
-            )
-        except (OSError, ValueError):
-            continue
-        name = str(record.get("execution_id") or candidate.name)
-        for relative, digest in digests.items():
-            versions.setdefault(relative, {}).setdefault(digest, name)
-    return versions
-
-
 def _authenticate_evidence(
     record: dict[str, Any],
     engagement: Path,
@@ -187,7 +160,6 @@ def _authenticate_evidence(
     """Return the evidence a receipt authenticates, or explain the conflict."""
     digests = _signed_digests(record, key=key, public_key=public_key)
     evidence_root = (engagement / "evidence").resolve()
-    versions: dict[str, dict[str, str]] = {}
     verified: list[Path] = []
     for value, expected_digest in digests.items():
         relative = Path(str(value))
@@ -201,19 +173,11 @@ def _authenticate_evidence(
             raise ValueError(f"evidence is missing or outside evidence/: {value}")
         current = _file_digest(candidate)
         if not hmac.compare_digest(current, str(expected_digest)):
-            versions = versions or _cited_versions(engagement, key=key, public_key=public_key)
-            citations = versions.get(relative.as_posix()) or {}
-            if current not in citations:
-                raise ValueError(
-                    f"has changed evidence: {relative.as_posix()} holds {current}, which no "
-                    "signed receipt recorded. Conflicting citations: "
-                    + ", ".join(
-                        f"{name} recorded {digest}" for digest, name in sorted(citations.items())
-                    )
-                    + ". REMEDY: one saved file may be cited by several receipts, so restore one "
-                    "of those recorded versions, or re-run the probe and cite the receipt that "
-                    "recorded the bytes now on disk."
-                )
+            raise ValueError(
+                f"has changed evidence: {relative.as_posix()} no longer matches the digest "
+                "in this receipt. Existing signatures are preserved; re-run the probe to "
+                "produce evidence and a receipt that authenticate the current bytes."
+            )
         verified.append(candidate)
     return tuple(verified)
 

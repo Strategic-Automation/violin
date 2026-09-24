@@ -999,10 +999,10 @@ def test_vuln_research_exit_accepts_challenge_cells_with_artifact(tmp_path: Path
     _validate_phase_exit(engagement, "PT-030", "[x]")  # no exception
 
 
-def test_reporting_exit_closes_when_two_receipts_cite_one_evidence_file(
+def test_stale_receipt_cannot_authenticate_overwritten_shared_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Issue #174: one saved file cited by two batches must stay closable."""
+    """An overwritten shared path is accepted only by its matching receipt."""
     monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"c" * 32)
     monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
     engagement = tmp_path / "engagement"
@@ -1037,20 +1037,29 @@ def test_reporting_exit_closes_when_two_receipts_cite_one_evidence_file(
 
     first = write_batch("batch-one", "HTTP/1.1 200 OK\ntoken leaked\n")
     second = write_batch("batch-two", "HTTP/1.1 200 OK\ntoken leaked again\n")
-    for index, receipt_path in enumerate((first, second), 1):
+    first_receipt_bytes = (engagement / first).read_bytes()
+    with pytest.raises(ValueError, match="has changed evidence"):
         findings.submit_finding(
             engagement,
-            title=f"Shared evidence {index}",
+            title="Stale shared evidence",
             severity="High",
-            summary="Cited the saved evidence file the other batch also wrote.",
-            receipt_paths=[receipt_path],
+            summary="The first receipt must not inherit another receipt's digest.",
+            receipt_paths=[first],
         )
+    assert (engagement / first).read_bytes() == first_receipt_bytes
+    findings.submit_finding(
+        engagement,
+        title="Current shared evidence",
+        severity="High",
+        summary="The second receipt authenticates the bytes currently saved.",
+        receipt_paths=[second],
+    )
 
-    _validate_phase_exit(engagement, "PT-050", "[x]")  # both citations hold
+    _validate_phase_exit(engagement, "PT-050", "[x]")  # the matching receipt closes
 
     evidence.write_text("HTTP/1.1 200 OK\nforged\n", encoding="utf-8")
     with pytest.raises(ValueError, match="has changed evidence") as excinfo:
         _validate_phase_exit(engagement, "PT-050", "[x]")
     message = str(excinfo.value)
-    assert "batch-one" in message and "batch-two" in message
-    assert "REMEDY" in message
+    assert "this receipt" in message
+    assert "re-run the probe" in message
