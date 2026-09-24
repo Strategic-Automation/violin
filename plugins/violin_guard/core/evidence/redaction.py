@@ -46,6 +46,7 @@ COOKIE_RE = re.compile(
 SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)([\"']?\b(?:password|passwd|secret|token|access[_-]?token|refresh[_-]?token|"
     r"api[_-]?key|apikey|private[_-]?key)\b[\"']?\s*[:=]\s*)"
+    r"(?!\[(?:REDACTED)(?:_[A-Z]+)?\])"
     r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)"
 )
 
