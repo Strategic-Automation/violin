@@ -7,6 +7,7 @@ dispatch, and scope-host resolution are covered, not just the in-process funcs.
 import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -213,15 +214,14 @@ def _patch_burst(monkeypatch, eng_dir):
         rec["commands"].append(command)
         active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
         reservation_id = kwargs.get("sync_reservation")
-        if reservation_id:
-            state.record_ok_check(eng_dir, command, phase)
-            remaining = state.consume_reserved_sync_credit(eng_dir, reservation_id)
-            state.mark_pending_sync(eng_dir, command, phase, active.id if active else "")
-            state.tick_command(eng_dir)
-        else:
-            remaining = execution._commit_guard_state(
-                Path(eng_dir), command, phase, active.id if active else ""
-            )
+        remaining = state.commit_execution_start(
+            eng_dir,
+            command,
+            phase,
+            active.id if active else "",
+            str(uuid.uuid4()),
+            reservation_id,
+        )[0]
         rec["batch_id"] = state.get_pending_sync(eng_dir)
         return {
             "execution_id": "00000000-0000-0000-0000-000000000001",

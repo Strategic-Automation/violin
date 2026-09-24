@@ -9,6 +9,7 @@ Covers the explicit correctness criteria:
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ def test_plugin_root_exposes_only_registration_contract() -> None:
 
     assert plugin.__all__ == ["REGISTERED_TOOLS", "TOOL_DEFINITIONS", "ToolDefinition", "register"]
     assert not hasattr(plugin, "bootstrap")
+    assert "violin_exec_burst" in plugin.REGISTERED_TOOLS
 
 
 def _init_e2e(tmp_path, skill_file, allowed=("recon", "vuln-research", "exploitation")):
@@ -82,9 +84,9 @@ def _fake_target_executor(monkeypatch):
         FAKE_EXEC["called"] = True
         FAKE_EXEC["command"] = command
         active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
-        remaining = execution._commit_guard_state(
-            Path(eng_dir), command, phase, active.id if active else ""
-        )
+        remaining = execution.state.commit_execution_start(
+            eng_dir, command, phase, active.id if active else "", str(uuid.uuid4())
+        )[0]
         return {
             "execution_id": "00000000-0000-0000-0000-000000000001",
             "status": "completed",

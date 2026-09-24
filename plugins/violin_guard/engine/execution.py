@@ -21,7 +21,6 @@ import psutil
 
 from plugins.violin_guard.core.commands.http_proof import normalize_http_proof_flags
 from plugins.violin_guard.core.engagement import state
-from plugins.violin_guard.core.engagement.phases import normalize_phase, suppresses_heartbeat
 from plugins.violin_guard.core.evidence.history import append_history
 from plugins.violin_guard.core.evidence.receipt_integrity import seal_execution_receipt
 from plugins.violin_guard.engine.runtime_backend import resolve_backend
@@ -628,20 +627,6 @@ def execute(
         "sync_reservation_consumed": consumed,
         "sync_reservation_released": False,
     }
-
-
-def _commit_guard_state(eng_dir: Path, command: str, phase: str, ptt_task_id: str = "") -> int:
-    state.record_ok_check(str(eng_dir), command, phase)
-    remaining = state.spend_sync_credit(str(eng_dir), phase)
-    state.mark_pending_sync(str(eng_dir), command, phase, ptt_task_id)
-    count = state.tick_command(str(eng_dir))
-    phase_enum = normalize_phase(phase)
-    if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
-        state.set_heartbeat_pending(
-            str(eng_dir),
-            f"Reached {count} executed target commands. Review engagement files for drift.",
-        )
-    return remaining
 
 
 def status(eng_dir: str, execution_id: str) -> dict[str, Any]:

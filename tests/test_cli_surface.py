@@ -144,6 +144,7 @@ def test_cli_does_not_advertise_removed_adapter_commands() -> None:
 
     assert result.returncode == 0
     assert "search-exploit" not in result.stdout
+    assert "exec-burst" not in result.stdout
     assert "adapters" not in SCRIPT.read_text(encoding="utf-8")
 
 

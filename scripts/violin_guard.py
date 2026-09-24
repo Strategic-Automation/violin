@@ -169,34 +169,6 @@ def cmd_target(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_exec_burst(args: argparse.Namespace) -> int:
-    out = json.loads(
-        handlers.handle_exec_burst(
-            {
-                "eng_dir": args.eng_dir,
-                "scope": args.scope,
-                "phase": args.phase,
-                "target": args.target or "",
-                "commands": [],
-                "commands_file": args.commands_file or "",
-                "session_id": args.session_id or "",
-                "label": args.label or "",
-                "continue_on_error": args.continue_on_error,
-            }
-        )
-    )
-    status = out.get("status")
-    if status == "denied":
-        print("BURST VERDICT: DENIED")
-    else:
-        print(f"BURST VERDICT: {status.upper()}")
-    for r in out.get("results", []):
-        idx = r.get("index", "?")
-        cmd = r.get("command", "")
-        print(f"[{idx}] {cmd}")
-    return 0 if status not in ("denied", "error", "execution_failed") else 1
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(prog="violin_guard.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -300,18 +272,6 @@ def main() -> int:
     p.add_argument("--role", default="")
     p.add_argument("--field", default="ip", choices=["ip", "url", "host"])
     p.set_defaults(func=cmd_target)
-
-    # exec-burst
-    p = sub.add_parser("exec-burst", help="Single-approval bounded command batch")
-    p.add_argument("--eng-dir", required=True)
-    p.add_argument("--scope", default="", help="defaults to <eng-dir>/scope/scope.yaml")
-    p.add_argument("--phase", required=True)
-    p.add_argument("--target", required=True, help="Explicit primary target for the batch")
-    p.add_argument("--commands-file", default="")
-    p.add_argument("--session-id", default="")
-    p.add_argument("--label", default="")
-    p.add_argument("--continue-on-error", action="store_true")
-    p.set_defaults(func=cmd_exec_burst)
 
     args = parser.parse_args()
     return args.func(args)
