@@ -606,12 +606,62 @@ def test_evidence_file_must_not_be_an_execution_receipt(tmp_path: Path) -> None:
         )
 
 
+def test_submit_finding_accepts_evidence_authenticated_by_an_uncited_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#206: any signed receipt in the engagement may authenticate evidence."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    response = engagement / "evidence/vuln-research/login.json"
+    response.parent.mkdir(parents=True, exist_ok=True)
+    response.write_text('{"requires_totp": true}', encoding="utf-8")
+    other = engagement / "evidence/vuln-research/other.json"
+    other.write_text('{"ok": true}', encoding="utf-8")
+    cited = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "cited-proof",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"response": other.relative_to(engagement).as_posix()},
+        },
+        engagement,
+    )
+    cited_path = engagement / "evidence/executions/cited-proof.json"
+    cited_path.parent.mkdir(parents=True, exist_ok=True)
+    cited_path.write_text(json.dumps(cited), encoding="utf-8")
+    sealed = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "login-proof",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"response": response.relative_to(engagement).as_posix()},
+        },
+        engagement,
+    )
+    (engagement / "evidence/executions/login-proof.json").write_text(
+        json.dumps(sealed), encoding="utf-8"
+    )
+
+    record = findings.submit_finding(
+        engagement,
+        title="Authentication step permits unintended access",
+        severity="High",
+        summary="Observed access using the first authentication step.",
+        receipt_paths=["evidence/executions/cited-proof.json"],
+        evidence_paths=["evidence/vuln-research/login.json"],
+    )
+
+    assert "evidence/vuln-research/login.json" in record["evidence_paths"]
+
+
 def test_json_evidence_still_requires_receipt_authentication(tmp_path: Path) -> None:
     engagement = tmp_path / "engagement"
     response = engagement / "evidence/vuln-research/response.json"
     response.parent.mkdir(parents=True)
     response.write_text('{"ok": true}', encoding="utf-8")
-    with pytest.raises(ValueError, match="authenticated by a cited execution receipt"):
+    with pytest.raises(ValueError, match="authenticated by an execution receipt"):
         findings._verified_evidence_files(
             engagement,
             ["evidence/vuln-research/response.json"],

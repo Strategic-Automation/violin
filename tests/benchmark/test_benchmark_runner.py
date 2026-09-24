@@ -540,7 +540,7 @@ def test_submit_finding_rejects_evidence_not_authenticated_by_cited_receipt(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="authenticated by a cited execution receipt"):
+    with pytest.raises(ValueError, match="authenticated by an execution receipt"):
         findings.submit_finding(
             tmp_path,
             title="Unattested proof",
