@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from plugins.violin_guard.core.evidence.redaction import (
     REDACTED,
+    REDACTED_API_KEY,
     REDACTED_JWT,
     REDACTED_PRIVATE_KEY,
     REDACTED_TOKEN,
@@ -49,6 +50,14 @@ def test_redact_single_line_masks_passwords_and_cookies() -> None:
     assert "Discovered administrative portal" in single_line
 
 
+def test_provider_token_marker_matches_redaction_context() -> None:
+    provider_token = "ghp_" + "a" * 24
+    value = f"provider credential {provider_token}"
+
+    assert redact_text(value) == f"provider credential {REDACTED_TOKEN}"
+    assert redact_single_line(value) == f"provider credential {REDACTED_API_KEY}"
+
+
 def test_redact_single_line_masks_authorization_and_provider_keys() -> None:
     note = (
         "curl -H 'Authorization: Basic dXNlcjpwYXNz' -H 'X-Api-Key: sk-ant-api03-abcdef1234567890'"
@@ -57,3 +66,14 @@ def test_redact_single_line_masks_authorization_and_provider_keys() -> None:
     assert "dXNlcjpwYXNz" not in result
     assert "sk-ant-api03-abcdef1234567890" not in result
     assert REDACTED in result or REDACTED_TOKEN in result
+
+
+def test_redaction_is_stable_for_overlapping_and_already_redacted_values() -> None:
+    provider_token = "ghp_" + "a" * 24
+    value = f"Authorization: Bearer {provider_token}\npassword={provider_token}"
+    expected = f"Authorization: Bearer {REDACTED_TOKEN}\npassword={REDACTED}"
+
+    assert redact_text(value) == expected
+    assert redact_text(expected) == expected
+    assert redact_single_line(value) == expected.replace("\n", " ")
+    assert redact_single_line(expected) == expected.replace("\n", " ")
