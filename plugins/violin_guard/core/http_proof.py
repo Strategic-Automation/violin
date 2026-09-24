@@ -150,7 +150,7 @@ def normalize_http_proof_flags(command: str) -> str:
                 or (token.startswith("-o") and not token.startswith("--"))
                 for token in tokens
             ):
-                capture_flag = "-w 'HTTP %{http_code}'"
+                capture_flag = "-w 'HTTP %{http_code}\\n'"
         insertions.append((start + client_match.end(), f" {capture_flag}"))
 
     rewritten = command

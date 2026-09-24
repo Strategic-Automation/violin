@@ -51,14 +51,14 @@ def test_adds_status_capture_to_redirected_body():
 def test_injects_status_to_stdout_when_curl_writes_body_file():
     cmd = "curl -sS -o body.json https://duck-store.escape.tech/api/v1/users/ && python3 parse.py body.json"
     out = normalize_http_proof_flags(cmd)
-    assert "-w 'HTTP %{http_code}'" in out
+    assert "-w 'HTTP %{http_code}\\n'" in out
     assert "curl -i" not in out
     assert out.endswith("&& python3 parse.py body.json")
 
 
 def test_injects_status_for_long_output_flag():
     cmd = "curl --output=body.json -sS https://duck-store.escape.tech/api/v1/users/"
-    assert "-w 'HTTP %{http_code}'" in normalize_http_proof_flags(cmd)
+    assert "-w 'HTTP %{http_code}\\n'" in normalize_http_proof_flags(cmd)
 
 
 def test_injects_i_for_wget_too():
@@ -111,7 +111,7 @@ def test_injects_status_for_probe_followed_by_logical_and():
     """The response file remains a body, while stdout records the status."""
     cmd = "curl -sS -o body.txt https://duck-store.escape.tech/ && wc -c body.txt"
     out = normalize_http_proof_flags(cmd)
-    assert "-w 'HTTP %{http_code}'" in out
+    assert "-w 'HTTP %{http_code}\\n'" in out
     assert "curl -i" not in out
 
 
