@@ -201,6 +201,10 @@ _EXCLUDED_SOURCES = frozenset(
     }
 )
 _VULNERABILITY_ROUTES = {
+    "default-credentials": "identity-auth",
+    "idor-access-control": "identity-auth",
+    "jwt-attacks": "identity-auth",
+    "workflow-state-abuse": "business-logic",
     "auth": "identity-auth",
     "authn": "identity-auth",
     "authz": "identity-auth",

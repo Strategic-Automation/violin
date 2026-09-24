@@ -85,6 +85,38 @@ def test_record_hypothesis_rejects_unknown_vuln_class_with_valid_list():
         )
 
 
+def test_record_hypothesis_accepts_coverage_table_vuln_class_names():
+    for name in (
+        "default-credentials",
+        "idor-access-control",
+        "jwt-attacks",
+        "workflow-state-abuse",
+    ):
+        model = schemas.validate_args(
+            schemas.RecordHypothesisArgsModel,
+            {"eng_dir": "/tmp/eng", "vuln_class": name},
+        )
+        assert model.vuln_class == name
+
+
+def test_record_hypothesis_publishes_the_vuln_class_enum():
+    description = schemas.RecordHypothesisArgsModel.model_fields["vuln_class"].description or ""
+    assert "idor" in description and "sqli" in description
+
+
+def test_record_hypothesis_accepts_evidence_paths_and_merges_runtime_evidence():
+    model = schemas.validate_args(
+        schemas.RecordHypothesisArgsModel,
+        {
+            "eng_dir": "/tmp/eng",
+            "runtime_evidence": "evidence/recon/a.txt",
+            "evidence_paths": ["evidence/recon/b.txt", "evidence/recon/a.txt"],
+        },
+    )
+    assert model.evidence_paths == ["evidence/recon/b.txt", "evidence/recon/a.txt"]
+    assert model.runtime_evidence == "evidence/recon/a.txt, evidence/recon/b.txt"
+
+
 @pytest.mark.parametrize(
     "model_type,required,default_status",
     [
