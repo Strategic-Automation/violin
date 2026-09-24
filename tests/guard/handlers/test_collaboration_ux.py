@@ -229,6 +229,9 @@ def test_review_batch_resolves_the_bound_hypothesis_route_not_the_phase_default(
     )
     monkeypatch.setattr(ptt_review, "HermesSkillViewAdapter", _ReadySkillAdapter)
 
+    status = json.loads(service.handle_status({"eng_dir": str(eng)}))
+    assert status["skill"]["route_candidates"] == ["identity-auth"]
+
     args = {
         "eng_dir": str(eng),
         "id": "PT-010",
