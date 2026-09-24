@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core import bootstrap, state
-from plugins.violin_guard.core import history as execution_history
-from plugins.violin_guard.gates import code_execution_audit
+from plugins.violin_guard.core.engagement import bootstrap, state
+from plugins.violin_guard.core.evidence import history as execution_history
+from plugins.violin_guard.engine import code_execution_audit
 from plugins.violin_guard.hooks import (
     _on_session_finalize_hook,
     _post_tool_call_hook,

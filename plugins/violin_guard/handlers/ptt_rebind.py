@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..core import ptt, state
-from ..core.history import history_contains
+from plugins.violin_guard.core.engagement import ptt, state
+from plugins.violin_guard.core.evidence.history import history_contains
+
 from .base import (
     _eng_path,
     _json,

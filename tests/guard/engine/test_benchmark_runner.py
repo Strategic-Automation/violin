@@ -15,7 +15,7 @@ from benchmark.run import (
     parse_args,
 )
 from benchmark.score import load_golden_manifest, load_golden_set, score_engagement
-from plugins.violin_guard.core import findings, receipt_integrity
+from plugins.violin_guard.core.evidence import findings, receipt_integrity
 from plugins.violin_guard.handlers.finding_handlers import handle_submit_finding
 
 

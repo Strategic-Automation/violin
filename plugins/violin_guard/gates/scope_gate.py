@@ -9,7 +9,8 @@ from typing import Any
 
 import yaml
 
-from ..core.phases import Phase
+from plugins.violin_guard.core.engagement.phases import Phase
+
 from ..core.results import GuardResult
 
 

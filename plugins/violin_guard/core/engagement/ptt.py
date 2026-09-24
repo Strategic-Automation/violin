@@ -9,10 +9,15 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .markdown_structure import MarkdownBlock, iter_markdown_blocks, read_markdown
-from .phases import Phase, normalize_phase
-from .results import GuardResult
-from .state import atomic_text
+from plugins.violin_guard.core.engagement.markdown_structure import (
+    MarkdownBlock,
+    iter_markdown_blocks,
+    read_markdown,
+)
+from plugins.violin_guard.core.engagement.phases import Phase, normalize_phase
+from plugins.violin_guard.core.engagement.state import atomic_text
+
+from ..results import GuardResult
 
 __all__ = [
     "PttTask",

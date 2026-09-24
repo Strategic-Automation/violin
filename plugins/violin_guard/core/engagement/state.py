@@ -14,9 +14,9 @@ from typing import Any
 
 from filelock import FileLock
 
-from .bash_ast import parse_bash_segments
-from .phases import normalize_phase, suppresses_heartbeat
-from .targets import extract_target_candidates
+from plugins.violin_guard.core.commands.bash_ast import parse_bash_segments
+from plugins.violin_guard.core.commands.targets import extract_target_candidates
+from plugins.violin_guard.core.engagement.phases import normalize_phase, suppresses_heartbeat
 
 # Constants
 
@@ -54,7 +54,7 @@ def _eng_root() -> Path:
     container_root = Path("/violin")
     if container_root.exists() and (container_root / "engagements").exists():
         return container_root.resolve()
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def resolve_eng_dir(eng_dir: str | Path) -> Path:
@@ -520,7 +520,7 @@ def _recorded_findings(eng_dir: Path) -> int:
     anti-stuck hint fire on productive batches. Imported here because
     ``findings`` imports this module at import time.
     """
-    from . import findings
+    from plugins.violin_guard.core.evidence import findings
 
     try:
         return len(findings.load_findings(eng_dir))

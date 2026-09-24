@@ -16,10 +16,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .markdown_structure import MarkdownBlock, iter_markdown_blocks, read_markdown
-from .phases import normalize_phase
-from .state import atomic_text, ensure_dir
-from .targets import normalize_target
+from plugins.violin_guard.core.commands.targets import normalize_target
+from plugins.violin_guard.core.engagement.markdown_structure import (
+    MarkdownBlock,
+    iter_markdown_blocks,
+    read_markdown,
+)
+from plugins.violin_guard.core.engagement.phases import normalize_phase
+from plugins.violin_guard.core.engagement.state import atomic_text, ensure_dir
 
 __all__ = [
     "Hypothesis",

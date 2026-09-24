@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 import pytest
 
-from plugins.violin_guard.core.ptt import PttTask, PttValidationResult
+from plugins.violin_guard.core.engagement.ptt import PttTask, PttValidationResult
 from plugins.violin_guard.core.results import GuardResult
 from plugins.violin_guard.gates.command import CheckResult
 from plugins.violin_guard.gates.hypothesis_gate import HypothesisResult

@@ -7,11 +7,17 @@ from pathlib import Path
 
 import yaml
 
-from ..core import bootstrap, ptt, runtime_backend, state
-from ..core.phases import Phase, requires_hypothesis, suppresses_heartbeat
-from ..core.skill_policy import resolve_skill_route
-from ..core.skill_receipts import binding_readiness
-from ..core.targets import resolve_target
+from plugins.violin_guard.core.commands.targets import resolve_target
+from plugins.violin_guard.core.engagement import bootstrap, ptt, state
+from plugins.violin_guard.core.engagement.phases import (
+    Phase,
+    requires_hypothesis,
+    suppresses_heartbeat,
+)
+from plugins.violin_guard.core.skills.skill_policy import resolve_skill_route
+from plugins.violin_guard.core.skills.skill_receipts import binding_readiness
+from plugins.violin_guard.engine import runtime_backend
+
 from ..gates import command
 from .base import _bound_route_context, _eng_path, _json, _serialize_errors
 

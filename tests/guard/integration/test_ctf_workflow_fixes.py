@@ -3,8 +3,8 @@ import json
 import pytest
 
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.core import ptt, state
-from plugins.violin_guard.core.skill_receipts import SkillViewResult
+from plugins.violin_guard.core.engagement import ptt, state
+from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult
 from plugins.violin_guard.handlers import ptt_handlers
 from tests.guard.receipt_fixture import bind_active_task
 
@@ -237,7 +237,7 @@ def test_invalid_ptt_start_status_error_message(ctf_eng):
 
 def test_parse_target_token_ipv6_url():
     """Verify targets._parse_target_token correctly extracts IPv6 address from URL."""
-    from plugins.violin_guard.core import targets
+    from plugins.violin_guard.core.commands import targets
 
     res = targets._parse_target_token("http://[2001:db8::1]:8080/api")
     assert res == "2001:db8::1"
@@ -245,7 +245,7 @@ def test_parse_target_token_ipv6_url():
 
 def test_update_hypothesis_merge_existing_fields(ctf_eng):
     """Verify update_hypothesis preserves existing runtime_evidence during partial field update."""
-    from plugins.violin_guard.core import hypotheses
+    from plugins.violin_guard.core.engagement import hypotheses
 
     h_file = ctf_eng / "hypotheses.md"
     evidence = ctf_eng / "evidence" / "executions" / "1.json"

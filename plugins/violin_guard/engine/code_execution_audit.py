@@ -20,17 +20,19 @@ from typing import Any
 
 import yaml
 
-from ..core import history, state
-from ..core.ptt import find_active_task, parse_ptt
-from ..core.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
-from ..core.targets import (
+from plugins.violin_guard.core.commands.targets import (
     KNOWN_FILE_EXTENSIONS,
     extract_target_candidates,
     normalize_target,
     resolve_target,
 )
-from ..engine.execution import PREVIEW_BYTES, _commit_guard_state
-from . import command
+from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.core.engagement.ptt import find_active_task, parse_ptt
+from plugins.violin_guard.core.evidence import history
+from plugins.violin_guard.core.evidence.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
+
+from ..gates import command
+from .execution import PREVIEW_BYTES
 
 _HEADER = re.compile(r"^\s*#\s*violin:\s*(\{.*\})\s*$")
 _DOCUMENTED_FIELDS = frozenset({"eng_dir", "phase"})
@@ -344,9 +346,13 @@ def prepare_execution(source: object) -> tuple[dict[str, str], Path]:
     if classification == "target_touching":
         try:
             active = find_active_task(parse_ptt(eng_dir / "state" / "ptt.md"))
-            remaining = _commit_guard_state(
-                eng_dir, command_text, metadata["phase"], active.id if active else ""
-            )
+            remaining = state.commit_execution_start(
+                eng_dir,
+                command_text,
+                metadata["phase"],
+                active.id if active else "",
+                audit_id,
+            )[0]
         except Exception as exc:
             receipt.update(status="failed_to_dispatch", error=str(exc))
             state.atomic_json(receipt_path, receipt)

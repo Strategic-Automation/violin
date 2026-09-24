@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plugins.violin_guard.core import hypotheses
+from plugins.violin_guard.core.engagement import hypotheses
 
 ROOT = Path(__file__).resolve().parents[3]
 

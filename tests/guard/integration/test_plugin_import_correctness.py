@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from plugins.violin_guard import handlers as TOOLS
-from plugins.violin_guard.core import bootstrap, ptt
+from plugins.violin_guard.core.engagement import bootstrap, ptt
 from plugins.violin_guard.engine import execution
 from plugins.violin_guard.gates import command
 from tests.guard.receipt_fixture import bind_active_task

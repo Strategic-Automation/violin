@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.core import bootstrap, history, state
+from plugins.violin_guard.core.engagement import bootstrap, state
+from plugins.violin_guard.core.evidence import history
 from plugins.violin_guard.handlers.ptt_gates import _redact_sensitive_note
 
 

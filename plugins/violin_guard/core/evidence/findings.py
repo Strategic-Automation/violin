@@ -10,8 +10,11 @@ from typing import Any
 
 import yaml
 
-from . import receipt_integrity, schemas, state
-from .results import GuardResult
+from plugins.violin_guard.core import schemas
+from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.core.evidence import receipt_integrity
+
+from ..results import GuardResult
 
 FINDINGS_PATH = Path("evidence/findings.jsonl")
 _SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")

@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.core import bootstrap, hypotheses, ptt, state
-from plugins.violin_guard.core.history import append_history, check_history_staleness
-from plugins.violin_guard.core.phases import Phase
-from plugins.violin_guard.core.skill_receipts import SkillViewResult
-from plugins.violin_guard.core.targets import check_scope_targets
+from plugins.violin_guard.core.commands.targets import check_scope_targets
+from plugins.violin_guard.core.engagement import bootstrap, hypotheses, ptt, state
+from plugins.violin_guard.core.engagement.phases import Phase
+from plugins.violin_guard.core.evidence.history import append_history, check_history_staleness
+from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult
 from plugins.violin_guard.engine import execution
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import (

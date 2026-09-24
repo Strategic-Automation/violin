@@ -25,9 +25,10 @@ from pathlib import Path
 
 import yaml
 
+from plugins.violin_guard.core.skills.skill_policy import catalog_snapshot, validate_catalog
+
 from ..core import schemas
 from ..core.results import GuardResult
-from ..core.skill_policy import catalog_snapshot, validate_catalog
 
 __all__ = [
     "GuardResult",

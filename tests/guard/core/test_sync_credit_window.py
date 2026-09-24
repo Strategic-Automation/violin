@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.core import bootstrap, ptt, state
+from plugins.violin_guard.core.engagement import bootstrap, ptt, state
 from plugins.violin_guard.engine import execution
 from tests.guard.receipt_fixture import bind_active_task
 
@@ -56,9 +57,9 @@ def test_phase_window_runs_without_yolo_then_next_command_blocks(
 
     def fake_execute(command: str, *, eng_dir: str, phase: str, **_kwargs):
         active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
-        remaining = execution._commit_guard_state(
-            Path(eng_dir), command, phase, active.id if active else ""
-        )
+        remaining = state.commit_execution_start(
+            eng_dir, command, phase, active.id if active else "", str(uuid.uuid4())
+        )[0]
         return {
             "status": "completed",
             "executed": True,

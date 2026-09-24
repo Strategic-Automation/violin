@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from plugins.violin_guard import handlers as TOOLS
-from plugins.violin_guard.core import bootstrap
+from plugins.violin_guard.core.engagement import bootstrap
 from plugins.violin_guard.gates import command
 from tests.guard.receipt_fixture import bind_active_task
 

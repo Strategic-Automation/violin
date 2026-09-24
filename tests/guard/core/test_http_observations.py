@@ -9,7 +9,7 @@ statuses.
 
 from __future__ import annotations
 
-from plugins.violin_guard.core.http_observations import (
+from plugins.violin_guard.core.evidence.http_observations import (
     parse_http_observations,
     parse_http_statuses,
 )

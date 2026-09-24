@@ -15,7 +15,8 @@ else:
 
 with cli_imports():
     from plugins.violin_guard import handlers
-    from plugins.violin_guard.core import bootstrap, findings, state
+    from plugins.violin_guard.core.engagement import bootstrap, state
+    from plugins.violin_guard.core.evidence import findings
     from plugins.violin_guard.engine import release
     from plugins.violin_guard.gates import command
 

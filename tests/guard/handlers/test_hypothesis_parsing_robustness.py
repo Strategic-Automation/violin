@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core import hypotheses
+from plugins.violin_guard.core.engagement import hypotheses
 
 
 def _board(text: str, path: Path) -> Path:

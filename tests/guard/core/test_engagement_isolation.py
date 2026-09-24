@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from plugins.violin_guard.core.state import resolve_eng_dir
+from plugins.violin_guard.core.engagement.state import resolve_eng_dir
 from plugins.violin_guard.gates.command import check_cross_engagement_paths
 
 
@@ -30,6 +30,23 @@ def test_relative_engagement_path_uses_profile_root_not_cwd(monkeypatch, tmp_pat
         resolve_eng_dir("engagements/new")
         == (Path(__file__).resolve().parents[3] / "engagements" / "new").resolve()
     )
+
+
+def test_resolve_eng_dir_honours_violin_eng_root(monkeypatch, tmp_path: Path) -> None:
+    custom_root = tmp_path / "custom-violin-root"
+    custom_eng = custom_root / "engagements" / "target-1"
+    custom_eng.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.delenv("ENG_DIR", raising=False)
+    monkeypatch.setenv("VIOLIN_ENG_ROOT", str(custom_root))
+    monkeypatch.chdir(tmp_path)
+
+    # Relative path resolves against VIOLIN_ENG_ROOT
+    assert resolve_eng_dir("engagements/target-1") == custom_eng.resolve()
+
+    # Empty string and dot resolve to VIOLIN_ENG_ROOT when ENG_DIR is unset and cwd has no scope/hypotheses
+    assert resolve_eng_dir("") == custom_root.resolve()
+    assert resolve_eng_dir(".") == custom_root.resolve()
 
 
 def test_resolve_eng_dir_does_not_redirect_explicit_path_to_environment(

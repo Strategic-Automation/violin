@@ -34,7 +34,9 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from plugins.violin_guard.core.receipt_integrity import RECEIPT_SIGNING_KEY_ENV  # noqa: E402
+from plugins.violin_guard.core.evidence.receipt_integrity import (  # noqa: E402
+    RECEIPT_SIGNING_KEY_ENV,
+)
 from plugins.violin_guard.gates.command import validate_scope  # noqa: E402
 
 _DEFAULT_HERMES_MAX_TOKENS = 32_000

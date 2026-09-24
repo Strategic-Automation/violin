@@ -9,8 +9,9 @@ from pathlib import Path
 import pytest
 
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.core import bootstrap, history, hypotheses, ptt, state
-from plugins.violin_guard.core.skill_receipts import SkillViewResult, get_binding
+from plugins.violin_guard.core.engagement import bootstrap, hypotheses, ptt, state
+from plugins.violin_guard.core.evidence import history
+from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult, get_binding
 from plugins.violin_guard.handlers import ptt_review
 from tests.guard.receipt_fixture import bind_active_task
 

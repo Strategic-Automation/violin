@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from plugins.violin_guard.core.receipt_integrity import (
+from plugins.violin_guard.core.evidence.receipt_integrity import (
     DIGESTS_FIELD,
     PUBLIC_SIGNATURE_FIELD,
     SIGNATURE_FIELD,

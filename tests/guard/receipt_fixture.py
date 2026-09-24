@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from plugins.violin_guard.core import ptt, state
-from plugins.violin_guard.core.skill_receipts import (
+from plugins.violin_guard.core.engagement import ptt, state
+from plugins.violin_guard.core.skills.skill_receipts import (
     SkillViewResult,
     bind_task,
     complete_delivery,

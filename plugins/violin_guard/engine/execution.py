@@ -19,12 +19,12 @@ from typing import Any
 
 import psutil
 
-from ..core import state
-from ..core.history import append_history
-from ..core.http_proof import normalize_http_proof_flags
-from ..core.phases import normalize_phase, suppresses_heartbeat
-from ..core.receipt_integrity import seal_execution_receipt
-from ..core.runtime_backend import resolve_backend
+from plugins.violin_guard.core.commands.http_proof import normalize_http_proof_flags
+from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.core.engagement.phases import normalize_phase, suppresses_heartbeat
+from plugins.violin_guard.core.evidence.history import append_history
+from plugins.violin_guard.core.evidence.receipt_integrity import seal_execution_receipt
+from plugins.violin_guard.engine.runtime_backend import resolve_backend
 
 __all__ = [
     "execute",
@@ -429,7 +429,7 @@ def execute(
     """Execute one already-authorized command and persist its complete receipt."""
     # Rewrite curl/wget HTTP probes to capture the response status line (add -i)
     # so saved evidence always carries a literal HTTP/1.x status line. Lives in
-    # core.http_proof; applied before the receipt is sealed and before the
+    # core.commands.http_proof; applied before the receipt is sealed and before the
     # process runs so both the manifest and the executed argv record the fix.
     requested_command = command
     command = normalize_http_proof_flags(command)

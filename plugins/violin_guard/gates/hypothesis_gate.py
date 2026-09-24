@@ -9,12 +9,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..core import hypotheses, state
-from ..core.http_proof import has_capture_flag
-from ..core.phases import Phase, normalize_phase, requires_hypothesis
+from plugins.violin_guard.core.commands.http_proof import has_capture_flag
+from plugins.violin_guard.core.commands.targets import normalize_target, resolve_command_targets
+from plugins.violin_guard.core.engagement import hypotheses, state
+from plugins.violin_guard.core.engagement.phases import Phase, normalize_phase, requires_hypothesis
+from plugins.violin_guard.core.skills.skill_receipts import get_binding
+
 from ..core.results import GuardResult
-from ..core.skill_receipts import get_binding
-from ..core.targets import normalize_target, resolve_command_targets
 from .scope_gate import validate_scope
 
 

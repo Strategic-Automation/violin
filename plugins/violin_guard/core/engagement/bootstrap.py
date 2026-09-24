@@ -13,8 +13,13 @@ from pathlib import Path
 
 import yaml
 
-from .results import GuardResult
-from .state import ensure_dir, record_session_id, resolve_eng_dir
+from plugins.violin_guard.core.engagement.state import (
+    ensure_dir,
+    record_session_id,
+    resolve_eng_dir,
+)
+
+from ..results import GuardResult
 
 __all__ = [
     "init_engagement",
@@ -74,8 +79,8 @@ def _derive_host(eng_dir: Path) -> str:
 
 
 def _profile_root() -> Path:
-    """Profile root = plugins/violin_guard/../.."""
-    return Path(__file__).resolve().parents[3]
+    """Return the profile root containing the bundled skill templates."""
+    return Path(__file__).resolve().parents[4]
 
 
 def _create_artifact(
