@@ -6,11 +6,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from plugins.violin_guard.core.engagement import ptt, state
-from plugins.violin_guard.core.engagement.phases import requires_hypothesis
-from plugins.violin_guard.core.evidence.history import history_contains
-from plugins.violin_guard.core.skills.skill_receipts import HermesSkillViewAdapter, get_binding
-
+from ..core.engagement import ptt, state
+from ..core.engagement.phases import requires_hypothesis
+from ..core.evidence.history import history_contains
+from ..core.skills.skill_receipts import HermesSkillViewAdapter, get_binding
 from .base import (
     _eng_path,
     _json,

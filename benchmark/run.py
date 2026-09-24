@@ -214,8 +214,8 @@ def _run_manifest(
         Path(__file__),
         REPO_ROOT / "benchmark" / "targets" / "duck-store" / "scope.yaml",
         REPO_ROOT / "benchmark" / "targets" / "duck-store" / "engage.md",
-        REPO_ROOT / "plugins" / "violin_guard" / "core" / "findings.py",
-        REPO_ROOT / "plugins" / "violin_guard" / "core" / "receipt_integrity.py",
+        REPO_ROOT / "plugins" / "violin_guard" / "core" / "evidence" / "findings.py",
+        REPO_ROOT / "plugins" / "violin_guard" / "core" / "evidence" / "receipt_integrity.py",
     ]
     isolation_id = str(getattr(args, "target_isolation_id", "") or "").strip()
     return {

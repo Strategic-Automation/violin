@@ -6,8 +6,8 @@ from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from plugins.violin_guard.core.engagement import state
-from plugins.violin_guard.core.skills.skill_policy import _VULNERABILITY_ROUTES, _normalize
+from ..core.engagement import state
+from ..core.skills.skill_policy import _VULNERABILITY_ROUTES, _normalize
 
 # ---------------------------------------------------------------------------
 # Pydantic v2 Models

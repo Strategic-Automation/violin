@@ -13,12 +13,11 @@ from pathlib import Path
 
 import yaml
 
-from plugins.violin_guard.core.engagement.state import (
+from ...core.engagement.state import (
     ensure_dir,
     record_session_id,
     resolve_eng_dir,
 )
-
 from ..results import GuardResult
 
 __all__ = [

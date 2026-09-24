@@ -14,9 +14,9 @@ from typing import Any
 
 from filelock import FileLock
 
-from plugins.violin_guard.core.commands.bash_ast import parse_bash_segments
-from plugins.violin_guard.core.commands.targets import extract_target_candidates
-from plugins.violin_guard.core.engagement.phases import normalize_phase, suppresses_heartbeat
+from ...core.commands.bash_ast import parse_bash_segments
+from ...core.commands.targets import extract_target_candidates
+from ...core.engagement.phases import normalize_phase, suppresses_heartbeat
 
 # Constants
 
@@ -520,7 +520,7 @@ def _recorded_findings(eng_dir: Path) -> int:
     anti-stuck hint fire on productive batches. Imported here because
     ``findings`` imports this module at import time.
     """
-    from plugins.violin_guard.core.evidence import findings
+    from ...core.evidence import findings
 
     try:
         return len(findings.load_findings(eng_dir))

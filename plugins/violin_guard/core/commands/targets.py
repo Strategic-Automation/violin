@@ -18,7 +18,7 @@ import netaddr
 import yaml
 from yarl import URL
 
-from plugins.violin_guard.core.commands.bash_ast import extract_all_command_words
+from ...core.commands.bash_ast import extract_all_command_words
 
 _PATH_VALUE_FLAGS = {
     "-o",

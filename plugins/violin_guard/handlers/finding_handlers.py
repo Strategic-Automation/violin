@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from plugins.violin_guard.core.evidence import findings
-
+from ..core.evidence import findings
 from .base import _json, _serialize_errors
 
 

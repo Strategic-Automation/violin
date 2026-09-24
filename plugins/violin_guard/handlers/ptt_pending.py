@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from plugins.violin_guard.core.engagement import ptt
+from ..core.engagement import ptt
 
 
 def validate_pending_phases(task: ptt.PttTask, pending: dict[str, Any], *, task_label: str) -> None:

@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from plugins.violin_guard.core.engagement.phases import Phase, normalize_phase
+from ...core.engagement.phases import Phase, normalize_phase
 
 __all__ = [
     "CATALOG",

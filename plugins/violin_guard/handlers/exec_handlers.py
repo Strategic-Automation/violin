@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from plugins.violin_guard.core.engagement import ptt, state
-
+from ..core.engagement import ptt, state
 from ..engine import execution
 from .base import (
     _check_command_internal,

@@ -19,11 +19,11 @@ from typing import Any
 
 import psutil
 
-from plugins.violin_guard.core.commands.http_proof import normalize_http_proof_flags
-from plugins.violin_guard.core.engagement import state
-from plugins.violin_guard.core.evidence.history import append_history
-from plugins.violin_guard.core.evidence.receipt_integrity import seal_execution_receipt
-from plugins.violin_guard.engine.runtime_backend import resolve_backend
+from ..core.commands.http_proof import normalize_http_proof_flags
+from ..core.engagement import state
+from ..core.evidence.history import append_history
+from ..core.evidence.receipt_integrity import seal_execution_receipt
+from ..engine.runtime_backend import resolve_backend
 
 __all__ = [
     "execute",

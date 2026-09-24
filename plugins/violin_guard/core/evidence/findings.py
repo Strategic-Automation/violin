@@ -10,10 +10,9 @@ from typing import Any
 
 import yaml
 
-from plugins.violin_guard.core import schemas
-from plugins.violin_guard.core.engagement import state
-from plugins.violin_guard.core.evidence import receipt_integrity
-
+from ...core import schemas
+from ...core.engagement import state
+from ...core.evidence import receipt_integrity
 from ..results import GuardResult
 
 FINDINGS_PATH = Path("evidence/findings.jsonl")

@@ -10,15 +10,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from plugins.violin_guard.core.commands.targets import (
+from ..core.commands.targets import (
     check_scope_targets,
     is_research_host,
     normalize_target,
 )
-from plugins.violin_guard.core.engagement import bootstrap, ptt, state
-from plugins.violin_guard.core.engagement.phases import Phase, normalize_phase, suppresses_heartbeat
-from plugins.violin_guard.core.evidence import history as history_mod
-
+from ..core.engagement import bootstrap, ptt, state
+from ..core.engagement.phases import Phase, normalize_phase, suppresses_heartbeat
+from ..core.evidence import history as history_mod
 from ..core.results import GuardResult
 from .hypothesis_gate import (
     _RECORD_AS_YOU_GO_GRACE,

@@ -5,10 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from plugins.violin_guard.core.engagement import ptt, state
-from plugins.violin_guard.core.engagement.phases import requires_hypothesis
-from plugins.violin_guard.core.skills.skill_receipts import HermesSkillViewAdapter, bind_task
-
+from ..core.engagement import ptt, state
+from ..core.engagement.phases import requires_hypothesis
+from ..core.skills.skill_receipts import HermesSkillViewAdapter, bind_task
 from .base import (
     _eng_path,
     _hypothesis_route_context,

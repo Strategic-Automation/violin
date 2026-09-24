@@ -20,17 +20,16 @@ from typing import Any
 
 import yaml
 
-from plugins.violin_guard.core.commands.targets import (
+from ..core.commands.targets import (
     KNOWN_FILE_EXTENSIONS,
     extract_target_candidates,
     normalize_target,
     resolve_target,
 )
-from plugins.violin_guard.core.engagement import state
-from plugins.violin_guard.core.engagement.ptt import find_active_task, parse_ptt
-from plugins.violin_guard.core.evidence import history
-from plugins.violin_guard.core.evidence.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
-
+from ..core.engagement import state
+from ..core.engagement.ptt import find_active_task, parse_ptt
+from ..core.evidence import history
+from ..core.evidence.redaction import REDACTED, SENSITIVE_FIELD_KEYS, redact_text
 from ..gates import command
 from .execution import PREVIEW_BYTES
 

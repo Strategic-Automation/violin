@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from plugins.violin_guard.core.engagement.state import ensure_dir, lock_file, resolve_eng_dir
+from ...core.engagement.state import ensure_dir, lock_file, resolve_eng_dir
 
 _COMMAND_MARKER = " | command="
 _COMMAND_LENGTH_MARKER = " | command_length="

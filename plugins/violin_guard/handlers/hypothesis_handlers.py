@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from plugins.violin_guard.core.commands.targets import scope_hosts
-from plugins.violin_guard.core.engagement import hypotheses, state
-
+from ..core.commands.targets import scope_hosts
+from ..core.engagement import hypotheses, state
 from ..gates.scope_gate import load_scope
 from .base import _eng_path, _json, _serialize_errors
 

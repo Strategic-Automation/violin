@@ -8,13 +8,13 @@ from typing import Any
 
 import yaml
 
-from plugins.violin_guard.core.engagement import hypotheses, ptt
-from plugins.violin_guard.core.engagement.disposition_policy import (
+from ..core.engagement import hypotheses, ptt
+from ..core.engagement.disposition_policy import (
     EXPECTED_METHODOLOGY_GATES,
     evaluate_dispositions,
 )
-from plugins.violin_guard.core.evidence import findings, history
-from plugins.violin_guard.core.evidence.redaction import redact_single_line
+from ..core.evidence import findings, history
+from ..core.evidence.redaction import redact_single_line
 
 # A REPORTING close is satisfied by a command that produced authenticated proof of
 # impact: one executed in an exploitation/later phase, or one executed under VULN_RESEARCH

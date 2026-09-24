@@ -8,14 +8,13 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from plugins.violin_guard.core.engagement import ptt, state
-from plugins.violin_guard.core.skills.skill_receipts import (
+from .core.engagement import ptt, state
+from .core.skills.skill_receipts import (
     advance_context_generation,
     binding_readiness,
     record_binding_turn,
     record_delivery_turn,
 )
-
 from .engine import code_execution_audit
 from .gates.terminal_policy import block_terminal_command
 
