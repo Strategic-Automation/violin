@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..core.engagement import state
 from ..core.skills.skill_policy import _VULNERABILITY_ROUTES, _normalize
@@ -74,7 +74,13 @@ class RecordHypothesisArgsModel(BaseModel):
     )
     phase: str = ""
     target: str = Field("", description="target host/IP (must be in scope)")
-    vuln_class: str = ""
+    vuln_class: str = Field(
+        "",
+        description=(
+            "Canonical vulnerability route key (lowercase; underscores and spaces map to '-'). "
+            "Accepted keys: " + ", ".join(sorted(_VULNERABILITY_ROUTES)) + "."
+        ),
+    )
     rationale: str = ""
     evidence: str = ""
     cve_research: str = Field(
@@ -130,6 +136,15 @@ class RecordHypothesisArgsModel(BaseModel):
             "evidence file paths; globs and semicolon-separated values are not accepted."
         ),
     )
+    evidence_paths: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description=(
+            "Optional engagement-relative saved output files under evidence/ supporting this "
+            "hypothesis (the same shape as finding-side evidence_paths). Values are merged "
+            "into runtime_evidence."
+        ),
+    )
 
     @field_validator("confidence", "port", mode="before")
     @classmethod
@@ -151,6 +166,17 @@ class RecordHypothesisArgsModel(BaseModel):
                 "unknown vuln_class; valid classes are: " + ", ".join(sorted(_VULNERABILITY_ROUTES))
             )
         return canonical
+
+    @model_validator(mode="after")
+    def _merge_evidence_paths(self) -> RecordHypothesisArgsModel:
+        """Fold finding-shaped evidence_paths into runtime_evidence."""
+        if self.evidence_paths:
+            merged = [p.strip() for p in self.runtime_evidence.split(",") if p.strip()]
+            for path in self.evidence_paths:
+                if path not in merged:
+                    merged.append(path)
+            self.runtime_evidence = ", ".join(merged)
+        return self
 
 
 class ExecArgsModel(BaseModel):
