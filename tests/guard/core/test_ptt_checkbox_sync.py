@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from plugins.violin_guard.core import ptt
 
 
@@ -98,3 +100,36 @@ def test_update_preserves_crlf_and_unowned_table_source(tmp_path: Path) -> None:
     assert "| PT-001 | [x] | Real task | finished |\r\n" in updated
     assert "| PT-999 | [ ] | Example only | preserve |\r\n" in updated
     assert "\n" not in updated.replace("\r\n", "")
+
+
+@pytest.mark.parametrize("note", ["stored <img onerror>", "DOM link <a href={o}>", "JS a || b"])
+def test_task_notes_round_trip_without_disappearing(tmp_path: Path, note: str) -> None:
+    path = tmp_path / "ptt.md"
+    path.write_text(
+        "# PTT\n\n## Phase: RECON\n\n"
+        "| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        "| PT-101 | [~] | Recon | initial |\n",
+        encoding="utf-8",
+    )
+
+    updated = ptt.update_task(path, "PT-101", "[x]", note)
+
+    assert updated.id == "PT-101"
+    assert updated.status == "[x]"
+    assert updated.note == note
+    assert [(task.id, task.note) for task in ptt.parse_ptt(path)] == [("PT-101", note)]
+
+
+def test_invalid_multiline_note_cannot_partially_update_ptt(tmp_path: Path) -> None:
+    path = tmp_path / "ptt.md"
+    original = (
+        "# PTT\n\n## Phase: RECON\n\n"
+        "| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        "| PT-101 | [~] | Recon | initial |\n"
+    )
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="single-line"):
+        ptt.update_task(path, "PT-101", "[x]", "line one\nline two")
+
+    assert path.read_text(encoding="utf-8") == original

@@ -1,11 +1,12 @@
 """HTTP proof-capture helpers shared by command gates and the execution engine.
 
 A target probe's saved evidence is only interpretable later (for scoring,
-reporting, or replay) if it records a literal ``HTTP/1.x <code>`` status line.
-Plain ``curl -s`` prints only the body and discards the status/headers. This
-module provides a pure rewriter that injects ``-i`` for curl or ``-S`` for wget
-when an HTTP probe lacks a status-capture flag. It lives here (lower-level than
-both gates and engine) so either layer can apply it without a circular import.
+reporting, or replay) if it records a response status. Plain ``curl -s``
+prints only the body and discards the status/headers. This module provides a
+pure rewriter that injects ``-i`` for curl, ``-w`` when curl
+writes the response body to a separate file, or ``-S`` for wget when an HTTP
+probe lacks status capture. It lives here (lower-level than both gates and
+engine) so either layer can apply it without a circular import.
 """
 
 from __future__ import annotations
@@ -113,12 +114,10 @@ def normalize_http_proof_flags(command: str) -> str:
     """Inject the client-specific flag into an HTTP probe missing status capture.
 
     Returns the original command unchanged unless it is an HTTP probe to an
-    http(s) URL using curl/wget with no status-capture flag, in which case
-    the flag is inserted immediately after the client token without rebuilding
-    or re-quoting the rest of the command. Probes whose stdout is consumed by a
-    pipe, a command substitution or a file redirect are left alone, because the
-    captured status would corrupt that consumer instead of reaching the receipt
-    (see ``_stdout_is_captured``).
+    http(s) URL using curl/wget with no status-capture flag. Curl probes writing
+    their body with ``-o`` use ``-w`` so the file remains parseable; other
+    probes receive the client-specific header flag. Probes whose stdout is
+    consumed by a pipe or command substitution are left alone.
     """
     segments = parse_bash_segments(command)
     spans = _segment_spans(command, segments)
@@ -139,7 +138,20 @@ def normalize_http_proof_flags(command: str) -> str:
         client_match = _CLIENT_TOKEN_RE[client].search(segment.raw_text)
         if client_match is None:
             continue
-        insertions.append((start + client_match.end(), f" {_INJECTED_CAPTURE_FLAG[client]}"))
+        capture_flag = _INJECTED_CAPTURE_FLAG[client]
+        if client == "curl":
+            try:
+                tokens = shlex.split(segment.raw_text, posix=True)
+            except ValueError:
+                tokens = segment.raw_text.split()
+            if any(
+                token == "--output"
+                or token.startswith("--output=")
+                or (token.startswith("-o") and not token.startswith("--"))
+                for token in tokens
+            ):
+                capture_flag = "-w 'HTTP %{http_code}\\n'"
+        insertions.append((start + client_match.end(), f" {capture_flag}"))
 
     rewritten = command
     for position, value in reversed(insertions):
