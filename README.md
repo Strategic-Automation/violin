@@ -238,9 +238,13 @@ the supplied command.
 
 ```text
 plugins/violin_guard/
-├── core/           state, schemas, parsing, phases, targets
+├── core/
+│   ├── commands/   shell parsing, targets, HTTP proof
+│   ├── engagement/ state, PTT, phases, hypotheses, bootstrap
+│   ├── evidence/   findings, history, receipts, redaction
+│   └── skills/     skill policy and receipts
 ├── gates/          command, scope, hypothesis, terminal policies
-├── engine/         execution and release verification
+├── engine/         execution, runtime backend, code audit, release checks
 ├── handlers/       public Hermes tool handlers
 ├── hooks.py        Hermes lifecycle hooks
 └── registry.py     registered tool definitions

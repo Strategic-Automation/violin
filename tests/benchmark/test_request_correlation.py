@@ -6,7 +6,7 @@ import pytest
 
 from benchmark.proof import _command_requests, _sub_commands, receipt_bundles
 from plugins.violin_guard.core.evidence import findings, receipt_integrity
-from tests.guard.engine.test_benchmark_runner import _write_receipt
+from tests.benchmark.receipt_fixture import _write_receipt
 
 
 @pytest.mark.parametrize(
