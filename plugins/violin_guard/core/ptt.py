@@ -27,16 +27,6 @@ __all__ = [
 ]
 
 
-# | PT-001 | [ ] | Title | Note |
-# Accepts PT-001 and PT-CTF-001 style ids; status tokens include the
-# canonical blocked/dropped markers [!] and [-] (audit P0: CTF ids and the
-# blocked/dropped states were previously rejected as "non-standard").
-_PTT_RE = re.compile(
-    r"^\|\s*(?P<id>PT-[\w-]+)\s*\|"
-    r"\s*(?P<status>\[[ x~!-]\])\s*\|"
-    r"\s*(?P<title>[^|]+?)\s*\|"
-    r"\s*(?P<note>[^|]*?)\s*\|"
-)
 _PAREN_SPLIT_RE = re.compile(r"\s*\(")
 _TASK_ID_RE = re.compile(r"PT-[\w-]+")
 
@@ -140,27 +130,27 @@ def _is_task_table(lines: list[str], start: int, end: int) -> bool:
 
 def _ptt_rows(source: str) -> list[tuple[PttTask, int]]:
     blocks = list(iter_markdown_blocks(source))
-    protected = [(block.start, block.end) for block in blocks if block.kind == "protected"]
     lines = source.splitlines()
     rows: list[tuple[PttTask, int]] = []
     for phase, start, end in _phase_tables(blocks, lines):
         for line_index in range(start, min(end, len(lines))):
-            if any(start <= line_index < end for start, end in protected):
+            cells = _pipe_cells(lines[line_index])
+            if len(cells) < 4 or not _TASK_ID_RE.fullmatch(cells[0]):
                 continue
-            match = _PTT_RE.match(lines[line_index].strip())
-            if match:
-                rows.append(
-                    (
-                        PttTask(
-                            id=match.group("id").strip(),
-                            status=match.group("status").strip(),
-                            title=match.group("title").strip(),
-                            note=match.group("note").strip(),
-                            phase=phase,
-                        ),
-                        line_index,
-                    )
+            if cells[1] not in _VALID_STATUSES or not cells[2]:
+                continue
+            rows.append(
+                (
+                    PttTask(
+                        id=cells[0],
+                        status=cells[1],
+                        title=cells[2].replace(r"\|", "|"),
+                        note=cells[-1].replace(r"\|", "|"),
+                        phase=phase,
+                    ),
+                    line_index,
                 )
+            )
     return rows
 
 
@@ -222,7 +212,9 @@ def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, P
         status = status.strip()
         if status not in _VALID_STATUSES:
             raise ValueError(f"invalid PTT status {status!r}; expected one of {_VALID_STATUSES}")
-        normalized[task_id] = (status, note)
+        if "\n" in note or "\r" in note:
+            raise ValueError("PTT note must be single-line")
+        normalized[task_id] = (status, note.strip())
 
     content = read_markdown(path) if path.exists() else ""
     lines = content.splitlines(keepends=True)
@@ -241,7 +233,14 @@ def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, P
         status, note = normalized[task_id]
         lines[target_idx] = _replace_task_row(lines[target_idx], status, note)
 
-    atomic_text(path, "".join(lines))
+    candidate = "".join(lines)
+    candidate_tasks = [task for task, _ in _ptt_rows(candidate) if task.id in normalized]
+    if len(candidate_tasks) != len(normalized) or any(
+        (task.status, task.note) != normalized[task.id] for task in candidate_tasks
+    ):
+        raise ValueError("PTT update would lose a task or note; refusing to write")
+
+    atomic_text(path, candidate)
     tasks = sync_ptt(path)
     result = {task.id: task for task in tasks if task.id in normalized}
     if len(result) != len(normalized):

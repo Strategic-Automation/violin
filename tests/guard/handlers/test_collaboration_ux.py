@@ -121,6 +121,25 @@ def test_review_batch_updates_ptt_and_clears_lock(tmp_path: Path, task_status: s
     assert "reviewed-batch:" in (eng / "state" / "ptt.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("note", ["XSS payload <img onerror>", "link <a href={o}>", "JS a || b"])
+def test_review_batch_with_markup_note_releases_pending_lock(tmp_path: Path, note: str) -> None:
+    eng = _engagement(tmp_path)
+    _pending_batch(eng)
+
+    result = json.loads(
+        service.handle_review_batch(
+            {"eng_dir": str(eng), "id": "PT-010", "status": "[x]", "note": note}
+        )
+    )
+
+    assert result["status"] == "ok", result
+    assert not state.has_pending_sync(eng)
+    reviewed = next(task for task in ptt.parse_ptt(eng / "state" / "ptt.md") if task.id == "PT-010")
+    assert reviewed.status == "[x]"
+    assert note in reviewed.note
+    assert "[reviewed-batch:" in reviewed.note
+
+
 class _ReadySkillAdapter:
     def view(self, *_args, **_kwargs) -> SkillViewResult:
         return SkillViewResult(True, "pentest review")
