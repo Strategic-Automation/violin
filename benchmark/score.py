@@ -16,11 +16,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from benchmark.proof import match_finding  # noqa: E402
-from plugins.violin_guard.core.disposition_policy import (  # noqa: E402
+from plugins.violin_guard.core.engagement.disposition_policy import (  # noqa: E402
     EXPECTED_METHODOLOGY_GATES,
     evaluate_dispositions,
 )
-from plugins.violin_guard.core.findings import load_findings  # noqa: E402
+from plugins.violin_guard.core.evidence.findings import load_findings  # noqa: E402
 
 GOLDEN_PATH = REPO_ROOT / "benchmark" / "private" / "duck-store-golden.json"
 CALIBRATION_ROOT = REPO_ROOT / "benchmark" / "targets" / "duck-store" / "calibration"

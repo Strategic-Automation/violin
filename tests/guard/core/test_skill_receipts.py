@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core.skill_receipts import (
+from plugins.violin_guard.core.skills.skill_receipts import (
     HermesSkillViewAdapter,
     SkillViewResult,
     advance_context_generation,

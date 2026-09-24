@@ -19,8 +19,12 @@ import ipaddress
 import re
 from urllib.parse import urlsplit
 
-from ..core.bash_ast import CommandSegment, parse_bash_segments, split_heredoc_body
-from ..core.targets import KNOWN_FILE_EXTENSIONS
+from ..core.commands.bash_ast import (
+    CommandSegment,
+    parse_bash_segments,
+    split_heredoc_body,
+)
+from ..core.commands.targets import KNOWN_FILE_EXTENSIONS
 
 # ---------------------------------------------------------------------------
 # Rule Sets & Pattern Definitions

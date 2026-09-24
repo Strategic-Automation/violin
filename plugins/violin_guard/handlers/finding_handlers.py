@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..core import findings
+from ..core.evidence import findings
 from .base import _json, _serialize_errors
 
 

@@ -8,7 +8,8 @@ from pathlib import Path
 
 import yaml
 
-from plugins.violin_guard.core import schemas, state
+from plugins.violin_guard.core import schemas
+from plugins.violin_guard.core.engagement import state
 from plugins.violin_guard.engine import release
 from plugins.violin_guard.engine.release import ReleaseCheckResult, _pytest_basetemp
 

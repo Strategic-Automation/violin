@@ -8,14 +8,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from .core import ptt, state
-from .core.skill_receipts import (
+from .core.engagement import ptt, state
+from .core.skills.skill_receipts import (
     advance_context_generation,
     binding_readiness,
     record_binding_turn,
     record_delivery_turn,
 )
-from .gates import code_execution_audit
+from .engine import code_execution_audit
 from .gates.terminal_policy import block_terminal_command
 
 _SESSION_ENGAGEMENTS: dict[str, str] = {}

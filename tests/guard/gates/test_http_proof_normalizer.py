@@ -1,6 +1,6 @@
 """Tests for automatic HTTP status-line capture in evidence-producing probes."""
 
-from plugins.violin_guard.core.http_proof import normalize_http_proof_flags
+from plugins.violin_guard.core.commands.http_proof import normalize_http_proof_flags
 
 
 def test_injects_i_into_plain_curl_get():

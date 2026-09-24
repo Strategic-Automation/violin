@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core.targets import (
+from plugins.violin_guard.core.commands.targets import (
     check_scope_targets,
     extract_target_candidates,
     normalize_target,
@@ -286,7 +286,7 @@ def test_direct_dev_tcp_redirection_is_checked_and_not_bookkeeping(tmp_path: Pat
 
 
 def test_parenthetical_scope_actions_are_permitted() -> None:
-    from plugins.violin_guard.core.phases import Phase
+    from plugins.violin_guard.core.engagement.phases import Phase
     from plugins.violin_guard.gates.command import check_scope_authorization
 
     scope = {
@@ -300,7 +300,7 @@ def test_parenthetical_scope_actions_are_permitted() -> None:
 
 
 def test_vulnerability_research_permits_vuln_research_phase() -> None:
-    from plugins.violin_guard.core.phases import Phase
+    from plugins.violin_guard.core.engagement.phases import Phase
     from plugins.violin_guard.gates.command import check_scope_authorization
 
     scope = {
@@ -412,7 +412,7 @@ def test_echo_label_ips_are_not_transport_targets(tmp_path: Path) -> None:
 
 
 def test_scope_authorization_error_message_provides_selection_list() -> None:
-    from plugins.violin_guard.core.phases import Phase
+    from plugins.violin_guard.core.engagement.phases import Phase
     from plugins.violin_guard.gates.command import check_scope_authorization
 
     scope = {

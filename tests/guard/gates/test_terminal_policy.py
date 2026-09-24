@@ -9,8 +9,9 @@ import pytest
 
 from plugins.violin_guard import TOOL_DEFINITIONS, register
 from plugins.violin_guard import handlers as service
-from plugins.violin_guard.core import bootstrap, schemas, state
-from plugins.violin_guard.core.skill_receipts import SkillViewResult
+from plugins.violin_guard.core import schemas
+from plugins.violin_guard.core.engagement import bootstrap, state
+from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult
 from plugins.violin_guard.gates import command as guard_command
 from plugins.violin_guard.handlers import ptt_handlers
 from plugins.violin_guard.hooks import (

@@ -12,7 +12,7 @@ else:
     from cli_environment import cli_imports
 
 with cli_imports():
-    from plugins.violin_guard.core import findings
+    from plugins.violin_guard.core.evidence import findings
 
 
 def main(argv: list[str] | None = None) -> int:

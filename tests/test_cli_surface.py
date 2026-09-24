@@ -144,14 +144,15 @@ def test_cli_does_not_advertise_removed_adapter_commands() -> None:
 
     assert result.returncode == 0
     assert "search-exploit" not in result.stdout
+    assert "exec-burst" not in result.stdout
     assert "adapters" not in SCRIPT.read_text(encoding="utf-8")
 
 
 def test_smoke_script_imports_from_owning_modules() -> None:
     source = SMOKE_SCRIPT.read_text(encoding="utf-8")
 
-    assert "from plugins.violin_guard import history" not in source
-    assert "from plugins.violin_guard import history, service, state" not in source
+    assert "from plugins.violin_guard.core.evidence import history" in source
+    assert "from plugins.violin_guard.core.engagement import state" in source
 
     result = subprocess.run(
         [
@@ -159,7 +160,8 @@ def test_smoke_script_imports_from_owning_modules() -> None:
             "-c",
             (
                 "from plugins.violin_guard import handlers as service; "
-                "from plugins.violin_guard.core import history, state; "
+                "from plugins.violin_guard.core.engagement import state; "
+                "from plugins.violin_guard.core.evidence import history; "
                 "assert service and history and state"
             ),
         ],

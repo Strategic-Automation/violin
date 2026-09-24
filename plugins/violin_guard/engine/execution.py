@@ -19,12 +19,11 @@ from typing import Any
 
 import psutil
 
-from ..core import state
-from ..core.history import append_history
-from ..core.http_proof import normalize_http_proof_flags
-from ..core.phases import normalize_phase, suppresses_heartbeat
-from ..core.receipt_integrity import seal_execution_receipt
-from ..core.runtime_backend import resolve_backend
+from ..core.commands.http_proof import normalize_http_proof_flags
+from ..core.engagement import state
+from ..core.evidence.history import append_history
+from ..core.evidence.receipt_integrity import seal_execution_receipt
+from ..engine.runtime_backend import resolve_backend
 
 __all__ = [
     "execute",
@@ -429,7 +428,7 @@ def execute(
     """Execute one already-authorized command and persist its complete receipt."""
     # Rewrite curl/wget HTTP probes to capture the response status line (add -i)
     # so saved evidence always carries a literal HTTP/1.x status line. Lives in
-    # core.http_proof; applied before the receipt is sealed and before the
+    # core.commands.http_proof; applied before the receipt is sealed and before the
     # process runs so both the manifest and the executed argv record the fix.
     requested_command = command
     command = normalize_http_proof_flags(command)
@@ -628,20 +627,6 @@ def execute(
         "sync_reservation_consumed": consumed,
         "sync_reservation_released": False,
     }
-
-
-def _commit_guard_state(eng_dir: Path, command: str, phase: str, ptt_task_id: str = "") -> int:
-    state.record_ok_check(str(eng_dir), command, phase)
-    remaining = state.spend_sync_credit(str(eng_dir), phase)
-    state.mark_pending_sync(str(eng_dir), command, phase, ptt_task_id)
-    count = state.tick_command(str(eng_dir))
-    phase_enum = normalize_phase(phase)
-    if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
-        state.set_heartbeat_pending(
-            str(eng_dir),
-            f"Reached {count} executed target commands. Review engagement files for drift.",
-        )
-    return remaining
 
 
 def status(eng_dir: str, execution_id: str) -> dict[str, Any]:

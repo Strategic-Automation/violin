@@ -16,13 +16,13 @@ from typing import Any
 from yarl import URL
 
 from benchmark.python_requests import python_request_observations
-from plugins.violin_guard.core.bash_ast import parse_bash_segments
-from plugins.violin_guard.core.http_observations import (
+from plugins.violin_guard.core.commands.bash_ast import parse_bash_segments
+from plugins.violin_guard.core.evidence.http_observations import (
     HTTP_METHODS,
     parse_http_observations,
     parse_http_statuses,
 )
-from plugins.violin_guard.core.receipt_integrity import verified_evidence_paths
+from plugins.violin_guard.core.evidence.receipt_integrity import verified_evidence_paths
 
 
 @dataclass(frozen=True)

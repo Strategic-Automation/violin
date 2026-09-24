@@ -20,7 +20,7 @@ permissions:
 # ---------------------------------------------------------------------------
 # Tier 1: Scorer Calibration (fast, deterministic, no Hermes/LLM needed)
 #   Runs on every push/PR via the main ci.yml workflow (pytest includes
-#   tests/guard/engine/test_benchmark_runner.py which exercises known-good and
+#   tests/benchmark/test_benchmark_runner.py which exercises known-good and
 #   known-bad calibration fixtures).
 #
 # Tier 2: Live LLM Benchmark (manual trigger, needs Hermes + OpenRouter key)
@@ -55,7 +55,7 @@ jobs:
       # ── Tier 1 gate: scorer calibration must pass before live run ──
       - name: Scorer Calibration Gate
         run: |
-          uv run pytest tests/guard/engine/test_benchmark_runner.py -v
+          uv run pytest tests/benchmark/test_benchmark_runner.py -v
 
       # ── Tier 2: live LLM benchmark (only if Hermes is available) ──
       - name: Check Hermes Availability

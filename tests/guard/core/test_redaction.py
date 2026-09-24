@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plugins.violin_guard.core.redaction import (
+from plugins.violin_guard.core.evidence.redaction import (
     REDACTED,
     REDACTED_JWT,
     REDACTED_PRIVATE_KEY,

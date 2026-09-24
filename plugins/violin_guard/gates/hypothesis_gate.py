@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..core import hypotheses, state
-from ..core.http_proof import has_capture_flag
-from ..core.phases import Phase, normalize_phase, requires_hypothesis
+from ..core.commands.http_proof import has_capture_flag
+from ..core.commands.targets import normalize_target, resolve_command_targets
+from ..core.engagement import hypotheses, state
+from ..core.engagement.phases import Phase, normalize_phase, requires_hypothesis
 from ..core.results import GuardResult
-from ..core.skill_receipts import get_binding
-from ..core.targets import normalize_target, resolve_command_targets
+from ..core.skills.skill_receipts import get_binding
 from .scope_gate import validate_scope
 
 

@@ -34,7 +34,9 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from plugins.violin_guard.core.receipt_integrity import RECEIPT_SIGNING_KEY_ENV  # noqa: E402
+from plugins.violin_guard.core.evidence.receipt_integrity import (  # noqa: E402
+    RECEIPT_SIGNING_KEY_ENV,
+)
 from plugins.violin_guard.gates.command import validate_scope  # noqa: E402
 
 _DEFAULT_HERMES_MAX_TOKENS = 32_000
@@ -212,8 +214,8 @@ def _run_manifest(
         Path(__file__),
         REPO_ROOT / "benchmark" / "targets" / "duck-store" / "scope.yaml",
         REPO_ROOT / "benchmark" / "targets" / "duck-store" / "engage.md",
-        REPO_ROOT / "plugins" / "violin_guard" / "core" / "findings.py",
-        REPO_ROOT / "plugins" / "violin_guard" / "core" / "receipt_integrity.py",
+        REPO_ROOT / "plugins" / "violin_guard" / "core" / "evidence" / "findings.py",
+        REPO_ROOT / "plugins" / "violin_guard" / "core" / "evidence" / "receipt_integrity.py",
     ]
     isolation_id = str(getattr(args, "target_isolation_id", "") or "").strip()
     return {

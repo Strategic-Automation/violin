@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import shlex
 
-from .bash_ast import CommandSegment, parse_bash_segments
+from ...core.commands.bash_ast import CommandSegment, parse_bash_segments
 
 _HTTP_URL_RE = re.compile(r"https?://\S+", re.I)
 

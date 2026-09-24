@@ -185,8 +185,8 @@ are not yet reliable across runs.
 | Path | Responsibility |
 |---|---|
 | `benchmark/run.py` | Isolated agent run and public engagement setup |
-| `plugins/violin_guard/core/findings.py` | Typed submission store and report rendering |
-| `plugins/violin_guard/core/receipt_integrity.py` | Receipt and evidence authentication |
+| `plugins/violin_guard/core/evidence/findings.py` | Typed submission store and report rendering |
+| `plugins/violin_guard/core/evidence/receipt_integrity.py` | Receipt and evidence authentication |
 | `benchmark/proof.py` | Private proof correlation and golden matching |
 | `benchmark/score.py` | Private scoring and calibration |
 | `benchmark/aggregate.py` | Multi-run non-determinism accounting (mean pass@1, pass@k/pass^k) |

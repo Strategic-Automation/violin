@@ -10,9 +10,9 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from ..core import hypotheses, state
-from ..core.skill_policy import routable_context, skill_spec
-from ..core.skill_receipts import (
+from ..core.engagement import hypotheses, state
+from ..core.skills.skill_policy import routable_context, skill_spec
+from ..core.skills.skill_receipts import (
     HermesSkillViewAdapter,
     complete_delivery,
     get_binding,

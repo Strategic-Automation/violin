@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plugins.violin_guard.core.findings import generate_findings_yaml, generate_report_md
+from plugins.violin_guard.core.evidence.findings import generate_findings_yaml, generate_report_md
 
 
 def _write_finding(engagement: Path) -> None:

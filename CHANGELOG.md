@@ -50,7 +50,7 @@
 
 - Upgrade GitHub Actions workflows to v7 (`actions/checkout@v7`, `actions/setup-node@v7`, `actions/labeler@v7`, `actions/upload-artifact@v7`, and `astral-sh/setup-uv@v7`).
 - Upgrade dependencies including `psutil` (7.2.2) and dev dependencies including `ruff` (0.16.7).
-- Migrate `Phase` enumeration in `plugins/violin_guard/core/phases.py` to native Python 3.11 `StrEnum`.
+- Migrate `Phase` enumeration in `plugins/violin_guard/core/engagement/phases.py` to native Python 3.11 `StrEnum`.
 - Configure Dependabot to target `dev` branch for all future dependency and action updates.
 
 ## 3.3.0

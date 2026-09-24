@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from plugins.violin_guard.core import targets
+from plugins.violin_guard.core.commands import targets
 
 
 def test_normalize_target_yarl():

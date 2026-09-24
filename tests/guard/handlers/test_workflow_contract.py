@@ -7,17 +7,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from plugins.violin_guard.core import (
-    bootstrap,
-    findings,
-    history,
-    hypotheses,
-    ptt,
-    receipt_integrity,
-    state,
-)
-from plugins.violin_guard.core.disposition_policy import evaluate_dispositions
-from plugins.violin_guard.core.phases import Phase
+from plugins.violin_guard.core.engagement import bootstrap, hypotheses, ptt, state
+from plugins.violin_guard.core.engagement.disposition_policy import evaluate_dispositions
+from plugins.violin_guard.core.engagement.phases import Phase
+from plugins.violin_guard.core.evidence import findings, history, receipt_integrity
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import check_scope_authorization, validate_scope
 from plugins.violin_guard.handlers.ptt_gates import (

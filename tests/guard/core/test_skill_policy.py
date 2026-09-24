@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core.phases import Phase
-from plugins.violin_guard.core.skill_policy import (
+from plugins.violin_guard.core.engagement.phases import Phase
+from plugins.violin_guard.core.skills.skill_policy import (
     CATALOG,
     SkillSpec,
     catalog_snapshot,

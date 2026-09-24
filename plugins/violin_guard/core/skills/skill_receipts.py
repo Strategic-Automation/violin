@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import state
-from .skill_policy import validate_skill_selection
+from ...core.engagement import state
+from ...core.skills.skill_policy import validate_skill_selection
 
 try:
     from tools.skills_tool import skill_view as _hermes_skill_view  # type: ignore[import-not-found]

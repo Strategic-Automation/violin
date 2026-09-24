@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core import bootstrap, state
-from plugins.violin_guard.core import history as execution_history
-from plugins.violin_guard.gates import code_execution_audit
+from plugins.violin_guard.core.engagement import bootstrap, state
+from plugins.violin_guard.core.evidence import history as execution_history
+from plugins.violin_guard.engine import code_execution_audit
 from plugins.violin_guard.hooks import (
     _on_session_finalize_hook,
     _post_tool_call_hook,
@@ -250,6 +250,23 @@ def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
     pending_command = pending["commands"][0]["command"]
     assert "duration_ms=" not in pending_command
     assert execution_history.history_contains(eng, pending_command)
+    accounting = state.read_json(eng / "state" / "sync.json")["execution_accounts"][
+        completed["audit_id"]
+    ]
+    assert accounting["command"] == pending_command
+    assert completed["audit_id"] in state.read_json(eng / "state" / "counts.json")["execution_ids"]
+    counts_before_retry = state.read_counts(eng)
+    remaining_before_retry = state.sync_credit_remaining(eng, "RECON")
+    state.commit_execution_start(
+        eng,
+        pending_command,
+        completed["phase"],
+        pending["ptt_task_id"],
+        completed["audit_id"],
+    )
+    assert state.read_counts(eng) == counts_before_retry
+    assert state.sync_credit_remaining(eng, "RECON") == remaining_before_retry
+    assert len(state.get_pending_sync(eng)["commands"]) == len(pending["commands"])
     from plugins.violin_guard.handlers.ptt_rebind import _validate_pending_history
     from plugins.violin_guard.handlers.ptt_review import _validate_review_history
 
