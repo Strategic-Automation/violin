@@ -215,14 +215,28 @@ _READ_ONLY_ADMIN_SUBCOMMANDS = frozenset({"check-command", "generate-closeout", 
 
 def _violin_admin_subcommand(seg: CommandSegment) -> str:
     """Return the local Violin administration subcommand, if any."""
-    if seg.executable not in {"python", "python3"}:
-        return ""
     words = seg.words
+    script_index = None
     for index, word in enumerate(words):
         script = word.replace("\\", "/").removeprefix("./")
         if script == "scripts/violin_guard.py" or script.endswith("/scripts/violin_guard.py"):
-            return words[index + 1] if index + 1 < len(words) else ""
-    return ""
+            script_index = index
+            break
+    if script_index is None:
+        return ""
+    # `uv run [--project ...] python scripts/violin_guard.py ...` is the
+    # installed runtime's interpreter form; anything else between the
+    # launcher and the script is not an administration call.
+    launcher_is_python = seg.executable in {"python", "python3"}
+    launcher_is_uv_run = (
+        seg.executable == "uv"
+        and "run" in words[:script_index]
+        and script_index > 0
+        and words[script_index - 1] in {"python", "python3"}
+    )
+    if not (launcher_is_python or launcher_is_uv_run):
+        return ""
+    return words[script_index + 1] if script_index + 1 < len(words) else ""
 
 
 def _dynamic_init_host(seg: CommandSegment) -> bool:

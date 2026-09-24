@@ -333,6 +333,31 @@ def test_generate_closeout_accepts_target_as_local_report_metadata() -> None:
     assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
 
 
+def test_generate_closeout_accepts_the_uv_run_interpreter_form() -> None:
+    """The installed runtime invokes local admin scripts through uv run (#178)."""
+    command = (
+        "uv run --project /violin python scripts/violin_guard.py generate-closeout "
+        "--eng-dir engagement --target https://target.example"
+    )
+
+    assert _pre_tool_call_hook(tool_name="terminal", args={"command": command}) is None
+
+
+def test_uv_run_admin_detection_requires_the_python_interpreter() -> None:
+    """Naming the admin script is not enough outside a python interpreter (#178)."""
+    result = _pre_tool_call_hook(
+        tool_name="terminal",
+        args={
+            "command": (
+                "uv run evil-tool scripts/violin_guard.py generate-closeout "
+                "--target https://target.example"
+            )
+        },
+    )
+
+    assert result["action"] == "block"
+
+
 @pytest.mark.parametrize(
     "raw_command",
     [
