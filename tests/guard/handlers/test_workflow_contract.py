@@ -656,6 +656,53 @@ def test_submit_finding_accepts_evidence_authenticated_by_an_uncited_receipt(
     assert "evidence/vuln-research/login.json" in record["evidence_paths"]
 
 
+def test_submit_finding_rejects_nonreviewable_cited_receipt_even_with_other_auth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cross-receipt evidence support must not weaken cited-receipt status checks."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    engagement = tmp_path / "engagement"
+    assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
+    response = engagement / "evidence/vuln-research/login.json"
+    response.parent.mkdir(parents=True, exist_ok=True)
+    response.write_text('{"requires_totp": true}', encoding="utf-8")
+    receipt_dir = engagement / "evidence/executions"
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+
+    unreviewable = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "blocked-proof",
+            "status": "precondition_denied",
+            "exit_code": None,
+            "evidence_paths": {},
+        },
+        engagement,
+    )
+    unreviewable_path = receipt_dir / "blocked-proof.json"
+    unreviewable_path.write_text(json.dumps(unreviewable), encoding="utf-8")
+    valid = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "login-proof",
+            "status": "completed",
+            "exit_code": 0,
+            "evidence_paths": {"response": response.relative_to(engagement).as_posix()},
+        },
+        engagement,
+    )
+    (receipt_dir / "login-proof.json").write_text(json.dumps(valid), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="receipt did not execute to a reviewable result"):
+        findings.submit_finding(
+            engagement,
+            title="Authentication step permits unintended access",
+            severity="High",
+            summary="Must cite a reviewable execution result.",
+            receipt_paths=[unreviewable_path.relative_to(engagement).as_posix()],
+            evidence_paths=["evidence/vuln-research/login.json"],
+        )
+
+
 def test_json_evidence_still_requires_receipt_authentication(tmp_path: Path) -> None:
     engagement = tmp_path / "engagement"
     response = engagement / "evidence/vuln-research/response.json"
