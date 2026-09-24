@@ -174,15 +174,17 @@ def test_post_exploitation_requires_scope_and_skill_load(tmp_path):
     eng = _init_e2e(tmp_path, skill_file, allowed=("recon", "exploitation", "post-exploitation"))
 
     ts = _dt.datetime.now(_UTC).strftime("%Y-%m-%d %H:%M")
-    (eng / "hypotheses.md").write_text(
-        (eng / "hypotheses.md").read_text(encoding="utf-8")
-        + (
-            f"\n### H-001: Post-exploit persistence\n- **Status:** Candidate\n"
-            f"- **Phase:** POST_EXPLOITATION\n- **Target:** 10.10.10.10\n"
-            f"- **CVE Research:** web_search persistence CVE; NVD; not applicable\n"
-            f"- **Exploit Research:** web_search persistence technique; vendor docs; no results\n"
-            f"- **Updated:** {ts} UTC\n"
-        ),
+    hypothesis_path = eng / "hypotheses.md"
+    hypothesis_board = hypothesis_path.read_text(encoding="utf-8")
+    hypothesis_record = (
+        f"### H-001: Post-exploit persistence\n- **Status:** Candidate\n"
+        f"- **Phase:** POST_EXPLOITATION\n- **Target:** 10.10.10.10\n"
+        f"- **CVE Research:** web_search persistence CVE; NVD; not applicable\n"
+        f"- **Exploit Research:** web_search persistence technique; vendor docs; no results\n"
+        f"- **Updated:** {ts} UTC\n\n"
+    )
+    hypothesis_path.write_text(
+        hypothesis_board.replace("## Observations", hypothesis_record + "## Observations", 1),
         encoding="utf-8",
     )
     ptt_path = eng / "state" / "ptt.md"

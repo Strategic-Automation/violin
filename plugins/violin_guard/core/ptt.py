@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .markdown_structure import MarkdownBlock, iter_markdown_blocks, read_markdown
 from .phases import Phase, normalize_phase
 from .results import GuardResult
 from .state import atomic_text
@@ -36,7 +37,6 @@ _PTT_RE = re.compile(
     r"\s*(?P<title>[^|]+?)\s*\|"
     r"\s*(?P<note>[^|]*?)\s*\|"
 )
-_PHASE_HEADING_RE = re.compile(r"^##\s+Phase:\s*(?P<phase>.+?)\s*$", re.IGNORECASE)
 _PAREN_SPLIT_RE = re.compile(r"\s*\(")
 _TASK_ID_RE = re.compile(r"PT-[\w-]+")
 
@@ -76,37 +76,92 @@ class PttValidationResult:
 
 
 def parse_ptt(path: Path) -> list[PttTask]:
-    """Parse PTT markdown file into list of PttTask."""
+    """Parse task rows from pipe tables inside recognized phase sections."""
     if not path.exists():
         return []
-    content = path.read_text(encoding="utf-8")
-    tasks = []
-    current_phase = ""
-    for line in content.splitlines():
-        heading = _PHASE_HEADING_RE.match(line.strip())
-        if heading:
-            raw_phase = heading.group("phase").strip()
-            # Human headings commonly add a parenthetical clarification.  The
-            # phase token remains the first bare word, rather than becoming an
-            # unmatchable value such as ``RECON_(WEB)``.
-            raw_phase = _PAREN_SPLIT_RE.split(raw_phase, maxsplit=1)[0].strip()
-            try:
-                current_phase = normalize_phase(raw_phase).value
-            except ValueError:
-                current_phase = raw_phase.upper().replace("-", "_").replace(" ", "_")
+    return [task for task, _line_index in _ptt_rows(read_markdown(path))]
+
+
+def _phase_from_heading(heading_text: str, level: int) -> str | None:
+    if level != 2 or not heading_text.casefold().startswith("phase:"):
+        return None
+    raw_phase = heading_text.partition(":")[2].strip()
+    raw_phase = _PAREN_SPLIT_RE.split(raw_phase, maxsplit=1)[0].strip()
+    try:
+        return normalize_phase(raw_phase).value
+    except ValueError:
+        return raw_phase.upper().replace("-", "_").replace(" ", "_")
+
+
+def _phase_tables(
+    blocks: list[MarkdownBlock], lines: list[str]
+) -> tuple[tuple[str, int, int], ...]:
+    """Return real Markdown tables associated with their nearest level-two phase."""
+    phase_tables: list[tuple[str, int, int]] = []
+    phase_headings = [block for block in blocks if block.kind == "heading" and block.level <= 2]
+    for table in (block for block in blocks if block.kind == "table"):
+        table_start, table_end = table.start, table.end
+        if not _is_task_table(lines, table_start, table_end):
             continue
-        m = _PTT_RE.match(line.strip())
-        if m:
-            tasks.append(
-                PttTask(
-                    id=m.group("id").strip(),
-                    status=m.group("status").strip(),
-                    title=m.group("title").strip(),
-                    note=m.group("note").strip(),
-                    phase=current_phase,
+        previous = next(
+            (heading for heading in reversed(phase_headings) if heading.start < table_start),
+            None,
+        )
+        if previous is None:
+            continue
+        phase = _phase_from_heading(previous.text, previous.level)
+        if phase:
+            phase_tables.append((phase, table_start, table_end))
+    return tuple(phase_tables)
+
+
+def _pipe_cells(line: str) -> list[str]:
+    separators = _pipe_positions(line)
+    if len(separators) < 2:
+        return []
+    return [
+        line[start + 1 : end].strip()
+        for start, end in zip(separators, separators[1:], strict=False)
+    ]
+
+
+def _is_task_table(lines: list[str], start: int, end: int) -> bool:
+    if end - start < 2 or start + 1 >= len(lines):
+        return False
+    headers = [cell.casefold() for cell in _pipe_cells(lines[start])]
+    divider = _pipe_cells(lines[start + 1])
+    return (
+        len(headers) >= 4
+        and headers[:3] == ["id", "status", "task"]
+        and all(re.fullmatch(r":?-{3,}:?", cell) for cell in divider)
+        and len(divider) == len(headers)
+    )
+
+
+def _ptt_rows(source: str) -> list[tuple[PttTask, int]]:
+    blocks = list(iter_markdown_blocks(source))
+    protected = [(block.start, block.end) for block in blocks if block.kind == "protected"]
+    lines = source.splitlines()
+    rows: list[tuple[PttTask, int]] = []
+    for phase, start, end in _phase_tables(blocks, lines):
+        for line_index in range(start, min(end, len(lines))):
+            if any(start <= line_index < end for start, end in protected):
+                continue
+            match = _PTT_RE.match(lines[line_index].strip())
+            if match:
+                rows.append(
+                    (
+                        PttTask(
+                            id=match.group("id").strip(),
+                            status=match.group("status").strip(),
+                            title=match.group("title").strip(),
+                            note=match.group("note").strip(),
+                            phase=phase,
+                        ),
+                        line_index,
+                    )
                 )
-            )
-    return tasks
+    return rows
 
 
 def validate_ptt(tasks: list[PttTask]) -> PttValidationResult:
@@ -169,15 +224,14 @@ def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, P
             raise ValueError(f"invalid PTT status {status!r}; expected one of {_VALID_STATUSES}")
         normalized[task_id] = (status, note)
 
-    content = path.read_text(encoding="utf-8") if path.exists() else ""
-    lines = content.splitlines()
+    content = read_markdown(path) if path.exists() else ""
+    lines = content.splitlines(keepends=True)
     row_indices: dict[str, int] = {}
-    for i, line in enumerate(content.splitlines()):
-        m = _PTT_RE.match(line.strip())
-        if m:
-            task_id = m.group("id").strip()
-            if task_id in normalized:
-                row_indices[task_id] = i
+    for task, line_index in _ptt_rows(content):
+        if task.id in normalized:
+            if task.id in row_indices:
+                raise ValueError(f"PTT task {task.id!r} appears in more than one phase table")
+            row_indices[task.id] = line_index
 
     missing = sorted(set(normalized) - set(row_indices))
     if missing:
@@ -185,22 +239,50 @@ def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, P
 
     for task_id, target_idx in row_indices.items():
         status, note = normalized[task_id]
-        target_line = lines[target_idx]
-        cells = [cell.strip() for cell in target_line.strip().strip("|").split("|")]
-        cells[1] = status
-        if len(cells) >= 4:
-            cells[-1] = note
-        lines[target_idx] = "| " + " | ".join(cells) + " |"
+        lines[target_idx] = _replace_task_row(lines[target_idx], status, note)
 
-    atomic_text(
-        path,
-        "\n".join(lines) + ("\n" if content and not content.endswith("\n") else ""),
-    )
+    atomic_text(path, "".join(lines))
     tasks = sync_ptt(path)
     result = {task.id: task for task in tasks if task.id in normalized}
     if len(result) != len(normalized):
         raise RuntimeError("internal error: updated PTT tasks were not found after rewrite")
     return result
+
+
+def _pipe_positions(line: str) -> list[int]:
+    positions: list[int] = []
+    backslashes = 0
+    for index, character in enumerate(line):
+        if character == "|" and backslashes % 2 == 0:
+            positions.append(index)
+        if character == "\\":
+            backslashes += 1
+        else:
+            backslashes = 0
+    return positions
+
+
+def _replace_pipe_cell(line: str, cell_index: int, value: str) -> str:
+    separators = _pipe_positions(line)
+    if len(separators) < 5 or cell_index >= len(separators) - 1:
+        raise ValueError("PTT row must contain an ID, status, task, and notes column")
+    cell_start = separators[cell_index] + 1
+    cell_end = separators[cell_index + 1]
+    while cell_start < cell_end and line[cell_start].isspace():
+        cell_start += 1
+    while cell_end > cell_start and line[cell_end - 1].isspace():
+        cell_end -= 1
+    return line[:cell_start] + value + line[cell_end:]
+
+
+def _replace_task_row(line: str, status: str, note: str) -> str:
+    """Replace the status and final notes cell without reformatting other source."""
+    separators = _pipe_positions(line)
+    cell_count = len(separators) - 1
+    if cell_count < 4:
+        raise ValueError("PTT row must contain at least four columns")
+    updated = _replace_pipe_cell(line, 1, status)
+    return _replace_pipe_cell(updated, cell_count - 1, note.replace("|", "\\|"))
 
 
 def update_task(path: Path, task_id: str, status: str, note: str) -> PttTask:
@@ -216,57 +298,50 @@ def create_task(path: Path, task_id: str, title: str, phase: str, note: str = ""
     tasks = parse_ptt(path)
     if any(task.id == task_id for task in tasks):
         raise ValueError(f"PTT task {task_id!r} already exists")
-    content = path.read_text(encoding="utf-8") if path.exists() else "# Pentesting Task Tree\n"
-    lines = content.splitlines()
-    phase_heading_index = None
-    for index, line in enumerate(lines):
-        match = _PHASE_HEADING_RE.match(line.strip())
-        if not match:
-            continue
-        raw_phase = _PAREN_SPLIT_RE.split(match.group("phase"), maxsplit=1)[0].strip()
-        try:
-            heading_phase = normalize_phase(raw_phase).value
-        except ValueError:
-            continue
-        if heading_phase == canonical_phase:
-            phase_heading_index = index
-            break
-
-    if phase_heading_index is None:
-        lines.extend(
-            [
-                "",
-                f"## Phase: {canonical_phase}",
-                "",
-                "| ID | Status | Task | Notes |",
-                "|---|---|---|---|",
-            ]
-        )
-        phase_heading_index = len(lines) - 4
-
-    next_heading_index = next(
+    content = read_markdown(path) if path.exists() else "# Pentesting Task Tree\n"
+    blocks = list(iter_markdown_blocks(content))
+    phase_heading = next(
         (
-            index
-            for index in range(phase_heading_index + 1, len(lines))
-            if _PHASE_HEADING_RE.match(lines[index].strip())
-        ),
-        len(lines),
-    )
-    table_start = next(
-        (
-            index
-            for index in range(phase_heading_index + 1, next_heading_index)
-            if lines[index].lstrip().startswith("|")
+            heading
+            for heading in blocks
+            if heading.kind == "heading"
+            and heading.level == 2
+            and _phase_from_heading(heading.text, heading.level) == canonical_phase
         ),
         None,
     )
-    if table_start is None:
-        raise ValueError(f"phase {canonical_phase} has no task table")
+    tables = [
+        (start, end)
+        for table_phase, start, end in _phase_tables(blocks, content.splitlines())
+        if table_phase == canonical_phase
+    ]
+    if phase_heading is None:
+        newline = "\r\n" if "\r\n" in content else "\n"
+        clean_title = title.strip().replace("|", "\\|").replace("\n", " ")
+        clean_note = note.strip().replace("|", "\\|").replace("\n", " ")
+        separator = ""
+        if content and not content.endswith(newline + newline):
+            separator = newline if content.endswith(newline) else newline + newline
+        addition = (
+            separator
+            + f"## Phase: {canonical_phase}{newline}{newline}"
+            + "| ID | Status | Task | Notes |"
+            + newline
+            + "|---|---|---|---|"
+            + newline
+            + f"| {task_id} | [ ] | {clean_title} | {clean_note} |"
+            + newline
+        )
+        atomic_text(path, content + addition)
+        sync_ptt(path)
+        return next(task for task in parse_ptt(path) if task.id == task_id)
+    if len(tables) != 1:
+        raise ValueError(f"phase {canonical_phase} must contain exactly one Markdown task table")
 
-    table_end = table_start
-    while table_end + 1 < next_heading_index and lines[table_end + 1].lstrip().startswith("|"):
-        table_end += 1
-    column_count = len([cell for cell in lines[table_start].strip().strip("|").split("|")])
+    lines = content.splitlines(keepends=True)
+    table_start, table_end = tables[0]
+    header_line = lines[table_start]
+    column_count = len(_pipe_positions(header_line)) - 1
     if column_count < 4:
         raise ValueError(f"phase {canonical_phase} task table must have at least four columns")
 
@@ -276,8 +351,11 @@ def create_task(path: Path, task_id: str, title: str, phase: str, note: str = ""
     cells = [task_id, "[ ]", clean_cell(title)]
     cells.extend([""] * (column_count - 4))
     cells.append(clean_cell(note))
-    lines.insert(table_end + 1, "| " + " | ".join(cells) + " |")
-    atomic_text(path, "\n".join(lines) + "\n")
+    newline = "\r\n" if "\r\n" in content else "\n"
+    if table_end > 0 and not lines[table_end - 1].endswith(("\n", "\r")):
+        lines[table_end - 1] += newline
+    lines.insert(table_end, "| " + " | ".join(cells) + " |" + newline)
+    atomic_text(path, "".join(lines))
     sync_ptt(path)
     return next(task for task in parse_ptt(path) if task.id == task_id)
 
@@ -291,26 +369,34 @@ def sync_ptt(path: Path) -> list[PttTask]:
         return []
     task_statuses = {task.id: task.status for task in tasks}
 
-    content = path.read_text(encoding="utf-8")
-    lines = content.splitlines()
+    content = read_markdown(path)
+    lines = content.splitlines(keepends=True)
+    blocks = list(iter_markdown_blocks(content))
+    summary_end = min(
+        (heading.start for heading in blocks if heading.kind == "heading" and heading.level >= 2),
+        default=len(lines),
+    )
     modified = False
 
-    bullet_re = re.compile(r"^(\s*-\s*)\[[ x~!-]\](\s+(?P<id>PT-[\w-]+)\b.*)")
-    for i, line in enumerate(lines):
+    bullet_re = re.compile(
+        r"^(?P<prefix>\s*-\s*)(?P<status>\[[ x~!-]\])(?P<rest>\s+(?P<id>PT-[\w-]+)\b.*)"
+    )
+    for i, line in enumerate(lines[:summary_end]):
+        if any(block.kind == "protected" and block.start <= i < block.end for block in blocks):
+            continue
         m = bullet_re.match(line)
         if m:
             t_id = m.group("id")
             if t_id in task_statuses:
                 new_status = task_statuses[t_id]
-                new_line = f"{m.group(1)}{new_status}{m.group(2)}"
+                status_start = m.start("status")
+                status_end = m.end("status")
+                new_line = line[:status_start] + new_status + line[status_end:]
                 if new_line != line:
                     lines[i] = new_line
                     modified = True
 
     if modified:
-        atomic_text(
-            path,
-            "\n".join(lines) + ("\n" if content and not content.endswith("\n") else ""),
-        )
+        atomic_text(path, "".join(lines))
         tasks = parse_ptt(path)
     return tasks

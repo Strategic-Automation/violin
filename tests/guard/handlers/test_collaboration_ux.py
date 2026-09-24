@@ -210,7 +210,8 @@ def test_review_batch_resolves_the_bound_hypothesis_route_not_the_phase_default(
     _pending_batch(eng)
     (eng / "hypotheses.md").write_text(
         "# Hypotheses\n\n"
-        "## H-007: Cross-account order access\n\n"
+        "## Active Theories\n\n"
+        "### H-007: Cross-account order access\n"
         "- **Status:** Candidate\n"
         "- **Vuln Class:** authorization\n"
         "- **Candidate Source:** internet-search\n",

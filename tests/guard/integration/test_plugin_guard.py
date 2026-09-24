@@ -139,6 +139,17 @@ def _init_e2e(tmp_path, skill_file):
     return eng
 
 
+def _append_active_theories(path: Path, records: str) -> None:
+    """Append fixture records inside the canonical hypothesis section."""
+    source = path.read_text(encoding="utf-8")
+    start = source.index("## Active Theories")
+    end = source.find("\n## ", start + 1)
+    if end < 0:
+        end = len(source)
+    updated = source[:end].rstrip() + "\n\n" + records.strip() + "\n\n" + source[end:].lstrip()
+    path.write_text(updated, encoding="utf-8")
+
+
 def test_meta_loaded():
     # Current plugin surface: handle_* command entrypoints registered.
     for name in (
@@ -198,13 +209,10 @@ def test_recon_does_not_require_hypothesis(tmp_path):
 
     # Add a fresh hypothesis - should pass without warnings
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-    (eng / "hypotheses.md").write_text(
-        (eng / "hypotheses.md").read_text(encoding="utf-8")
-        + (
-            f"\n### H-001: SMB share exposed\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
-            f"- **Target:** 10.10.10.10\n- **Updated:** {ts} UTC\n"
-        ),
-        encoding="utf-8",
+    _append_active_theories(
+        eng / "hypotheses.md",
+        f"### H-001: SMB share exposed\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
+        f"- **Target:** 10.10.10.10\n- **Updated:** {ts} UTC",
     )
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
@@ -240,13 +248,10 @@ def test_recon_does_not_require_hypothesis(tmp_path):
 
     # Add a stale hypothesis - should warn
     old_ts = "2020-01-01 00:00"
-    (eng / "hypotheses.md").write_text(
-        (eng / "hypotheses.md").read_text(encoding="utf-8")
-        + (
-            f"\n### H-002: Old hypothesis\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
-            f"- **Target:** 10.10.10.10\n- **Updated:** {old_ts} UTC\n"
-        ),
-        encoding="utf-8",
+    _append_active_theories(
+        eng / "hypotheses.md",
+        f"### H-002: Old hypothesis\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
+        f"- **Target:** 10.10.10.10\n- **Updated:** {old_ts} UTC",
     )
     research3 = command.check_command(
         command.CheckCommandArgs(
@@ -270,16 +275,13 @@ def test_exploit_phase_does_not_gate_on_research(tmp_path):
     skill_file = tmp_path / ".skill-loaded-ts"
     eng = _init_e2e(tmp_path, skill_file)
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-    (eng / "hypotheses.md").write_text(
-        (eng / "hypotheses.md").read_text(encoding="utf-8")
-        + (
-            f"\n### H-001: JWT alg none\n- **Status:** Validated\n- **Phase:** EXPLOITATION\n"
-            f"- **Target:** duck-store.escape.tech\n- **CVE Research:** NVD queried; no CVE\n"
-            f"- **Exploit Research:** ExploitDB; none applicable\n- **Updated:** {ts} UTC\n"
-            f"\n### H-002: No research done\n- **Status:** Candidate\n- **Phase:** EXPLOITATION\n"
-            f"- **Target:** duck-store.escape.tech\n- **Updated:** {ts} UTC\n"
-        ),
-        encoding="utf-8",
+    _append_active_theories(
+        eng / "hypotheses.md",
+        f"### H-001: JWT alg none\n- **Status:** Validated\n- **Phase:** EXPLOITATION\n"
+        f"- **Target:** duck-store.escape.tech\n- **CVE Research:** NVD queried; no CVE\n"
+        f"- **Exploit Research:** ExploitDB; none applicable\n- **Updated:** {ts} UTC\n\n"
+        f"### H-002: No research done\n- **Status:** Candidate\n- **Phase:** EXPLOITATION\n"
+        f"- **Target:** duck-store.escape.tech\n- **Updated:** {ts} UTC",
     )
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
@@ -332,7 +334,7 @@ def test_target_scanner_ignores_dotted_files_and_handles_dev_tcp_endpoint():
 
 def test_hypothesis_id_and_target_are_canonicalized_without_false_collisions(tmp_path):
     path = tmp_path / "hypotheses.md"
-    path.write_text("# Hypothesis Board\n\n### H-H-001: malformed stale entry\n", encoding="utf-8")
+    path.write_text("# Hypothesis Board\n\n## Active Theories\n\n", encoding="utf-8")
 
     record = hypotheses.update_hypothesis(
         path,
@@ -349,7 +351,7 @@ def test_hypothesis_id_and_target_are_canonicalized_without_false_collisions(tmp
     assert record.id == "001"
     text = path.read_text(encoding="utf-8")
     assert "### H-001: Scoped endpoint test" in text
-    assert "H-H-001" not in text
+    assert "## Active Theories" in text
 
     result = command.check_hypothesis_freshness(
         tmp_path,
@@ -416,7 +418,11 @@ def test_hypothesis_write_accepts_descriptive_target_context(tmp_path):
 
 def test_exploitation_hypothesis_match_accepts_manual_field_order(tmp_path):
     (tmp_path / "hypotheses.md").write_text(
-        """### H-001: Queue service validation
+        """# Hypothesis Board
+
+## Active Theories
+
+### H-001: Queue service validation
 - **Target:** 10.129.47.140:1515
 - **Port:** 1515
 - **Evidence:** evidence/vuln-research/queue.txt
@@ -436,7 +442,11 @@ def test_exploitation_hypothesis_match_accepts_manual_field_order(tmp_path):
 
 def test_exploitation_hints_when_research_missing_but_does_not_block(tmp_path):
     (tmp_path / "hypotheses.md").write_text(
-        """### H-001: Queue service validation
+        """# Hypothesis Board
+
+## Active Theories
+
+### H-001: Queue service validation
 - **Target:** 10.129.47.140:1515
 - **Status:** Likely
 - **Phase:** VULN_RESEARCH
@@ -476,6 +486,7 @@ def test_hypothesis_enforces_scope_target_fallback(tmp_path):
     )
     # Hypothesis is for a DIFFERENT target host (192.168.1.1)
     (tmp_path / "hypotheses.md").write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n"
         "### H-001: Other host\n"
         "- **Target:** 192.168.1.1\n"
         "- **Status:** Validated\n"
@@ -511,6 +522,7 @@ def test_rejected_hypothesis_testable_when_explicitly_linked(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "hypotheses.md").write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n"
         "### H-001: Default creds login\n"
         "- **Target:** https://duck-store.escape.tech\n"
         "- **Status:** Rejected\n"
@@ -542,6 +554,7 @@ def test_unphased_hypothesis_defaults_to_current_phase_when_linked(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "hypotheses.md").write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n"
         "### H-001: API surface\n"
         "- **Target:** https://duck-store.escape.tech\n"
         "- **Status:** Candidate\n"
@@ -574,6 +587,7 @@ def test_unphased_hypothesis_defaults_to_current_phase_unlinked(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "hypotheses.md").write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n"
         "### H-001: API surface\n"
         "- **Target:** https://duck-store.escape.tech\n"
         "- **Status:** Candidate\n"
@@ -608,11 +622,14 @@ def test_check_command_routes_research_hint_to_active_task_hypothesis(tmp_path):
     )
     (tmp_path / "state").mkdir(parents=True, exist_ok=True)
     (tmp_path / "state" / "ptt.md").write_text(
-        "## Phase: EXPLOITATION\n\n| PT-001 | [~] | Exploit Task | testing H-002 |\n",
+        "## Phase: EXPLOITATION\n\n"
+        "| ID | Status | Task | Notes |\n|---|---|---|---|\n"
+        "| PT-001 | [~] | Exploit Task | testing H-002 |\n",
         encoding="utf-8",
     )
     # H-001 has research; active task links H-002 which has NO research.
     (tmp_path / "hypotheses.md").write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n"
         "### H-001: First\n"
         "- **Target:** 10.129.47.140\n"
         "- **Status:** Validated\n"
@@ -761,13 +778,10 @@ def test_exec_ok_response_carries_hypothesis_review_hint(tmp_path):
     # Advance PTT to VULN_RESEARCH and add a hypothesis (mirrors the phase
     # handoff pattern in test_recon_does_not_require_hypothesis).
     ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-    (eng / "hypotheses.md").write_text(
-        (eng / "hypotheses.md").read_text(encoding="utf-8")
-        + (
-            f"\n### H-001: Test endpoint exposed\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
-            f"- **Target:** 10.10.10.10\n- **Updated:** {ts} UTC\n"
-        ),
-        encoding="utf-8",
+    _append_active_theories(
+        eng / "hypotheses.md",
+        f"### H-001: Test endpoint exposed\n- **Status:** Candidate\n- **Phase:** VULN_RESEARCH\n"
+        f"- **Target:** 10.10.10.10\n- **Updated:** {ts} UTC",
     )
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(

@@ -16,6 +16,7 @@ _DEPENDENCY_MODULES = {
     "cryptography",
     "duckduckgo_search",
     "filelock",
+    "markdown_it",
     "netaddr",
     "psutil",
     "pydantic",

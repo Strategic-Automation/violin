@@ -177,7 +177,8 @@ def _atomic_write(path: Path, content: str) -> None:
     """Write text atomically by replacing a temporary swap file with retry on Windows."""
     ensure_dir(path.parent)
     tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
-    tmp.write_text(content, encoding="utf-8")
+    with tmp.open("w", encoding="utf-8", newline="") as temporary_file:
+        temporary_file.write(content)
     try:
         for attempt in range(5):
             try:

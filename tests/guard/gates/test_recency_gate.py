@@ -9,7 +9,9 @@ from pathlib import Path
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import Phase
 
-_STALE_HYP = """### H-001: Queue service validation
+_STALE_HYP = """## Active Theories
+
+### H-001: Queue service validation
 - **Target:** 10.129.47.140:1515
 - **Status:** Validated
 - **Phase:** EXPLOITATION
@@ -18,7 +20,9 @@ _STALE_HYP = """### H-001: Queue service validation
 - **Updated:** 2026-08-01 10:00
 """
 
-_FRESH_HYP = """### H-001: Queue service validation
+_FRESH_HYP = """## Active Theories
+
+### H-001: Queue service validation
 - **Target:** 10.129.47.140:1515
 - **Status:** Validated
 - **Phase:** EXPLOITATION
