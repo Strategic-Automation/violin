@@ -90,6 +90,29 @@ def test_receipt_status_is_consistent_for_findings_and_scoring(tmp_path, monkeyp
             findings._verified_receipt(tmp_path, receipt)
 
 
+def test_receipt_authenticated_json_response_is_read_as_saved_evidence(tmp_path: Path):
+    """A signed JSON HTTP body must reach the same proof reader as a text body."""
+    key = b"s" * 32
+    body = tmp_path / "evidence" / "vuln-research" / "response.json"
+    body.parent.mkdir(parents=True)
+    body.write_text('{"ok":true}', encoding="utf-8")
+    relative = body.relative_to(tmp_path).as_posix()
+    receipt = _write_receipt(
+        tmp_path,
+        key=key,
+        command=f"curl -sS -o {relative} -w 'HTTP %{{http_code}}\\n' https://host/status",
+        proof="HTTP 200\n",
+        declared_evidence_outputs=[relative],
+    )
+    bundles = receipt_bundles(tmp_path, [receipt], evidence_paths=[relative], receipt_key=key)
+    assert any(
+        bundle.receipt_path == body.resolve() and '{"ok":true}' in bundle.proof
+        for bundle in bundles
+    )
+    body.write_text('{"ok":false}', encoding="utf-8")
+    assert receipt_bundles(tmp_path, [receipt], evidence_paths=[relative], receipt_key=key) == []
+
+
 def test_script_batch_requires_correlated_observations(tmp_path: Path):
     key = b"s" * 32
     receipt = _write_receipt(
