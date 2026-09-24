@@ -105,6 +105,7 @@ def _verified_evidence_files(
     """Resolve decisive-evidence files authenticated by the cited receipts."""
     valid: list[str] = []
     evidence_root = (engagement / "evidence").resolve()
+    receipt_root = (evidence_root / "executions").resolve()
     for value in dict.fromkeys(evidence_paths):
         relative = Path(str(value).strip())
         candidate = (engagement / relative).resolve()
@@ -113,11 +114,14 @@ def _verified_evidence_files(
             or relative.is_absolute()
             or not candidate.is_relative_to(evidence_root)
             or candidate.is_symlink()
-            or candidate.suffix.lower() == ".json"
             or not candidate.is_file()
             or candidate.stat().st_size == 0
         ):
-            raise ValueError("evidence_paths must name non-empty, non-JSON files beneath evidence/")
+            raise ValueError("evidence_paths must name non-empty files beneath evidence/")
+        if candidate.is_relative_to(receipt_root) and candidate.suffix.lower() == ".json":
+            raise ValueError(
+                "execution receipts are not decisive evidence; cite them via receipt_paths"
+            )
         normalized = candidate.relative_to(engagement).as_posix()
         if normalized not in authenticated_paths:
             raise ValueError(
