@@ -45,10 +45,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /root/.local/bin && ln -sf /usr/bin/httpx-toolkit /root/.local/bin/httpx
 
 
-# Install uv and the latest tested Hermes release in its own Python 3.14
-# environment. The shallow, immutable source checkout preserves Git release
-# provenance: upstream's wheel metadata is 0.0.0 without its build stamp, but
-# Violin's profile installer needs the real release version.
+# Install uv and pinned Hermes v0.21.5 into a Python 3.13 environment.
+# The upstream project declares requires-python >=3.11,<3.14; keep the CLI
+# runtime inside that supported range and install the immutable audited source.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:/root/.cargo/bin:/opt/hermes/bin:${PATH}"
 ENV HOME="/root"
@@ -56,7 +55,7 @@ ARG HERMES_TAG=v2026.9.24
 ARG HERMES_COMMIT=f97608f178d1ffeca59860195ab7da295f7c8e5f
 RUN git clone --depth 1 --branch "$HERMES_TAG" https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent \
     && test "$(git -C /opt/hermes-agent rev-parse HEAD)" = "$HERMES_COMMIT" \
-    && uv venv /opt/hermes --python 3.14 \
+    && uv venv /opt/hermes --python 3.13 \
     && uv pip install --python /opt/hermes/bin/python \
         --editable /opt/hermes-agent \
         duckduckgo-search \
