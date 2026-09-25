@@ -218,6 +218,12 @@ def _run_manifest(
         REPO_ROOT / "plugins" / "violin_guard" / "core" / "evidence" / "receipt_integrity.py",
     ]
     isolation_id = str(getattr(args, "target_isolation_id", "") or "").strip()
+    source_commit = _git_output("rev-parse", "HEAD")
+    source_dirty = bool(_git_output("status", "--porcelain"))
+    if source_commit == "unknown":
+        source_commit = os.environ.get("VIOLIN_SOURCE_COMMIT", "unknown").strip() or "unknown"
+        dirty_override = os.environ.get("VIOLIN_SOURCE_DIRTY", "unknown").strip().casefold()
+        source_dirty = dirty_override != "false"
     return {
         "schema_version": 1,
         "run_id": eng_dir.name,
@@ -237,8 +243,8 @@ def _run_manifest(
             "public_key_hex": public_key.hex(),
         },
         "source": {
-            "git_commit": _git_output("rev-parse", "HEAD"),
-            "git_dirty": bool(_git_output("status", "--porcelain")),
+            "git_commit": source_commit,
+            "git_dirty": source_dirty,
             "sha256": {
                 path.relative_to(REPO_ROOT).as_posix(): _sha256(path) for path in source_paths
             },

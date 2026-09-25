@@ -10,6 +10,7 @@ import pytest
 from benchmark.proof import _command_requests, match_finding
 from benchmark.run import (
     _hermes_environment,
+    _run_manifest,
     _scope_for_target,
     init_benchmark_engagement,
     parse_args,
@@ -36,6 +37,38 @@ def test_benchmark_runner_does_not_select_model_or_provider_defaults() -> None:
     assert args.model == ""
     assert args.provider == ""
     assert args.api_base == ""
+
+
+def test_run_manifest_uses_explicit_source_metadata_without_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("benchmark.run._git_output", lambda *_args: "unknown")
+    monkeypatch.setenv("VIOLIN_SOURCE_COMMIT", "a" * 40)
+    monkeypatch.setenv("VIOLIN_SOURCE_DIRTY", "false")
+    manifest = _run_manifest(
+        parse_args(["--target", "https://example.test"]),
+        tmp_path / "run-1",
+        public_key=b"public",
+        started_at="2026-09-25T00:00:00+00:00",
+    )
+    assert manifest["source"]["git_commit"] == "a" * 40
+    assert manifest["source"]["git_dirty"] is False
+
+
+def test_run_manifest_fails_closed_when_source_metadata_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("benchmark.run._git_output", lambda *_args: "unknown")
+    monkeypatch.delenv("VIOLIN_SOURCE_COMMIT", raising=False)
+    monkeypatch.setenv("VIOLIN_SOURCE_DIRTY", "false")
+    manifest = _run_manifest(
+        parse_args(["--target", "https://example.test"]),
+        tmp_path / "run-1",
+        public_key=b"public",
+        started_at="2026-09-25T00:00:00+00:00",
+    )
+    assert manifest["source"]["git_commit"] == "unknown"
+    assert manifest["source"]["git_dirty"] is False
 
 
 def test_hermes_environment_forwards_only_selected_provider_key(
