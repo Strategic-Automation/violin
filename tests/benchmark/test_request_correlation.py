@@ -110,7 +110,12 @@ def test_receipt_authenticated_json_response_is_read_as_saved_evidence(tmp_path:
         for bundle in bundles
     )
     body.write_text('{"ok":false}', encoding="utf-8")
-    assert receipt_bundles(tmp_path, [receipt], evidence_paths=[relative], receipt_key=key) == []
+    bundles = receipt_bundles(tmp_path, [receipt], evidence_paths=[relative], receipt_key=key)
+    # The rewritten body is stale: it proves nothing and never reaches a bundle.
+    assert not any('{"ok' in bundle.proof for bundle in bundles)
+    # The receipt still authenticates the stdout its own command produced, so one
+    # rewritten artifact does not cost the receipt the evidence it still proves.
+    assert any(bundle.proof == "HTTP 200\n" for bundle in bundles)
 
 
 def test_script_batch_requires_correlated_observations(tmp_path: Path):

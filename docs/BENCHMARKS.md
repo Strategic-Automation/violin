@@ -116,8 +116,8 @@ prose:
 ```
 
 Include decisive response fields in the same JSON line when a result depends on them. Use
-`evidence_outputs` when a command writes proof outside captured stdout or stderr; declared
-files are included in the signed receipt digest set.
+`evidence_outputs` when a command writes proof outside captured stdout or stderr; the files
+the command actually writes are included in the signed receipt digest set.
 
 ## Calibration
 
