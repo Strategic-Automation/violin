@@ -587,4 +587,4 @@ def catalog_snapshot(repo_root: Path) -> dict[str, object]:
         if spec.trust == "bundled":
             entry["path"] = str(repo_root / spec.source.removeprefix("bundled:"))
         skills.append(entry)
-    return {"hermes_version": "0.18.0", "skills": skills, "taps": []}
+    return {"hermes_version": "0.21.5", "skills": skills, "taps": []}
