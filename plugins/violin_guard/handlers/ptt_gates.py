@@ -86,25 +86,22 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                     first_missing = next(iter(evaluation.missing_obligations), None)
                     if unresolved_coverage:
                         hints = [
-                            "how to fix: each obligation must map to a coverage-matrix cell",
-                            "  - matrix keys are the EXACT lowercased obligation strings from scope.yaml",
-                            "    (e.g. 'post /api/v1/auth/login') inside a flat 'coverage:' mapping —",
-                            "    no nested 'routes:' block, no slugified keys",
-                            "  - 'tested' cells: evidence_or_reason must cite evidence/ or a hypothesis id",
-                            "  - 'not_applicable' cells: evidence_or_reason must cite an evidence/ file showing the probe",
-                            "    (run the probe, save its output under evidence/vuln-research/, then reference that path)",
-                            "  - 'blocked' cells: evidence_or_reason must name the guard that prevented testing",
-                            "  - minimal valid cell:",
-                            "      coverage:",
-                            "        'post /api/v1/auth/login':",
-                            "          status: tested",
-                            "          evidence_or_reason: 'evidence/vuln-research/login.txt HTTP status line'",
+                            "how to fix: each obligation needs a coverage-matrix cell",
+                            "  - keys are the EXACT lowercased obligation strings from scope.yaml in a flat",
+                            "    'coverage:' mapping (no 'routes:' block, no slugified keys)",
+                            "  - 'tested' cells: evidence_or_reason cites evidence/ or a hypothesis id",
+                            "  - 'not_applicable' cells: cite the probe artifact; 'blocked' cells: name the guard",
+                            "  - minimal cell: 'post /api/v1/auth/login': {status: tested,",
+                            "    evidence_or_reason: 'evidence/...login.txt HTTP status line'}",
                         ]
-                        message = "undispositioned coverage: " + ", ".join(unresolved_coverage)
+                        shown = unresolved_coverage[:3]
+                        remainder = len(unresolved_coverage) - len(shown)
+                        message = "undispositioned coverage: " + "; ".join(shown)
+                        if remainder:
+                            message += f"; +{remainder} more"
                         if first_missing:
                             message += (
-                                f". First missing obligation: {first_missing} — add a cell keyed by "
-                                "this exact lowercased string"
+                                f". First missing: {first_missing} — use this exact lowercased key"
                             )
                         close_errors.append(message + ". " + " ".join(hints))
 
