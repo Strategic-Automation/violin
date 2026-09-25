@@ -110,6 +110,17 @@ def test_unknown_policy_input_fails_closed() -> None:
         ("missing-auth", "missing-authentication"),
         ("ssti-injection", "ssti"),
         ("authentication-bypass", "auth-bypass"),
+        ("authn-bypass", "auth-bypass"),
+        ("authz-bypass", "auth-bypass"),
+        ("business-logic-flaw-logic", "business-logic-flaw"),
+        ("buiness-logic", "business-logic"),
+        ("blind-sqli", "sqli"),
+        ("missing/authentication", "missing-authentication"),
+        ("mcp-ap-testing", "mcp-api-testing"),
+        ("mcp-ai-testing", "mcp-api-testing"),
+        ("sql-injection-bypass", "sql-injection"),
+        ("jwt-attacks-bypass", "jwt-attacks"),
+        ("xss-bypass", "xss"),
     ],
 )
 def test_unknown_vulnerability_class_suggests_a_near_match(value: str, expected: str) -> None:
@@ -121,8 +132,12 @@ def test_unknown_vulnerability_class_suggests_a_near_match(value: str, expected:
     assert message.index("Did you mean") < message.index("Valid classes are")
 
 
-def test_ambiguous_vulnerability_suffix_gets_no_misleading_suggestion() -> None:
-    decision = resolve_skill_route("vuln-research", "bogus-injection")
+@pytest.mark.parametrize(
+    "value",
+    ("bogus-injection", "bogus-bypass", "path-injection", "abuse-access", "abuse-bypass"),
+)
+def test_ambiguous_vulnerability_suffix_gets_no_misleading_suggestion(value: str) -> None:
+    decision = resolve_skill_route("vuln-research", value)
 
     message = "\n".join(decision.mismatch_reasons)
     assert not decision.allowed

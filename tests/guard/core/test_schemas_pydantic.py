@@ -95,6 +95,7 @@ def test_record_hypothesis_normalizes_human_readable_vuln_classes():
     [
         ("mass-assignmnt", "mass-assignment"),
         ("missing-auth", "missing-authentication"),
+        ("xss-bypass", "xss"),
     ],
 )
 def test_record_hypothesis_rejects_unknown_vuln_class_with_suggestion(value: str, expected: str):
