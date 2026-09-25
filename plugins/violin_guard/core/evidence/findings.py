@@ -70,11 +70,12 @@ def _next_finding_id(records: list[dict[str, Any]]) -> str:
     return f"FIND-{max(numbers, default=0) + 1:03d}"
 
 
-def _stale_evidence_error(paths: Any) -> ValueError:
+def _stale_evidence_error(paths: Collection[str]) -> ValueError:
     """Explain that cited evidence no longer matches the receipt that sealed it."""
     return ValueError(
         f"has changed evidence: {', '.join(paths)} no longer matches the digest "
-        "in this receipt. Existing signatures are preserved; re-run the probe to "
+        "in this receipt (the bytes changed, the file was removed, or it is not a "
+        "regular file). Existing signatures are preserved; re-run the probe to "
         "produce evidence and a receipt that authenticate the current bytes."
     )
 

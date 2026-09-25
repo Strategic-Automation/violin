@@ -90,7 +90,7 @@ def test_an_evidence_receipt_with_nothing_left_is_rejected(tmp_path: Path) -> No
 def test_intact_evidence_still_submits_after_a_sibling_changes(tmp_path: Path) -> None:
     """Findings rest on the files they cite, not on every file a receipt sealed."""
     engagement = tmp_path
-    receipt, _, second = _sealed_evidence(engagement)
+    receipt, first, second = _sealed_evidence(engagement)
     receipt_path = _write_receipt(engagement, "intact-sibling", receipt)
     second.write_text("rewritten\n", encoding="utf-8")
 
@@ -106,10 +106,14 @@ def test_intact_evidence_still_submits_after_a_sibling_changes(tmp_path: Path) -
 
 def test_citing_stale_evidence_names_the_conflicting_file(tmp_path: Path) -> None:
     engagement = tmp_path
-    receipt, _, second = _sealed_evidence(engagement)
+    receipt, first, second = _sealed_evidence(engagement)
     receipt_path = _write_receipt(engagement, "stale-cite", receipt)
     second.write_text("rewritten\n", encoding="utf-8")
 
+    # The rewrite is confined to the file it touched: its sibling is untouched.
+    assert receipt_integrity.verify_runtime_receipt(receipt, engagement).authenticated == (
+        first.resolve(),
+    )
     with pytest.raises(ValueError, match="has changed evidence: evidence/recon/second.txt"):
         findings.submit_finding(
             engagement,
@@ -128,7 +132,7 @@ def test_citing_a_receipt_that_has_no_proof_left_is_rejected(tmp_path: Path) -> 
     first.write_text("rewritten\n", encoding="utf-8")
     second.write_text("rewritten\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="has changed evidence"):
+    with pytest.raises(ValueError) as excinfo:
         findings.submit_finding(
             engagement,
             title="Rests on rewritten evidence",
@@ -136,3 +140,8 @@ def test_citing_a_receipt_that_has_no_proof_left_is_rejected(tmp_path: Path) -> 
             summary="Rests on bytes the receipt no longer authenticates.",
             receipt_paths=[receipt_path],
         )
+    # Every conflicted file is named, not just the first one inspected.
+    message = str(excinfo.value)
+    assert "has changed evidence" in message
+    assert "evidence/recon/first.txt" in message
+    assert "evidence/recon/second.txt" in message
