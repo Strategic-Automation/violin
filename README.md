@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/Strategic-Automation/violin"><img src="https://img.shields.io/badge/Status-Release%20Ready-2ea44f?style=for-the-badge" alt="Release Ready"></a>
   <a href="https://github.com/Strategic-Automation/violin/blob/master/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.18.0-FFD700?style=for-the-badge" alt="Hermes >=0.18.0"></a>
+  <a href="https://hermes-agent.nousresearch.com/"><img src="https://img.shields.io/badge/Hermes-%3E%3D0.21.5-FFD700?style=for-the-badge" alt="Hermes >=0.21.5"></a>
   <a href="https://www.kali.org/"><img src="https://img.shields.io/badge/Kali%20Linux-557C94?style=for-the-badge&logo=kali-linux&logoColor=white" alt="Kali Linux"></a>
   <a href="https://www.parrotsec.org/"><img src="https://img.shields.io/badge/Parrot%20OS-2E8B57?style=for-the-badge" alt="Parrot OS"></a>
   <a href="https://strategic-automation.github.io/violin/"><img src="https://img.shields.io/badge/Site-Landing%20page-FF3B4A?style=for-the-badge" alt="Landing page"></a>
@@ -82,7 +82,7 @@ Run an authorized penetration test against example.com.
 
 ### Requirements
 
-- [Hermes Agent](https://hermes-agent.nousresearch.com/) 0.18.0 or newer
+- [Hermes Agent](https://hermes-agent.nousresearch.com/) 0.21.5 or newer (container pins the `v2026.9.24` release commit)
 - Python 3.11 and `uv` for local development
 - Kali Linux or Parrot OS for the expected security-tool environment
 - Written authorization and an approved scope
