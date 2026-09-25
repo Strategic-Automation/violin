@@ -24,15 +24,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     httpx-toolkit \
     dnsx \
     subfinder \
-    seclists \
     wordlists \
     dirb \
+    nodejs \
+    npm \
+    ripgrep \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
-# SecLists and the DIRB/params wordlists are referenced throughout the
-# playbooks; without them every assessment falls back to a hand-built target
-# wordlist, which is far weaker for content discovery (#222).
+# The small wordlists and DIRB packages provide candidate lists for discovery;
+# the much larger SecLists archive is optional, not baked into the benchmark
+# image. Playbooks must check which paths actually exist before use (#222).
 #
 # Kali ships ProjectDiscovery httpx as `httpx-toolkit` to avoid colliding with
 # the PyPI `httpx` client. That console script lands in /opt/hermes/bin, which
@@ -58,6 +61,16 @@ RUN uv venv /opt/hermes --python 3.13 \
         bashlex \
         netaddr \
         yarl
+
+# Browser tooling. The `browser` toolset drives the agent-browser CLI, which
+# is an npm package with its own Chromium download -- neither comes with
+# hermes-agent. Without this step the toolset is enabled but every call fails,
+# so install it here rather than leaving agents to rediscover it (#223).
+# No credentials are written into the image; anything needing a key is passed
+# at runtime via -e.
+RUN npm install -g agent-browser \
+    && agent-browser install --with-deps \
+    && npm cache clean --force
 
 
 
