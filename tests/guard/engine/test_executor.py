@@ -443,3 +443,74 @@ def test_a_batch_mate_rewrite_does_not_invalidate_another_command(
         receipt_paths=[first["evidence_paths"]["manifest"]],
         evidence_paths=["evidence/recon/first.txt"],
     )
+
+
+def test_a_rewrite_with_unchanged_size_and_mtime_is_still_sealed(tmp_path):
+    """#203: provenance is content, not stat.
+
+    A probe that rewrites its output byte-for-byte without changing the length or
+    the timestamp (`cp -p`, `rsync -t`, `os.utime` after write, a coarse-timestamp
+    filesystem) must still be recorded as produced. Stat alone silently discards
+    genuine proof and every finding citing it is then rejected.
+    """
+    eng = _engagement(tmp_path)
+    probe = eng / "evidence" / "recon" / "probe.txt"
+    probe.parent.mkdir(parents=True)
+    probe.write_text("stale\n", encoding="utf-8")
+    unchanged_stat = probe.stat()
+    assert len("stale\n") == len("proof\n")
+
+    receipt = execution.execute(
+        "python -c 'rewrite the output in place'",
+        argv=[
+            sys.executable,
+            "-c",
+            "import os, pathlib, sys; p = pathlib.Path(sys.argv[1]); "
+            "p.write_text(sys.argv[2], encoding='utf-8'); "
+            "os.utime(p, ns=(int(sys.argv[3]), int(sys.argv[3])))",
+            str(probe),
+            "proof\n",
+            str(unchanged_stat.st_mtime_ns),
+        ],
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=["evidence/recon/probe.txt"],
+    )
+
+    assert probe.stat().st_size == unchanged_stat.st_size
+    assert probe.stat().st_mtime_ns == unchanged_stat.st_mtime_ns
+    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
+        "evidence/recon/probe.txt"
+    ]
+
+
+def test_a_background_command_still_seals_only_its_own_output(tmp_path):
+    """#203: background and status()/cancel() finalizers narrow identically."""
+    eng = _engagement(tmp_path)
+    written = eng / "evidence" / "recon" / "written.txt"
+    untouched = eng / "evidence" / "recon" / "untouched.txt"
+    untouched.parent.mkdir(parents=True)
+    untouched.write_text("from a batch-mate\n", encoding="utf-8")
+
+    receipt = execution.execute(
+        "python -c 'write one declared output'",
+        argv=_write_file_argv(written, "written\n"),
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=["evidence/recon/written.txt", "evidence/recon/untouched.txt"],
+        background=True,
+    )
+    deadline = time.monotonic() + 15
+    current = receipt
+    while current.get("status") == "running" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        current = execution.status(str(eng), receipt["execution_id"])
+
+    assert current["status"] == "completed"
+    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
+        "evidence/recon/written.txt"
+    ]
