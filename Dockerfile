@@ -26,10 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     subfinder \
     wordlists \
     dirb \
-    nodejs \
-    npm \
     ripgrep \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
@@ -43,6 +40,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # tool. Expose the security tool under the name the playbooks use; the Python
 # client stays reachable as `python -m httpx`.
 RUN mkdir -p /root/.local/bin && ln -sf /usr/bin/httpx-toolkit /root/.local/bin/httpx
+
+# ripgrep backs Hermes' `search_files` tool (bounded broad search) and is in the
+# guard's read-only command allowlist, so it is provisioned as tooling rather
+# than pulled in as a browser dependency.
+
+# No browser runtime is provisioned here. The previous attempt added nodejs/npm
+# plus a global `agent-browser` install (npm was unpinned, and the download grew
+# the image from 2.56GB to 4.78GB) for a browser whose redirect/subresource
+# scope is not yet enforced (#57) and which was never benchmarked. Do not
+# assume browser tools are absent merely because the CLI is missing: verify
+# runtime registration separately. Revisit provisioning only after #57 lands
+# and the cost and tool exposure are measured.
 
 
 # Install uv and pinned Hermes v0.21.5 into a Python 3.13 environment.
@@ -64,16 +73,6 @@ RUN git clone --depth 1 --branch "$HERMES_TAG" https://github.com/NousResearch/h
         bashlex \
         netaddr \
         yarl
-
-# Browser tooling. The `browser` toolset drives the agent-browser CLI, which
-# is an npm package with its own Chromium download -- neither comes with
-# hermes-agent. Without this step the toolset is enabled but every call fails,
-# so install it here rather than leaving agents to rediscover it (#223).
-# No credentials are written into the image; anything needing a key is passed
-# at runtime via -e.
-RUN npm install -g agent-browser \
-    && agent-browser install --with-deps \
-    && npm cache clean --force
 
 
 
