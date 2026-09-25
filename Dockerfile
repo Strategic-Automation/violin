@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     subfinder \
     seclists \
     wordlists \
+    dirb \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
