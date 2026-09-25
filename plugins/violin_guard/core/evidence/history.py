@@ -7,6 +7,7 @@ checks (which owned the staleness check).
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -107,6 +108,26 @@ def _recorded_command(line: str) -> str | None:
     return command if marker else payload
 
 
+_FAILED_EXECUTION_STATUSES = frozenset(
+    {"failed", "error", "timeout", "timed_out", "cancelled", "blocked"}
+)
+
+
+def _previous_run_failed(line: str) -> bool:
+    """True when the recorded execution did not complete successfully.
+
+    A repeat of a command whose previous run failed is a legitimate retry after
+    fixing preconditions, not drift: rejecting it pushes the operator into
+    cosmetically editing the command, which spends a round trip and salts the
+    receipts with probes that were only ever varied to satisfy the dedup check.
+    """
+    exit_match = re.search(r"(?:^|\|)\s*exit_code=(-?\d+)", line)
+    if exit_match and exit_match.group(1) != "0":
+        return True
+    status_match = re.search(r"(?:^|\|)\s*status=([A-Za-z_]+)", line)
+    return bool(status_match and status_match.group(1).lower() in _FAILED_EXECUTION_STATUSES)
+
+
 def check_history_staleness(
     eng_dir: str | Path, command: str, *, allow_pending_repeat: bool = False
 ) -> tuple[list[str], list[str], list[str]]:
@@ -139,12 +160,17 @@ def check_history_staleness(
         recorded_command is not None
         and normalize_command(recorded_command) == normalize_command(command)
     )
-    if is_repeat and not allow_pending_repeat:
+    if is_repeat and allow_pending_repeat:
+        infos.append("exact repeat belongs to the pending batch; allowing reconciliation/retry")
+    elif is_repeat and _previous_run_failed(last_line):
+        infos.append(
+            "exact repeat allowed: the previous identical command did not complete "
+            "successfully, so re-running after fixing its preconditions is expected"
+        )
+    elif is_repeat:
         errors.append(
             f"command appears to be an exact repeat of the last recorded command: {last_line}"
         )
-    elif is_repeat:
-        infos.append("exact repeat belongs to the pending batch; allowing reconciliation/retry")
 
     return errors, warnings, infos
 
