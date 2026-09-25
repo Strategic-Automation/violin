@@ -315,29 +315,79 @@ def _normalize(value: str | None) -> str:
 
 
 _VULNERABILITY_SUGGESTION_CUTOFF = 0.8
+_SUGGESTION_TOKEN_ALIASES = {"authentication": "auth"}
+
+
+def _suggestion_tokens(value: str) -> list[str]:
+    """Split route-like suggestion text on canonical and descriptive separators."""
+    return value.replace("/", "-").split("-")
 
 
 def _vulnerability_class_suggestion(canonical: str) -> str | None:
+    """Suggest a canonical class without changing policy.
+
+    Prefer typo completions, aligned alias suffixes, and exact route extensions;
+    ambiguous suffixes return no hint before the conservative fuzzy fallback.
+    """
     routes = sorted(_VULNERABILITY_ROUTES)
     prefixes = [route for route in routes if len(canonical) >= 6 and route.startswith(canonical)]
     if prefixes:
         return min(prefixes, key=len)
 
-    suffix = canonical.rsplit("-", 1)[-1]
-    suffix_matches = [route for route in routes if route.rsplit("-", 1)[-1] == suffix]
-    if len(suffix_matches) == 1:
-        return suffix_matches[0]
+    query_tokens = _suggestion_tokens(canonical)
+    query_prefix_tokens = query_tokens[:-1]
+    suffix = query_tokens[-1]
+    suffix_matches: list[str] = []
+    alias_suffix_matches: list[str] = []
+    for route in routes:
+        route_tokens = _suggestion_tokens(route)
+        if len(route_tokens) < 2 or route_tokens[-1] != suffix:
+            continue
+        route_prefix_tokens = route_tokens[:-1]
+        if len(route_prefix_tokens) > len(query_prefix_tokens):
+            continue
+        pairs = zip(route_prefix_tokens, query_prefix_tokens, strict=False)
+        if all(query_token == route_token for route_token, query_token in pairs):
+            suffix_matches.append(route)
+            continue
+        pairs = zip(route_prefix_tokens, query_prefix_tokens, strict=False)
+        if all(
+            _SUGGESTION_TOKEN_ALIASES.get(query_token, query_token) == route_token
+            for route_token, query_token in pairs
+        ):
+            alias_suffix_matches.append(route)
+    if len(alias_suffix_matches) == 1:
+        return alias_suffix_matches[0]
 
     extensions = [route for route in routes if canonical.startswith(f"{route}-")]
     if extensions:
+        close_route = get_close_matches(canonical, routes, n=1, cutoff=0.9)
+        if close_route:
+            return close_route[0]
         return max(extensions, key=len)
 
-    tokens = set(canonical.split("-"))
-    token_matches = [route for route in routes if tokens.intersection(route.split("-"))]
-    if len(token_matches) == 1:
-        return token_matches[0]
-    if len(token_matches) > 1:
-        return None
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+
+    shared_suffix_routes = [
+        route
+        for route in routes
+        if len(_suggestion_tokens(route)) > 1 and _suggestion_tokens(route)[-1] == suffix
+    ]
+    if len(shared_suffix_routes) > 1:
+        route_prefixes = [
+            "-".join(_suggestion_tokens(route)[:-1]) for route in shared_suffix_routes
+        ]
+        query_prefix = "-".join(query_prefix_tokens)
+        route_prefixes = [prefix for prefix in route_prefixes if query_prefix[:1] == prefix[:1]]
+        close_prefix = get_close_matches(
+            query_prefix,
+            route_prefixes,
+            n=1,
+            cutoff=_VULNERABILITY_SUGGESTION_CUTOFF,
+        )
+        if not close_prefix:
+            return None
 
     matches = get_close_matches(
         canonical,
@@ -345,7 +395,13 @@ def _vulnerability_class_suggestion(canonical: str) -> str | None:
         n=1,
         cutoff=_VULNERABILITY_SUGGESTION_CUTOFF,
     )
-    return matches[0] if matches else None
+    if matches:
+        return matches[0]
+
+    exact_token_matches = [route for route in routes if route in query_tokens]
+    if len(exact_token_matches) == 1:
+        return exact_token_matches[0]
+    return None
 
 
 def skill_spec(name: str) -> SkillSpec | None:
