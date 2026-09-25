@@ -14,9 +14,12 @@ from pathlib import Path
 import yaml
 
 from ...core.engagement.state import (
+    atomic_text,
     ensure_dir,
+    lock_file,
     record_session_id,
     resolve_eng_dir,
+    workflow_lock,
 )
 from ..results import GuardResult
 
@@ -91,27 +94,30 @@ def _create_artifact(
     ctf: bool = False,
 ) -> None:
     target = eng_dir / rel
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if placeholder is not None:
-        target.write_text(placeholder, encoding="utf-8")
-        return
-    assert template_rel is not None
-    src = _profile_root() / template_rel
-    content = src.read_text(encoding="utf-8")
-    if rel == Path("scope/scope.yaml"):
-        data = yaml.safe_load(content)
-        data["targets"]["ip_addresses"] = [host or _derive_host(eng_dir)]
-        data["engagement"]["date"] = date.today().isoformat()
-        content = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
-    if rel == Path("state/ptt.md"):
-        content = re.sub(
-            r"\*Last updated:.*\*",
-            f"*Last updated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}*",
-            content,
-        )
-        if ctf:
-            content = _ctf_ptt(host or _derive_host(eng_dir))
-    target.write_text(content, encoding="utf-8")
+    with lock_file(target):
+        if target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if placeholder is not None:
+            atomic_text(target, placeholder)
+            return
+        assert template_rel is not None
+        src = _profile_root() / template_rel
+        content = src.read_text(encoding="utf-8")
+        if rel == Path("scope/scope.yaml"):
+            data = yaml.safe_load(content)
+            data["targets"]["ip_addresses"] = [host or _derive_host(eng_dir)]
+            data["engagement"]["date"] = date.today().isoformat()
+            content = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+        if rel == Path("state/ptt.md"):
+            content = re.sub(
+                r"\*Last updated:.*\*",
+                f"*Last updated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}*",
+                content,
+            )
+            if ctf:
+                content = _ctf_ptt(host or _derive_host(eng_dir))
+        atomic_text(target, content)
 
 
 def _ctf_ptt(host: str) -> str:
@@ -163,9 +169,9 @@ def _seed_coverage_matrix(eng_dir: Path, scope_data: dict) -> None:
             for obligation in obligations
         }
     }
-    (eng_dir / "state" / "coverage-matrix.yaml").write_text(
-        yaml.safe_dump(coverage, sort_keys=False), encoding="utf-8"
-    )
+    target = eng_dir / "state" / "coverage-matrix.yaml"
+    with lock_file(target):
+        atomic_text(target, yaml.safe_dump(coverage, sort_keys=False))
 
 
 def _ctf_scope(host: str) -> dict:
@@ -208,29 +214,33 @@ def init_engagement(
     result = BootstrapResult()
     host = (host or "").strip() or _derive_host(eng_dir)
 
-    ensure_dir(eng_dir)
-    record_session_id(eng_dir, session_id)
-    matrix_created_here = not (eng_dir / "state" / "coverage-matrix.yaml").exists()
-    for rel in _ARTIFACT_DIRECTORIES:
-        ensure_dir(eng_dir / rel)
-    for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():
-        target = eng_dir / rel
-        if target.exists():
-            continue
-        _create_artifact(eng_dir, rel, template_rel, placeholder, host, ctf)
-        result.add_info(f"created {rel}")
+    with workflow_lock(eng_dir):
+        ensure_dir(eng_dir)
+        record_session_id(eng_dir, session_id)
+        matrix_created_here = not (eng_dir / "state" / "coverage-matrix.yaml").exists()
+        for rel in _ARTIFACT_DIRECTORIES:
+            ensure_dir(eng_dir / rel)
+        for rel, (template_rel, placeholder) in _REPAIR_TEMPLATES.items():
+            target = eng_dir / rel
+            if target.exists():
+                continue
+            _create_artifact(eng_dir, rel, template_rel, placeholder, host, ctf)
+            result.add_info(f"created {rel}")
 
-    if ctf:
-        scope_path = eng_dir / "scope" / "scope.yaml"
-        scope_path.write_text(yaml.safe_dump(_ctf_scope(host), sort_keys=False), encoding="utf-8")
-        result.add_info("wrote CTF scope")
+        if ctf:
+            scope_path = eng_dir / "scope" / "scope.yaml"
+            with lock_file(scope_path):
+                atomic_text(scope_path, yaml.safe_dump(_ctf_scope(host), sort_keys=False))
+            result.add_info("wrote CTF scope")
 
-    if matrix_created_here:
-        scope_path = eng_dir / "scope" / "scope.yaml"
-        scope_data = (
-            yaml.safe_load(scope_path.read_text(encoding="utf-8")) if scope_path.is_file() else {}
-        )
-        _seed_coverage_matrix(eng_dir, scope_data if isinstance(scope_data, dict) else {})
+        if matrix_created_here:
+            scope_path = eng_dir / "scope" / "scope.yaml"
+            scope_data = (
+                yaml.safe_load(scope_path.read_text(encoding="utf-8"))
+                if scope_path.is_file()
+                else {}
+            )
+            _seed_coverage_matrix(eng_dir, scope_data if isinstance(scope_data, dict) else {})
 
     if result.errors or result.warnings:
         result.add_error("init-engagement produced an incomplete or non-compliant engagement")
@@ -332,7 +342,8 @@ def check_bootstrap(
             )
 
     if auto_repair:
-        result = _auto_repair_corrupt_artifacts(eng_dir, result)
+        with workflow_lock(eng_dir):
+            result = _auto_repair_corrupt_artifacts(eng_dir, result)
 
     if not result.errors and not result.warnings:
         result.add_info(f"bootstrap complete: {eng_dir}")

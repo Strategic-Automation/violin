@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from plugins.violin_guard import handlers as service
 from plugins.violin_guard.core.commands.targets import check_scope_targets
 from plugins.violin_guard.core.engagement import bootstrap, hypotheses, ptt, state
@@ -239,13 +241,30 @@ def test_pending_batch_repeat_is_allowed_for_recovery(tmp_path: Path) -> None:
     assert any("pending batch" in info for info in infos)
 
 
-def test_burst_continues_past_review_required_command(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("yolo_mode", [None, "0", "1"])
+@pytest.mark.parametrize("review_index", [0, 1])
+def test_burst_requires_authorization_before_any_execution(
+    tmp_path: Path, monkeypatch, yolo_mode, review_index
+) -> None:
+    if yolo_mode is None:
+        monkeypatch.delenv("HERMES_YOLO_MODE", raising=False)
+    else:
+        monkeypatch.setenv("HERMES_YOLO_MODE", yolo_mode)
     eng = _engagement(tmp_path)
-    checks = iter((CheckResult(warnings=["review first"]), CheckResult()))
+    results = [CheckResult(), CheckResult()]
+    results[review_index] = CheckResult(warnings=["review first"])
+    checks = iter(results)
     from plugins.violin_guard.handlers import exec_handlers
 
     monkeypatch.setattr(exec_handlers, "_check_command_internal", lambda _args: next(checks))
     executed: list[str] = []
+    reservations: list[int] = []
+
+    def reserve_credit(eng_dir, phase, count):
+        reservations.append(count)
+        return None
+
+    monkeypatch.setattr(state, "reserve_sync_credit", reserve_credit)
 
     def fake_execute(command: str, **_kwargs):
         executed.append(command)
@@ -262,6 +281,15 @@ def test_burst_continues_past_review_required_command(tmp_path: Path, monkeypatc
             }
         )
     )
-    assert data["status"] == "batch_complete"
-    assert data["review_required"] is True
-    assert executed == ["first", "second"]
+    if yolo_mode == "1":
+        assert data["status"] == "batch_complete"
+        assert data["review_required"] is True
+        assert executed == ["first", "second"]
+        assert reservations == [2]
+    else:
+        assert data["status"] == "denied"
+        assert data["executed"] == 0
+        assert data["results"][0]["index"] == review_index + 1
+        assert data["results"][0]["warnings"] == ["review first"]
+        assert executed == []
+        assert reservations == []

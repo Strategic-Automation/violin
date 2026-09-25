@@ -52,14 +52,16 @@ def handle_heartbeat_done(args: dict, **kwargs):
     return _json("ok")
 
 
+def _execution_allowed(exit_code: int) -> bool:
+    """Use the same pre-execution authorization for single commands and batches."""
+    return exit_code == 0 or (exit_code == 2 and os.environ.get("HERMES_YOLO_MODE") == "1")
+
+
 @_serialize_errors
 def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, **kwargs):
     result = _check_command_internal(args)
     exit_code = result.exit_code()
-    status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
-    if status_name not in ("ok",) and not (
-        status_name == "review" and os.environ.get("HERMES_YOLO_MODE") == "1"
-    ):
+    if not _execution_allowed(exit_code):
         sync_status = (
             "sync_required"
             if any(
@@ -123,7 +125,7 @@ def handle_exec_cancel(args: dict, **kwargs):
 
 @_serialize_errors
 def handle_exec_burst(args: dict, **kwargs):
-    """Single-approval bounded command batch with real burst semantics."""
+    """Authorize the complete bounded batch before executing any command."""
     eng_dir = args.get("eng_dir", "")
     phase = args.get("phase", "")
     scope = args.get("scope", "")
@@ -186,7 +188,9 @@ def handle_exec_burst(args: dict, **kwargs):
         cmd_result = _check_command_internal(cmd_args)
         exit_code = cmd_result.exit_code()
         status_name = "ok" if exit_code == 0 else "review" if exit_code == 2 else "block"
-        if status_name == "block":
+        if not _execution_allowed(exit_code):
+            denied_status = "blocked" if status_name == "block" else "review"
+            reasons = cmd_result.errors or cmd_result.warnings
             return _json(
                 "denied",
                 executed=0,
@@ -194,11 +198,11 @@ def handle_exec_burst(args: dict, **kwargs):
                     {
                         "index": idx + 1,
                         "command": cmd,
-                        "status": "blocked",
-                        "errors": cmd_result.errors,
+                        "status": denied_status,
+                        **_result(cmd_result),
                     }
                 ],
-                reason=f"command [{idx + 1}] blocked: {cmd_result.errors[0] if cmd_result.errors else 'blocked'}",
+                reason=f"command [{idx + 1}] {denied_status}: {reasons[0] if reasons else denied_status}",
             )
         review_warnings = cmd_result.warnings if status_name == "review" else []
         local = state.is_local_bookkeeping_command(cmd)
