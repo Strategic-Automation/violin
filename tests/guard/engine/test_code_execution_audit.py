@@ -18,7 +18,7 @@ from plugins.violin_guard.hooks import (
     _post_tool_call_hook,
     _pre_tool_call_hook,
 )
-from tests.guard.receipt_fixture import bind_active_task
+from tests.guard.receipt_fixture import bind_active_task, record_started_command
 
 _SCOPE = """targets:
   ip_addresses: ["10.10.10.10"]
@@ -310,9 +310,11 @@ def test_local_execute_code_is_recorded_without_target_sync_credit(tmp_path) -> 
 
 def test_local_execute_code_remains_available_when_target_credit_is_exhausted(tmp_path) -> None:
     eng = _engagement(tmp_path)
-    for _ in range(state.sync_credit_limit("RECON")):
-        state.spend_sync_credit(eng, "RECON")
+    for index in range(state.sync_credit_limit("RECON")):
+        record_started_command(eng, f"nmap -p {index + 1} 10.10.10.10")
     assert state.sync_credit_remaining(eng, "RECON") == 0
+    pending_before = state.get_pending_sync(eng)
+    counts_before = state.read_counts(eng)
 
     source = _code(eng)
     assert (
@@ -333,7 +335,8 @@ def test_local_execute_code_remains_available_when_target_credit_is_exhausted(tm
         tool_call_id="exhausted-local-analysis",
     )
     assert state.sync_credit_remaining(eng, "RECON") == 0
-    assert not state.has_pending_sync(eng)
+    assert state.get_pending_sync(eng) == pending_before
+    assert state.read_counts(eng) == counts_before
 
 
 def test_execute_code_rejects_foreign_literal_target(tmp_path) -> None:

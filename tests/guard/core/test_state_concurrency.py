@@ -8,17 +8,24 @@ import json
 from plugins.violin_guard.core.engagement import state
 
 
-def test_concurrent_credit_spends_are_serialized(tmp_path):
+def test_concurrent_execution_starts_are_serialized(tmp_path):
     eng = tmp_path / "engagement"
     sync = eng / "state" / "sync.json"
     sync.parent.mkdir(parents=True)
     sync.write_text(json.dumps({"credit": 50}), encoding="utf-8")
 
+    def start(index):
+        return state.commit_execution_start(
+            eng, f"nmap -p {index} 10.10.10.10", "RECON", "PT-010", f"execution-{index}"
+        )[0]
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
-        results = list(pool.map(lambda _: state.spend_sync_credit(eng, "RECON"), range(25)))
+        results = list(pool.map(start, range(25)))
 
     assert state.sync_credit_remaining(eng) == 25
     assert sorted(results) == list(range(25, 50))
+    assert state.read_counts(eng)["commands"] == 25
+    assert len(state.get_pending_sync(eng)["commands"]) == 25
 
 
 def test_lock_file_releases_lock_path(tmp_path):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -72,22 +73,10 @@ def _fake_target_executor(monkeypatch):
     def fake_execute(command, *, eng_dir, phase, **kwargs):
         engagement = Path(eng_dir)
         history.append_history(engagement, command, phase, 0, "evidence/executions/test.json")
-        remaining = state.spend_sync_credit(str(engagement), phase)
-        # Mirror real execution: tick command counter, mark pending sync, set heartbeat if interval reached
-        from plugins.violin_guard.core.engagement.phases import (
-            normalize_phase,
-            suppresses_heartbeat,
-        )
-
-        count = state.tick_command(str(engagement))
         active = ptt.find_active_task(ptt.parse_ptt(engagement / "state" / "ptt.md"))
-        state.mark_pending_sync(str(engagement), command, phase, active.id if active else "")
-        phase_enum = normalize_phase(phase)
-        if count % state.COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
-            state.set_heartbeat_pending(
-                str(engagement),
-                f"Reached {count} executed target commands. Review engagement files for drift.",
-            )
+        remaining, _, _, _ = state.commit_execution_start(
+            engagement, command, phase, active.id if active else "", str(uuid.uuid4())
+        )
         return {
             "execution_id": "00000000-0000-0000-0000-000000000001",
             "status": "completed",
@@ -1035,8 +1024,11 @@ def test_heartbeat_gate_every_n_commands(monkeypatch, tmp_path):
         "session_id": "ts",
     }
 
-    for _ in range(state.COMMAND_INTERVAL - 1):
-        state.tick_command(str(eng))
+    with state.workflow_lock(eng):
+        state.mutate_json(
+            eng / "state" / "counts.json",
+            lambda data: data.update({"commands": state.COMMAND_INTERVAL - 1}),
+        )
 
     threshold = json.loads(TOOLS.handle_exec({**args, "command": "nmap -sV 10.10.10.10 -p 20"}))
     assert threshold["status"] == "ok", threshold

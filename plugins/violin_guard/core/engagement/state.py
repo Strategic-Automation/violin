@@ -245,18 +245,6 @@ def sync_credit_remaining(eng_dir: str | Path, phase: str | None = None) -> int:
     return max(0, data.get("credit", sync_credit_limit(phase)))
 
 
-def spend_sync_credit(eng_dir: str | Path, phase: str) -> int:
-    path = _sync_path(eng_dir)
-
-    def spend(data: dict[str, Any]) -> int:
-        starting_credit = data.get("credit", sync_credit_limit(phase))
-        credit = max(0, starting_credit - 1)
-        data["credit"] = credit
-        return credit
-
-    return mutate_json(path, spend)
-
-
 def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
     """Atomically reserve credit for a burst before any command starts."""
     if count < 1:
@@ -279,22 +267,6 @@ def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
     return mutate_json(path, reserve)
 
 
-def consume_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
-    """Consume one previously reserved slot without decrementing credit twice."""
-    path = _sync_path(eng_dir)
-
-    def consume(data: dict[str, Any]) -> int:
-        reservation = (data.get("reservations") or {}).get(reservation_id)
-        if not reservation or int(reservation.get("remaining", 0)) < 1:
-            raise ValueError("sync reservation is missing or exhausted")
-        reservation["remaining"] = int(reservation["remaining"]) - 1
-        if reservation["remaining"] == 0:
-            data["reservations"].pop(reservation_id, None)
-        return max(0, int(data.get("credit", 0)))
-
-    return mutate_json(path, consume)
-
-
 def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
     """Return every unconsumed slot in a reservation to the sync window."""
     path = _sync_path(eng_dir)
@@ -308,37 +280,6 @@ def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> in
         return max(0, int(data.get("credit", 0)))
 
     return mutate_json(path, release)
-
-
-def mark_pending_sync(
-    eng_dir: str | Path,
-    command: str,
-    command_phase: str,
-    ptt_task_id: str,
-) -> None:
-    path = _sync_path(eng_dir)
-
-    def mark(data: dict[str, Any]) -> None:
-        old = data.get("pending") or {}
-        commands = list(old.get("commands") or [])
-        if old.get("command") and not commands:
-            commands = [{"command": old["command"], "phase": old.get("phase", command_phase)}]
-        commands.append({"command": command, "phase": command_phase})
-        task_id = old.get("ptt_task_id") or ptt_task_id
-        if not task_id:
-            raise ValueError("pending execution requires a captured active PTT task")
-        data["pending"] = {
-            "batch_id": old.get("batch_id") or str(uuid.uuid4()),
-            "commands": commands,
-            "phase": command_phase,
-            "created_at": old.get("created_at")
-            or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "ptt_task_id": task_id,
-            "ptt_reviewed": False,
-            "credit_limit": old.get("credit_limit") or sync_credit_limit(command_phase),
-        }
-
-    mutate_json(path, mark)
 
 
 def commit_execution_start(
@@ -539,7 +480,6 @@ def record_semantic_review(
     evidence_paths: list[str],
     next_action: str,
     next_technique: str,
-    research_attempted: bool = False,
 ) -> dict[str, Any]:
     """Track evidence-backed technique-pivot progress and the anti-stuck lock.
 
@@ -699,16 +639,6 @@ def read_counts(eng_dir: str | Path) -> dict[str, int]:
     }
 
 
-def tick_command(eng_dir: str | Path) -> int:
-    path = _counts_path(eng_dir)
-
-    def tick(data: dict[str, Any]) -> int:
-        data["commands"] = data.get("commands", 0) + 1
-        return data["commands"]
-
-    return mutate_json(path, tick)
-
-
 def tick_message(eng_dir: str | Path) -> int:
     path = _counts_path(eng_dir)
 
@@ -726,16 +656,3 @@ def tick_message(eng_dir: str | Path) -> int:
             if attempt == 2:
                 raise
             time.sleep(0.02 * (attempt + 1))
-
-
-def record_ok_check(eng_dir: str | Path, command: str, phase: str) -> None:
-    path = _counts_path(eng_dir)
-
-    def record(data: dict[str, Any]) -> None:
-        data["last_check"] = {
-            "command": command,
-            "phase": phase,
-            "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
-
-    mutate_json(path, record)

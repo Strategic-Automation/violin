@@ -167,7 +167,6 @@ def _execute_batch_review(
         evidence_paths=evidence_paths,
         next_action=str(args.get("next_action") or "review evidence"),
         next_technique=str(args.get("next_technique") or ""),
-        research_attempted=bool(args.get("research_attempted")),
     )
     state.clear_pending_sync(engagement)
     return _json(

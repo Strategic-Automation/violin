@@ -93,7 +93,7 @@ def test_batch_review_succeeds_for_multiline_pending_command(tmp_path: Path) -> 
     multiline_cmd = "cd /app\n  curl -i http://eloquia.htb/\n  wc -l index.html"
 
     # Mark pending sync with multiline command
-    state.mark_pending_sync(eng, multiline_cmd, "RECON", "PT-010")
+    state.commit_execution_start(eng, multiline_cmd, "RECON", "PT-010", "multiline-execution")
     pending = state.get_pending_sync(eng)
     assert pending is not None
 

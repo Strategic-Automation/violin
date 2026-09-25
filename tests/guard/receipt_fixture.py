@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from plugins.violin_guard.core.engagement import ptt, state
@@ -11,6 +12,25 @@ from plugins.violin_guard.core.skills.skill_receipts import (
     complete_delivery,
     prepare_delivery,
 )
+
+
+def record_started_command(
+    engagement: Path,
+    command: str,
+    phase: str = "RECON",
+    task_id: str = "PT-010",
+    *,
+    reservation_id: str | None = None,
+) -> tuple[int, bool, int, bool]:
+    """Arm test review state through the runtime's execution accountant."""
+    return state.commit_execution_start(
+        engagement,
+        command,
+        phase,
+        task_id,
+        str(uuid.uuid4()),
+        sync_reservation=reservation_id,
+    )
 
 
 def bind_active_task(
