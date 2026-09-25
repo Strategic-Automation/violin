@@ -224,18 +224,46 @@ def _find_execution_manifest(engagement: Path, execution_id: str) -> Path | None
     return None
 
 
-def _evidence_digests(engagement: Path, declared: list[str]) -> dict[str, str | None]:
-    """Content digest of each declared evidence file, or None where it is absent.
+def _evidence_snapshot(engagement: Path, declared: list[str]) -> dict[str, dict[str, Any]]:
+    """Per-file content digest and stat: the observation provenance is judged on.
 
-    Content, not size and mtime: a probe that rewrites a file byte-for-byte
-    without changing its length or timestamp would otherwise look untouched and
-    go unsealed, silently discarding proof the agent actually produced.
+    Neither signal alone can tell what a command touched. A probe that rewrites
+    a file byte-for-byte changes no digest; a probe that rewrites content while
+    preserving the timestamp changes no stat (`cp -p`, `rsync -t`, `os.utime`
+    after write, coarse-timestamp filesystems). Recording both lets the
+    finalizer detect either kind of write, instead of silently discarding proof
+    the agent actually produced. A file is described as absent (``None``) when
+    it is missing, so a command that creates its declared output is detected.
     """
-    digests: dict[str, str | None] = {}
+    snapshot: dict[str, dict[str, Any]] = {}
     for value in declared:
         path = engagement / value
-        digests[value] = file_digest(path) if path.is_file() and not path.is_symlink() else None
-    return digests
+        if path.is_file() and not path.is_symlink():
+            stat = path.stat()
+            snapshot[value] = {
+                "sha256": file_digest(path),
+                "mtime_ns": stat.st_mtime_ns,
+            }
+        else:
+            snapshot[value] = {"sha256": None, "mtime_ns": None}
+    return snapshot
+
+
+def _was_written(before: Any, after: dict[str, Any]) -> bool:
+    """Whether a declared file's observed state differs from its own baseline.
+
+    ``before`` is this run's snapshot entry, or a bare digest from a record
+    written before the snapshot shape existed. A file absent at baseline and
+    present now was created; a moved mtime is a write even when the bytes are
+    identical; a changed digest is a write even when the timestamp is preserved.
+    """
+    if isinstance(before, dict):
+        return (before.get("sha256"), before.get("mtime_ns")) != (
+            after["sha256"],
+            after["mtime_ns"],
+        )
+    # Legacy baseline: content is the only signal the old record carries.
+    return after["sha256"] != before
 
 
 def _produced_outputs(engagement: Path, record: dict[str, Any]) -> list[str]:
@@ -251,8 +279,8 @@ def _produced_outputs(engagement: Path, record: dict[str, Any]) -> list[str]:
     if not isinstance(baseline, dict) or not isinstance(declared, list):
         return declared
     values = [str(value) for value in declared]
-    after = _evidence_digests(engagement, values)
-    return [value for value in values if after[value] != baseline.get(value)]
+    after = _evidence_snapshot(engagement, values)
+    return [value for value in values if _was_written(baseline.get(value), after[value])]
 
 
 def _finalize_execution(
@@ -500,7 +528,7 @@ def execute(
             "stderr": rel_stderr,
         },
         "declared_evidence_outputs": declared_outputs,
-        "declared_outputs_before": _evidence_digests(engagement, declared_outputs),
+        "declared_outputs_before": _evidence_snapshot(engagement, declared_outputs),
     }
     if command != requested_command:
         # The probe was rewritten to capture its status line. Keep the command the
