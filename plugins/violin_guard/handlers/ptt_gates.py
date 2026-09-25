@@ -157,7 +157,7 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                             f"authenticate its evidence: {exc}"
                         ) from exc
                     proof_paths.add((engagement / receipt_path).resolve())
-                    proof_paths.update(evidence)
+                    proof_paths.update(evidence.authenticated)
                 reported_proofs[finding_id] = proof_paths
             unreported = []
             for item in validated:

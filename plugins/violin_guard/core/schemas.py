@@ -215,8 +215,9 @@ class ExecArgsModel(BaseModel):
         default_factory=list,
         description=(
             "Engagement-relative files beneath evidence/ that this command will create or "
-            "update. Declared files are hashed into the signed execution receipt. Use this "
-            "for scripts and tools that write evidence outside captured stdout/stderr."
+            "update. The files the command actually writes are hashed into its signed "
+            "execution receipt. Use this for scripts and tools that write evidence outside "
+            "captured stdout/stderr."
         ),
     )
     background: bool = Field(
@@ -360,9 +361,9 @@ class ExecBurstArgsModel(BaseModel):
         default_factory=list,
         description=(
             "engagement-relative evidence files this batch writes (same paths you would pass "
-            "to violin_exec); each command's receipt declares them so violin_submit_finding "
-            "can authenticate the files. Bursts are approved as one batch, so declare the "
-            "union of the files the batch produces."
+            "to violin_exec). Bursts are approved as one batch, so declare the union of the "
+            "files the batch produces; each command's receipt then seals only the files that "
+            "command itself wrote, so violin_submit_finding can authenticate them."
         ),
     )
 

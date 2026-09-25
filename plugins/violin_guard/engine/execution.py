@@ -224,6 +224,16 @@ def _find_execution_manifest(engagement: Path, execution_id: str) -> Path | None
     return None
 
 
+def _evidence_fingerprint(engagement: Path, declared: list[str]) -> dict[str, tuple[int, int]]:
+    """Size and mtime of each declared evidence file that currently exists."""
+    fingerprint: dict[str, tuple[int, int]] = {}
+    for value in declared:
+        with contextlib.suppress(OSError):
+            stat = (engagement / value).stat()
+            fingerprint[value] = (stat.st_size, stat.st_mtime_ns)
+    return fingerprint
+
+
 def _finalize_execution(
     *,
     engagement: Path,
@@ -233,6 +243,7 @@ def _finalize_execution(
     timed_out: bool = False,
     cancelled: bool = False,
     output_limited: bool = False,
+    produced_outputs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Persist a terminal intent, then idempotently publish history and receipt.
 
@@ -267,13 +278,11 @@ def _finalize_execution(
                 with contextlib.suppress(OSError):
                     stderr_p.unlink()
                 record.setdefault("evidence_paths", {})["stderr"] = None
-        missing_outputs = [
-            value
-            for value in record.get("declared_evidence_outputs") or []
-            if not (engagement / value).is_file()
-        ]
-        terminal.setdefault("missing_evidence_outputs", missing_outputs)
-        terminal.setdefault("evidence_complete", not terminal["missing_evidence_outputs"])
+        if produced_outputs is not None:
+            # A receipt's evidence identity is what its own command wrote. Files the
+            # command left alone belong to whoever produced them, so a burst receipt
+            # never seals — or reports as missing — a batch-mate's output.
+            record["declared_evidence_outputs"] = produced_outputs
         record["terminal"] = terminal
         state.atomic_json(manifest_path, record)
         command = str(record.get("command") or "")
@@ -434,6 +443,7 @@ def execute(
     command = normalize_http_proof_flags(command)
     engagement = _resolve_engagement(eng_dir)
     declared_outputs = _validate_evidence_outputs(engagement, evidence_outputs)
+    declared_before = _evidence_fingerprint(engagement, declared_outputs)
     workdir = _resolve_cwd(engagement, cwd)
     timeout = _timeout(timeout_seconds)
     resolution = resolve_backend(backend, engagement, container=docker_container)
@@ -593,6 +603,7 @@ def execute(
             execution_id,
             sync_reservation,
         )
+    declared_after = _evidence_fingerprint(engagement, declared_outputs)
     receipt = _finalize_execution(
         engagement=engagement,
         manifest_path=manifest_path,
@@ -610,6 +621,11 @@ def execute(
         timed_out=timed_out,
         cancelled=cancelled,
         output_limited=output_limited,
+        produced_outputs=[
+            value
+            for value in declared_outputs
+            if declared_after.get(value) != declared_before.get(value)
+        ],
     )
     remaining, consumed = (
         (accounting[0], accounting[1])
