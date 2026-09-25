@@ -312,6 +312,7 @@ def test_exec_burst_denies_secondary_only_primary_target(
 def test_exec_burst_fail_closed_on_blocked_command(eng, monkeypatch):
     """A batch containing a hard-blocked command (e.g. `rm -rf /`) is denied
     and the batch is halted at the first BLOCK (fail-closed)."""
+    monkeypatch.setenv("HERMES_YOLO_MODE", "1")
     rec = _patch_burst(monkeypatch, str(eng))
     data = json.loads(
         service.handle_exec_burst(
