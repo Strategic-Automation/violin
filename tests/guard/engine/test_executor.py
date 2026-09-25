@@ -514,3 +514,109 @@ def test_a_background_command_still_seals_only_its_own_output(tmp_path):
     assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
         "evidence/recon/written.txt"
     ]
+
+
+def test_a_byte_identical_rewrite_is_still_sealed_without_its_sibling(tmp_path):
+    """#203 regression: bytes alone cannot tell a rewrite from an untouched file.
+
+    A single command that rewrites an existing declared output with identical
+    bytes leaves the content digest unchanged, so the file was dropped from the
+    receipt and every finding citing it was rejected as unauthenticated — the
+    exact proof loss the #203 narrowing was meant to prevent. The command did
+    write the file, so it must be sealed; the untouched declared sibling still
+    belongs to whoever produced it and must not be reattached.
+    """
+    eng = _engagement(tmp_path)
+    rewritten = eng / "evidence" / "recon" / "rewritten.txt"
+    untouched = eng / "evidence" / "recon" / "untouched.txt"
+    untouched.parent.mkdir(parents=True)
+    payload = "identical bytes\n"
+    rewritten.write_text(payload, encoding="utf-8")
+    untouched.write_text("from a batch-mate\n", encoding="utf-8")
+    # Pin the baseline timestamp far in the past so any real write moves it,
+    # independent of filesystem timestamp granularity.
+    os.utime(rewritten, ns=(1_000_000_000, 1_000_000_000))
+    baseline_mtime = rewritten.stat().st_mtime_ns
+    baseline_digest = receipt_integrity.file_digest(rewritten)
+
+    receipt = execution.execute(
+        "python -c 'rewrite the output with identical bytes'",
+        argv=_write_file_argv(rewritten, payload),
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=["evidence/recon/rewritten.txt", "evidence/recon/untouched.txt"],
+    )
+
+    assert rewritten.read_text(encoding="utf-8") == payload
+    assert receipt_integrity.file_digest(rewritten) == baseline_digest
+    assert rewritten.stat().st_mtime_ns != baseline_mtime
+    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
+        "evidence/recon/rewritten.txt"
+    ]
+
+
+def test_a_background_byte_identical_rewrite_is_sealed(tmp_path):
+    """The background finalizer narrows on the same per-command provenance rule."""
+    eng = _engagement(tmp_path)
+    probe = eng / "evidence" / "recon" / "probe.txt"
+    probe.parent.mkdir(parents=True)
+    payload = "same bytes in the background\n"
+    probe.write_text(payload, encoding="utf-8")
+    os.utime(probe, ns=(1_000_000_000, 1_000_000_000))
+    baseline_mtime = probe.stat().st_mtime_ns
+
+    receipt = execution.execute(
+        "python -c 'rewrite the background output with identical bytes'",
+        argv=_write_file_argv(probe, payload),
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=["evidence/recon/probe.txt"],
+        background=True,
+    )
+    deadline = time.monotonic() + 15
+    current = receipt
+    while current.get("status") == "running" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        current = execution.status(str(eng), receipt["execution_id"])
+
+    assert current["status"] == "completed"
+    assert probe.read_text(encoding="utf-8") == payload
+    assert probe.stat().st_mtime_ns != baseline_mtime
+    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
+        "evidence/recon/probe.txt"
+    ]
+
+
+def test_a_legacy_digest_baseline_still_narrows_by_content(tmp_path):
+    """A record written before the snapshot shape keeps its content-only rule.
+
+    Old manifests stored ``declared_outputs_before`` as a bare digest per file.
+    Finishing such an in-flight record must not change how it narrows.
+    """
+    eng = _engagement(tmp_path)
+    reported = eng / "evidence" / "recon" / "reported.txt"
+    untouched = eng / "evidence" / "recon" / "untouched.txt"
+    untouched.parent.mkdir(parents=True)
+    reported.write_text("legacy rewritten\n", encoding="utf-8")
+    untouched.write_text("from a batch-mate\n", encoding="utf-8")
+
+    record = {
+        "execution_id": "12345678-1234-4234-8234-123456789abc",
+        "status": "running",
+        "command": "legacy command",
+        "phase": "recon",
+        "declared_evidence_outputs": [
+            "evidence/recon/reported.txt",
+            "evidence/recon/untouched.txt",
+        ],
+        "declared_outputs_before": {
+            "evidence/recon/reported.txt": "0" * 64,
+            "evidence/recon/untouched.txt": receipt_integrity.file_digest(untouched),
+        },
+    }
+
+    assert execution._produced_outputs(eng, record) == ["evidence/recon/reported.txt"]
