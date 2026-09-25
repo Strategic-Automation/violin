@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from plugins.violin_guard.core.evidence import findings, receipt_integrity
 from plugins.violin_guard.engine import execution
 
 
@@ -356,3 +357,89 @@ def test_executor_rejects_cwd_escape(tmp_path):
     eng = _engagement(tmp_path)
     with pytest.raises(ValueError, match="inside the engagement"):
         execution.execute("echo blocked", eng_dir=str(eng), phase="recon", cwd="..")
+
+
+def _write_file_argv(path: Path, content: str) -> list[str]:
+    return [
+        sys.executable,
+        "-c",
+        "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')",
+        str(path),
+        content,
+    ]
+
+
+def _manifest_record(eng: Path, receipt: dict) -> dict:
+    return json.loads((eng / receipt["evidence_paths"]["manifest"]).read_text(encoding="utf-8"))
+
+
+def test_receipt_seals_only_the_outputs_its_command_wrote(tmp_path):
+    """#203: a receipt's evidence identity is what its own command wrote."""
+    eng = _engagement(tmp_path)
+    written = eng / "evidence" / "recon" / "written.txt"
+    untouched = eng / "evidence" / "recon" / "untouched.txt"
+    untouched.parent.mkdir(parents=True)
+    untouched.write_text("from a batch-mate\n", encoding="utf-8")
+
+    receipt = execution.execute(
+        "python -c 'write one declared output'",
+        argv=_write_file_argv(written, "written\n"),
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=["evidence/recon/written.txt", "evidence/recon/untouched.txt"],
+    )
+
+    assert receipt["exit_code"] == 0
+    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
+        "evidence/recon/written.txt"
+    ]
+
+
+def test_a_batch_mate_rewrite_does_not_invalidate_another_command(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    """#203: two commands declaring one batch-wide union must not share evidence identity."""
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
+    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
+    eng = _engagement(tmp_path)
+    first_output = eng / "evidence" / "recon" / "first.txt"
+    second_output = eng / "evidence" / "recon" / "second.txt"
+    first_output.parent.mkdir(parents=True)
+    union = ["evidence/recon/first.txt", "evidence/recon/second.txt"]
+
+    first = execution.execute(
+        "python -c 'write the first output'",
+        argv=_write_file_argv(first_output, "first\n"),
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=union,
+    )
+    second = execution.execute(
+        "python -c 'write the second output'",
+        argv=_write_file_argv(second_output, "second\n"),
+        eng_dir=str(eng),
+        phase="recon",
+        timeout_seconds=30,
+        ptt_task_id="PT-001",
+        evidence_outputs=union,
+    )
+    assert _manifest_record(eng, first)["declared_evidence_outputs"] == ["evidence/recon/first.txt"]
+    assert _manifest_record(eng, second)["declared_evidence_outputs"] == [
+        "evidence/recon/second.txt"
+    ]
+
+    # A later batch step rewrites its own output. The earlier receipt must still
+    # authenticate the file its own command produced.
+    second_output.write_text("rewritten by a later probe\n", encoding="utf-8")
+    findings.submit_finding(
+        eng,
+        title="Rests on the first command's own output",
+        severity="High",
+        summary="Reproduced with receipt-authenticated evidence.",
+        receipt_paths=[first["evidence_paths"]["manifest"]],
+        evidence_paths=["evidence/recon/first.txt"],
+    )
