@@ -24,8 +24,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     httpx-toolkit \
     dnsx \
     subfinder \
+    seclists \
+    wordlists \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
+
+# SecLists and the DIRB/params wordlists are referenced throughout the
+# playbooks; without them every assessment falls back to a hand-built target
+# wordlist, which is far weaker for content discovery (#222).
+#
+# Kali ships ProjectDiscovery httpx as `httpx-toolkit` to avoid colliding with
+# the PyPI `httpx` client. That console script lands in /opt/hermes/bin, which
+# precedes /usr/bin on PATH, so a bare `httpx` silently resolved to the wrong
+# tool. Expose the security tool under the name the playbooks use; the Python
+# client stays reachable as `python -m httpx`.
+RUN mkdir -p /root/.local/bin && ln -sf /usr/bin/httpx-toolkit /root/.local/bin/httpx
 
 
 # Install uv package manager & hermes-agent CLI + violin plugin deps.
