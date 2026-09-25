@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Target commands now reject paths into another engagement through the normal single-command and burst guard.
+- PTT task updates no longer advertise ignored review fields; record execution outcomes with `violin_review_batch`. The ignored `research_attempted` batch-review input is removed, while hypothesis research recording remains available.
+- Execution accounting tests and smoke checks use the same retry-safe state transition as the runtime; obsolete state helpers are removed.
 - Reporting close: a command whose receipt authenticates the submitted findings satisfies the close even when it ran under `VULN_RESEARCH`, and the refusal names the exact command that would satisfy it.
 - Evidence identity: a saved evidence file cited by more than one receipt stays verifiable while it holds a version that some signed receipt recorded, and a genuine authentication failure names both conflicting citations with a remedy. Submission and the close now share one rule instead of two independent checks.
 - Hypothesis-to-finding check requires overlap with a finding's authenticated proof rather than a strict subset, so a hypothesis that records everything it investigated no longer blocks its own close.
