@@ -594,7 +594,7 @@ state.atomic_json(receipt, {
 history.append_history(
     engagement, command, "RECON", 0, receipt.relative_to(engagement).as_posix()
 )
-state.mark_pending_sync(engagement, command, "RECON", "PT-010")
+state.commit_execution_start(engagement, command, "RECON", "PT-010", "smoke-review")
 
 reviewed = json.loads(service.handle_review_batch({
     "eng_dir": str(engagement),

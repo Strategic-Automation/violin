@@ -9,6 +9,7 @@ from plugins.violin_guard import handlers as service
 from plugins.violin_guard.core.engagement import bootstrap, state
 from plugins.violin_guard.core.evidence import history
 from plugins.violin_guard.handlers.ptt_gates import _redact_sensitive_note
+from tests.guard.receipt_fixture import record_started_command
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -26,7 +27,7 @@ def test_record_ptt_refuses_to_reconcile_a_pending_batch(tmp_path: Path) -> None
     eng = _engagement(tmp_path)
     command = "nmap -p 80 10.10.10.10"
     history.append_history(eng, command, "RECON", 0, "evidence/executions/test.json")
-    state.mark_pending_sync(eng, command, "RECON", "PT-010")
+    record_started_command(eng, command)
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
         ptt_path.read_text(encoding="utf-8")
@@ -53,21 +54,21 @@ def test_record_ptt_refuses_to_reconcile_a_pending_batch(tmp_path: Path) -> None
 
 def test_appending_work_invalidates_an_earlier_review(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
-    state.mark_pending_sync(eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010")
+    record_started_command(eng, "nmap -p 80 10.10.10.10")
     sync_path = eng / "state" / "sync.json"
     sync_data = state.read_json(sync_path)
     sync_data["pending"]["ptt_reviewed"] = True
     state.atomic_json(sync_path, sync_data)
-    state.mark_pending_sync(eng, "nmap -p 443 10.10.10.10", "RECON", "PT-010")
+    record_started_command(eng, "nmap -p 443 10.10.10.10")
     assert state.get_pending_sync(eng)["ptt_reviewed"] is False
 
 
 def test_new_pending_batches_use_unique_uuid_ids(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
-    state.mark_pending_sync(eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010")
+    record_started_command(eng, "nmap -p 80 10.10.10.10")
     first = state.get_pending_sync(eng)["batch_id"]
     state.clear_pending_sync(eng)
-    state.mark_pending_sync(eng, "nmap -p 443 10.10.10.10", "RECON", "PT-010")
+    record_started_command(eng, "nmap -p 443 10.10.10.10")
     second = state.get_pending_sync(eng)["batch_id"]
     assert first != second
     assert len(first) == 36
@@ -77,7 +78,7 @@ def test_new_pending_batches_use_unique_uuid_ids(tmp_path: Path) -> None:
 def _completed_batch_with_active_replacement(eng: Path, replacement: str = "PT-011") -> str:
     command = "nmap -p 80 10.10.10.10"
     history.append_history(eng, command, "RECON", 0, "evidence/executions/test.json")
-    state.mark_pending_sync(eng, command, "RECON", "PT-010")
+    record_started_command(eng, command)
     ptt_path = eng / "state" / "ptt.md"
     ptt_path.write_text(
         ptt_path.read_text(encoding="utf-8")
@@ -140,7 +141,7 @@ def test_rebind_requires_confirmation_and_current_batch_identity(tmp_path: Path)
 
 def test_rebind_rejects_incomplete_or_phase_incompatible_batch(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
-    state.mark_pending_sync(eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010")
+    record_started_command(eng, "nmap -p 80 10.10.10.10")
     pending = state.get_pending_sync(eng)
     incomplete = json.loads(
         service.handle_rebind_pending_batch(
