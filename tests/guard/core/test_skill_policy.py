@@ -61,6 +61,8 @@ def test_every_phase_has_one_deterministic_default_route(phase: Phase) -> None:
         ("static analysis", "semgrep"),
         ("sarif", "sarif-parsing"),
         ("false positive", "fp-check"),
+        ("Mass assignment", "api-testing"),
+        ("Missing authentication", "identity-auth"),
     ],
 )
 def test_vulnerability_class_routes_are_deterministic(
@@ -96,9 +98,36 @@ def test_unknown_policy_input_fails_closed() -> None:
     assert decision.selected == "pentest"
     assert not decision.allowed
     assert any(
-        "unknown vulnerability class: template-language-injection; valid classes are:" in r
+        "unknown vulnerability class: 'template-language-injection'. Valid classes are:" in r
         for r in decision.mismatch_reasons
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("mass-assignmnt", "mass-assignment"),
+        ("missing-auth", "missing-authentication"),
+        ("ssti-injection", "ssti"),
+        ("authentication-bypass", "auth-bypass"),
+    ],
+)
+def test_unknown_vulnerability_class_suggests_a_near_match(value: str, expected: str) -> None:
+    decision = resolve_skill_route("vuln-research", value)
+
+    message = "\n".join(decision.mismatch_reasons)
+    assert not decision.allowed
+    assert f"Did you mean '{expected}'?" in message
+    assert message.index("Did you mean") < message.index("Valid classes are")
+
+
+def test_ambiguous_vulnerability_suffix_gets_no_misleading_suggestion() -> None:
+    decision = resolve_skill_route("vuln-research", "bogus-injection")
+
+    message = "\n".join(decision.mismatch_reasons)
+    assert not decision.allowed
+    assert "Did you mean" not in message
+    assert "Valid classes are" in message
 
 
 def test_skill_name_as_vulnerability_class_explains_the_distinction() -> None:
@@ -119,6 +148,14 @@ def test_unknown_candidate_source_returns_accepted_values_and_routes() -> None:
     assert "accepted normalized values and routes" in message
     assert "source -> audit-context-building" in message
     assert "username -> sherlock" in message
+    assert "api-enumeration -> api-testing" in message
+
+
+def test_candidate_source_label_selects_api_testing_route() -> None:
+    decision = validate_skill_selection("api-testing", "recon", candidate_source="API enumeration")
+
+    assert decision.allowed
+    assert decision.selected == "api-testing"
 
 
 @pytest.mark.parametrize("selected", ["godmode", "web-pentest", "yayalingo", "hack-skills"])

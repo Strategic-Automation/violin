@@ -77,12 +77,60 @@ def test_record_hypothesis_normalises_variant_vuln_class():
     assert model.vuln_class == "idor"
 
 
-def test_record_hypothesis_rejects_unknown_vuln_class_with_valid_list():
-    with pytest.raises(ValidationError, match="unknown vuln_class.*valid classes are"):
+def test_record_hypothesis_normalizes_human_readable_vuln_classes():
+    for value, expected in (
+        ("Mass assignment", "mass-assignment"),
+        ("Missing authentication", "missing-authentication"),
+        ("IDOR access control", "idor-access-control"),
+    ):
+        model = schemas.validate_args(
+            schemas.RecordHypothesisArgsModel,
+            {"eng_dir": "/tmp/eng", "vuln_class": value},
+        )
+        assert model.vuln_class == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("mass-assignmnt", "mass-assignment"),
+        ("missing-auth", "missing-authentication"),
+    ],
+)
+def test_record_hypothesis_rejects_unknown_vuln_class_with_suggestion(value: str, expected: str):
+    with pytest.raises(ValidationError) as exc:
         schemas.validate_args(
             schemas.RecordHypothesisArgsModel,
-            {"eng_dir": "/tmp/eng", "vuln_class": "Mass assignment"},
+            {"eng_dir": "/tmp/eng", "vuln_class": value},
         )
+    message = str(exc.value)
+    assert f"Did you mean '{expected}'?" in message
+    assert message.index("Did you mean") < message.index("Valid classes are")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_suggestion"),
+    (
+        ("bogus-class", None),
+        ("Default/weak credentials", "default-credentials"),
+        ("bogus-injection", None),
+    ),
+)
+def test_record_hypothesis_rejects_unknown_vuln_class_with_appropriate_suggestion(
+    value: str, expected_suggestion: str | None
+):
+    with pytest.raises(ValidationError) as exc:
+        schemas.validate_args(
+            schemas.RecordHypothesisArgsModel,
+            {"eng_dir": "/tmp/eng", "vuln_class": value},
+        )
+    message = str(exc.value)
+    assert "unknown vuln_class" in message
+    assert "Valid classes are" in message
+    if expected_suggestion is None:
+        assert "Did you mean" not in message
+    else:
+        assert f"Did you mean '{expected_suggestion}'?" in message
 
 
 def test_record_hypothesis_accepts_coverage_table_vuln_class_names():
@@ -102,6 +150,13 @@ def test_record_hypothesis_accepts_coverage_table_vuln_class_names():
 def test_record_hypothesis_publishes_the_vuln_class_enum():
     description = schemas.RecordHypothesisArgsModel.model_fields["vuln_class"].description or ""
     assert "idor" in description and "sqli" in description
+    assert "mass-assignment" in description
+    assert "missing-authentication" in description
+    source_description = (
+        schemas.RecordHypothesisArgsModel.model_fields["candidate_source"].description or ""
+    )
+    assert "api-enumeration" in source_description
+    assert "api-enumeration is a technique-as-source alias for api-testing" in source_description
 
 
 def test_record_hypothesis_accepts_evidence_paths_and_merges_runtime_evidence():
