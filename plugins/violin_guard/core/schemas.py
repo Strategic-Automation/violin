@@ -7,7 +7,12 @@ from typing import Any, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..core.engagement import state
-from ..core.skills.skill_policy import _VULNERABILITY_ROUTES, _normalize
+from ..core.skills.skill_policy import (
+    _SOURCE_ROUTES,
+    _VULNERABILITY_ROUTES,
+    _normalize,
+    _vulnerability_class_suggestion,
+)
 
 # ---------------------------------------------------------------------------
 # Pydantic v2 Models
@@ -121,9 +126,11 @@ class RecordHypothesisArgsModel(BaseModel):
     candidate_source: str = Field(
         "",
         description=(
-            "Optional normalized source route: domain, osint, public-records, username, identity, "
-            "repository, supply-chain, codebase, source, semgrep, codeql, or sarif. "
-            "When present, it can select the PTT skill unless vuln_class has a higher-priority route."
+            "Optional normalized source route: "
+            + ", ".join(sorted(_SOURCE_ROUTES))
+            + ". When present, it can select the PTT skill unless vuln_class has a "
+            "higher-priority route. api-enumeration is a technique-as-source "
+            "alias for api-testing; use vuln_class for the vulnerability type."
         ),
     )
     entry_point: str = ""
@@ -162,8 +169,16 @@ class RecordHypothesisArgsModel(BaseModel):
         if not canonical:
             return value
         if canonical not in _VULNERABILITY_ROUTES:
+            suggestion = _vulnerability_class_suggestion(canonical)
+            message = f"unknown vuln_class {value!r}"
+            if suggestion:
+                message += f". Did you mean '{suggestion}'?"
+                separator = " "
+            else:
+                separator = ". "
             raise ValueError(
-                "unknown vuln_class; valid classes are: " + ", ".join(sorted(_VULNERABILITY_ROUTES))
+                f"{message}{separator}Valid classes are: "
+                + ", ".join(sorted(_VULNERABILITY_ROUTES))
             )
         return canonical
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from difflib import get_close_matches
 from pathlib import Path
 
 from ...core.engagement.phases import Phase, normalize_phase
@@ -202,6 +203,8 @@ _EXCLUDED_SOURCES = frozenset(
 )
 _VULNERABILITY_ROUTES = {
     "default-credentials": "identity-auth",
+    "mass-assignment": "api-testing",
+    "missing-authentication": "identity-auth",
     "idor-access-control": "identity-auth",
     "jwt-attacks": "identity-auth",
     "workflow-state-abuse": "business-logic",
@@ -261,6 +264,7 @@ _VULNERABILITY_ROUTES = {
     "false-positive": "fp-check",
 }
 _SOURCE_ROUTES = {
+    "api-enumeration": "api-testing",
     "domain": "domain-intel",
     "osint": "osint-investigation",
     "public-records": "osint-investigation",
@@ -308,6 +312,40 @@ def _route_basis(decision: RouteDecision) -> str:
 
 def _normalize(value: str | None) -> str:
     return "-".join((value or "").strip().lower().replace("_", "-").split())
+
+
+_VULNERABILITY_SUGGESTION_CUTOFF = 0.8
+
+
+def _vulnerability_class_suggestion(canonical: str) -> str | None:
+    routes = sorted(_VULNERABILITY_ROUTES)
+    prefixes = [route for route in routes if len(canonical) >= 6 and route.startswith(canonical)]
+    if prefixes:
+        return min(prefixes, key=len)
+
+    suffix = canonical.rsplit("-", 1)[-1]
+    suffix_matches = [route for route in routes if route.rsplit("-", 1)[-1] == suffix]
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+
+    extensions = [route for route in routes if canonical.startswith(f"{route}-")]
+    if extensions:
+        return max(extensions, key=len)
+
+    tokens = set(canonical.split("-"))
+    token_matches = [route for route in routes if tokens.intersection(route.split("-"))]
+    if len(token_matches) == 1:
+        return token_matches[0]
+    if len(token_matches) > 1:
+        return None
+
+    matches = get_close_matches(
+        canonical,
+        routes,
+        n=1,
+        cutoff=_VULNERABILITY_SUGGESTION_CUTOFF,
+    )
+    return matches[0] if matches else None
 
 
 def skill_spec(name: str) -> SkillSpec | None:
@@ -392,10 +430,14 @@ def resolve_skill_route(
                 f"{valid_classes}"
             )
         else:
-            mismatch.append(
-                f"unknown vulnerability class: {vulnerability_class}; valid classes are: "
-                f"{valid_classes}"
-            )
+            suggestion = _vulnerability_class_suggestion(raw_vulnerability)
+            message = f"unknown vulnerability class: {vulnerability_class!r}"
+            if suggestion:
+                message += f". Did you mean '{suggestion}'?"
+                separator = " "
+            else:
+                separator = ". "
+            mismatch.append(f"{message}{separator}Valid classes are: {valid_classes}")
     if raw_source and raw_source not in _SOURCE_ROUTES:
         mismatch.append(
             f"unknown candidate source: {candidate_source!r}; accepted normalized values and routes: "
