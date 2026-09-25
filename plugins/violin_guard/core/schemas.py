@@ -19,20 +19,8 @@ from ..core.skills.skill_policy import (
 # ---------------------------------------------------------------------------
 
 
-class ReviewOutcomeFields(BaseModel):
-    """Shared evidence and next-step fields for task and batch reviews."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    outcome: str = ""
-    evidence_paths: list[str] = Field(default_factory=list)
-    next_action: str = ""
-    next_technique: str = ""
-    research_attempted: bool = False
-
-
-class RecordPttArgsModel(ReviewOutcomeFields):
-    """Start one untouched [ ] PTT task with [~], or review the active task after a completed batch. A non-empty note is required; reviewed batches are bound automatically."""
+class RecordPttArgsModel(BaseModel):
+    """Start or close a PTT task. Record execution outcomes with violin_review_batch."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -274,11 +262,15 @@ class FindingRecordModel(FindingClaimModel):
     engagement_id: str = ""
 
 
-class ReviewBatchArgsModel(ReviewOutcomeFields):
-    """Review a completed batch and release its sync lock. Submit findings separately."""
+class ReviewBatchArgsModel(BaseModel):
+    """Record execution outcomes, review a completed batch, and release its sync lock. Submit findings separately."""
 
     model_config = ConfigDict(extra="forbid")
 
+    outcome: str = ""
+    evidence_paths: list[str] = Field(default_factory=list)
+    next_action: str = ""
+    next_technique: str = ""
     eng_dir: str
     id: str = Field(..., description="Active PTT task id")
     status: str = Field(

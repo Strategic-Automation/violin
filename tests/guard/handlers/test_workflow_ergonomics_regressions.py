@@ -113,6 +113,23 @@ def test_missing_scope_blocks_targeted_but_not_untargeted_hypotheses(tmp_path: P
     assert allowed["status"] == "ok"
 
 
+def test_hypothesis_research_flag_still_records_a_research_attempt(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    result = json.loads(
+        service.handle_record_hypothesis(
+            {
+                "eng_dir": str(eng),
+                "id": "002",
+                "title": "Review prior work",
+                "research_attempted": True,
+            }
+        )
+    )
+    assert result["status"] == "ok"
+    progress = state.read_json(eng / "state" / "semantic-progress.json")
+    assert progress["research_attempts"][-1]["tool"] == "hypothesis_research"
+
+
 def test_wildcard_scope_allows_subdomains(tmp_path: Path) -> None:
     scope = tmp_path / "scope.yaml"
     scope.write_text("targets:\n  domains: ['*.example.test']\n", encoding="utf-8")
