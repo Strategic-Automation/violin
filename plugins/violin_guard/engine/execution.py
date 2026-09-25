@@ -22,7 +22,7 @@ import psutil
 from ..core.commands.http_proof import normalize_http_proof_flags
 from ..core.engagement import state
 from ..core.evidence.history import append_history
-from ..core.evidence.receipt_integrity import seal_execution_receipt
+from ..core.evidence.receipt_integrity import file_digest, seal_execution_receipt
 from ..engine.runtime_backend import resolve_backend
 
 __all__ = [
@@ -224,14 +224,35 @@ def _find_execution_manifest(engagement: Path, execution_id: str) -> Path | None
     return None
 
 
-def _evidence_fingerprint(engagement: Path, declared: list[str]) -> dict[str, tuple[int, int]]:
-    """Size and mtime of each declared evidence file that currently exists."""
-    fingerprint: dict[str, tuple[int, int]] = {}
+def _evidence_digests(engagement: Path, declared: list[str]) -> dict[str, str | None]:
+    """Content digest of each declared evidence file, or None where it is absent.
+
+    Content, not size and mtime: a probe that rewrites a file byte-for-byte
+    without changing its length or timestamp would otherwise look untouched and
+    go unsealed, silently discarding proof the agent actually produced.
+    """
+    digests: dict[str, str | None] = {}
     for value in declared:
-        with contextlib.suppress(OSError):
-            stat = (engagement / value).stat()
-            fingerprint[value] = (stat.st_size, stat.st_mtime_ns)
-    return fingerprint
+        path = engagement / value
+        digests[value] = file_digest(path) if path.is_file() and not path.is_symlink() else None
+    return digests
+
+
+def _produced_outputs(engagement: Path, record: dict[str, Any]) -> list[str]:
+    """The declared files this command actually wrote.
+
+    A receipt's evidence identity is what its own command produced. Files the
+    command left alone belong to whoever produced them, so a receipt never seals
+    a batch-mate's output. Idempotent: narrowing an already-narrowed record
+    against the same baseline yields the same set, so retries are safe.
+    """
+    baseline = record.get("declared_outputs_before")
+    declared = record.get("declared_evidence_outputs") or []
+    if not isinstance(baseline, dict) or not isinstance(declared, list):
+        return declared
+    values = [str(value) for value in declared]
+    after = _evidence_digests(engagement, values)
+    return [value for value in values if after[value] != baseline.get(value)]
 
 
 def _finalize_execution(
@@ -243,12 +264,14 @@ def _finalize_execution(
     timed_out: bool = False,
     cancelled: bool = False,
     output_limited: bool = False,
-    produced_outputs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Persist a terminal intent, then idempotently publish history and receipt.
 
     The intent makes the chosen outcome recoverable if the process exits after
     history is appended but before its signed receipt is atomically replaced.
+    Every finalizer narrows the receipt's evidence identity the same way, so a
+    command that runs in the background or is reconciled from ``status()`` seals
+    exactly what its own command wrote — never a batch-mate's output.
     """
     with state.lock_file(manifest_path):
         record = state.read_json(manifest_path)
@@ -278,11 +301,7 @@ def _finalize_execution(
                 with contextlib.suppress(OSError):
                     stderr_p.unlink()
                 record.setdefault("evidence_paths", {})["stderr"] = None
-        if produced_outputs is not None:
-            # A receipt's evidence identity is what its own command wrote. Files the
-            # command left alone belong to whoever produced them, so a burst receipt
-            # never seals — or reports as missing — a batch-mate's output.
-            record["declared_evidence_outputs"] = produced_outputs
+        record["declared_evidence_outputs"] = _produced_outputs(engagement, record)
         record["terminal"] = terminal
         state.atomic_json(manifest_path, record)
         command = str(record.get("command") or "")
@@ -443,7 +462,6 @@ def execute(
     command = normalize_http_proof_flags(command)
     engagement = _resolve_engagement(eng_dir)
     declared_outputs = _validate_evidence_outputs(engagement, evidence_outputs)
-    declared_before = _evidence_fingerprint(engagement, declared_outputs)
     workdir = _resolve_cwd(engagement, cwd)
     timeout = _timeout(timeout_seconds)
     resolution = resolve_backend(backend, engagement, container=docker_container)
@@ -482,6 +500,7 @@ def execute(
             "stderr": rel_stderr,
         },
         "declared_evidence_outputs": declared_outputs,
+        "declared_outputs_before": _evidence_digests(engagement, declared_outputs),
     }
     if command != requested_command:
         # The probe was rewritten to capture its status line. Keep the command the
@@ -603,7 +622,6 @@ def execute(
             execution_id,
             sync_reservation,
         )
-    declared_after = _evidence_fingerprint(engagement, declared_outputs)
     receipt = _finalize_execution(
         engagement=engagement,
         manifest_path=manifest_path,
@@ -621,11 +639,6 @@ def execute(
         timed_out=timed_out,
         cancelled=cancelled,
         output_limited=output_limited,
-        produced_outputs=[
-            value
-            for value in declared_outputs
-            if declared_after.get(value) != declared_before.get(value)
-        ],
     )
     remaining, consumed = (
         (accounting[0], accounting[1])
