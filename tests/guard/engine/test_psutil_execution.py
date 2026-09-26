@@ -7,7 +7,7 @@ import time
 
 import psutil
 
-from plugins.violin_guard.engine import execution
+from plugins.violin_guard.engine import execution_support
 
 
 def test_terminate_process_tree_with_psutil():
@@ -26,7 +26,7 @@ def test_terminate_process_tree_with_psutil():
     assert len(children) >= 1
 
     # Terminate process tree
-    execution._terminate_process(proc)
+    execution_support._terminate_process(proc)
 
     # Verify both parent and child processes are dead
     assert proc.poll() is not None
