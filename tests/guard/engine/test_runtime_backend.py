@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.engine import execution, runtime_backend
+from plugins.violin_guard.engine import execution_support, runtime_backend
 from plugins.violin_guard.engine.runtime_backend import resolve_backend
 
 
@@ -83,6 +84,6 @@ def test_docker_probe_timeout_is_unavailable(tmp_path: Path, monkeypatch) -> Non
 def test_docker_command_uses_engagement_mount(tmp_path: Path, monkeypatch) -> None:
     eng = tmp_path / "assessment-a"
     eng.mkdir()
-    monkeypatch.setattr(execution.shutil, "which", lambda _: "docker")
-    argv = execution._command_argv("id", "docker", eng, eng, "kali-pentest")
+    monkeypatch.setattr(shutil, "which", lambda _: "docker")
+    argv = execution_support._command_argv("id", "docker", eng, eng, "kali-pentest")
     assert argv[:5] == ["docker", "exec", "-i", "-w", "/engagements/assessment-a"]

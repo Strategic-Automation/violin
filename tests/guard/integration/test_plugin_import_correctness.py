@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from plugins.violin_guard import handlers as TOOLS
-from plugins.violin_guard.core.engagement import bootstrap, ptt
+from plugins.violin_guard.core.engagement import bootstrap, ptt, state
 from plugins.violin_guard.engine import execution
 from plugins.violin_guard.gates import command
 from tests.guard.receipt_fixture import bind_active_task
@@ -84,7 +84,7 @@ def _fake_target_executor(monkeypatch):
         FAKE_EXEC["called"] = True
         FAKE_EXEC["command"] = command
         active = ptt.find_active_task(ptt.parse_ptt(Path(eng_dir) / "state" / "ptt.md"))
-        remaining = execution.state.commit_execution_start(
+        remaining = state.commit_execution_start(
             eng_dir, command, phase, active.id if active else "", str(uuid.uuid4())
         )[0]
         return {
