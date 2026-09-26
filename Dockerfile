@@ -24,8 +24,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     httpx-toolkit \
     dnsx \
     subfinder \
+    wordlists \
+    dirb \
+    nodejs \
+    npm \
+    ripgrep \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
+
+# The small wordlists and DIRB packages provide candidate lists for discovery;
+# the much larger SecLists archive is optional, not baked into the benchmark
+# image. Playbooks must check which paths actually exist before use (#222).
+#
+# Kali ships ProjectDiscovery httpx as `httpx-toolkit` to avoid colliding with
+# the PyPI `httpx` client. That console script lands in /opt/hermes/bin, which
+# precedes /usr/bin on PATH, so a bare `httpx` silently resolved to the wrong
+# tool. Expose the security tool under the name the playbooks use; the Python
+# client stays reachable as `python -m httpx`.
+RUN mkdir -p /root/.local/bin && ln -sf /usr/bin/httpx-toolkit /root/.local/bin/httpx
 
 
 # Install uv package manager & hermes-agent CLI + violin plugin deps.
@@ -44,6 +61,16 @@ RUN uv venv /opt/hermes --python 3.13 \
         bashlex \
         netaddr \
         yarl
+
+# Browser tooling. The `browser` toolset drives the agent-browser CLI, which
+# is an npm package with its own Chromium download -- neither comes with
+# hermes-agent. Without this step the toolset is enabled but every call fails,
+# so install it here rather than leaving agents to rediscover it (#223).
+# No credentials are written into the image; anything needing a key is passed
+# at runtime via -e.
+RUN npm install -g agent-browser \
+    && agent-browser install --with-deps \
+    && npm cache clean --force
 
 
 

@@ -182,10 +182,34 @@ def parse_metadata(source: object) -> tuple[dict[str, str] | None, str | None]:
         raw["target"] = target
         raw["session_id"] = session_id
     elif set(raw) != _REQUIRED_FIELDS:
-        return None, _HEADER_ERROR
+        return None, _header_field_error(set(raw))
     if not all(isinstance(raw[name], str) and raw[name].strip() for name in _REQUIRED_FIELDS):
         return None, "execute_code metadata values must be non-empty strings"
     return {name: raw[name].strip() for name in _REQUIRED_FIELDS}, None
+
+
+def _header_field_error(found: set[str]) -> str:
+    """Name the offending metadata keys instead of restating the template alone.
+
+    Restating the form reads as though the header were missing entirely, which
+    hides the real mistake — usually an extra key the caller invented.
+    """
+    parts = []
+    extra = sorted(found - _DOCUMENTED_FIELDS)
+    missing = sorted(_DOCUMENTED_FIELDS - found)
+    if extra:
+        parts.append("unexpected key(s): " + ", ".join(repr(key) for key in extra))
+    if missing:
+        parts.append("missing key(s): " + ", ".join(repr(key) for key in missing))
+    return (
+        _HEADER_ERROR
+        + " "
+        + "("
+        + "; ".join(parts)
+        + ". Write only "
+        + ", ".join(sorted(_DOCUMENTED_FIELDS))
+        + " — target and session_id are resolved for you)"
+    )
 
 
 def execution_class(source: object) -> str:
@@ -245,7 +269,7 @@ def validate_source(source: object) -> tuple[dict[str, str] | None, str | None]:
     if gate.errors:
         return None, "execute_code blocked by Violin guard: " + "; ".join(gate.errors)
     declared = normalize_target(metadata["target"])
-    foreign: set[str] = set()
+    foreign: dict[str, int] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
             continue
@@ -256,12 +280,13 @@ def validate_source(source: object) -> tuple[dict[str, str] | None, str | None]:
             continue  # Identifier-shaped text is not a network endpoint.
         for candidate in extract_target_candidates(f"probe {value}"):
             normalized = normalize_target(candidate)
-            if normalized not in {declared, "localhost", "127.0.0.1", "0.0.0.0", "::1"}:
-                foreign.add(normalized)
+            if normalized not in {declared, "localhost", "127.0.0.1", "0.0.0.0", "::", "::1"}:
+                foreign.setdefault(normalized, node.lineno)
     if foreign:
+        located = ", ".join(f"{target} (line {line})" for target, line in sorted(foreign.items()))
         return None, (
             "execute_code contains non-local target literals that differ from declared target: "
-            + ", ".join(sorted(foreign))
+            + located
         )
     return metadata, None
 
@@ -291,6 +316,12 @@ def _names_network_endpoint(value: str) -> bool:
     cannot be told apart from one, so it is left to the command gate that sees
     what is actually contacted.
     """
+    if not any(character.isalnum() for character in value):
+        # Punctuation and separators cannot name a host. Every real host, IP or
+        # URL carries at least one alphanumeric character; without this check
+        # "::" — the IPv6 unspecified address, and a common log separator —
+        # parses as a network target and blocks an in-scope script.
+        return False
     if "://" in value or value.lstrip().startswith("//"):
         return True
     for word in value.split():
