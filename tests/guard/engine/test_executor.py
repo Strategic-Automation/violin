@@ -1,12 +1,20 @@
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
-from plugins.violin_guard.engine import execution
+from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.engine import (
+    execution,
+    execution_lifecycle,
+    execution_process,
+    execution_support,
+)
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -88,13 +96,13 @@ def test_unchanged_command_carries_no_rewrite_note(tmp_path):
 
 def test_failed_to_start_is_audited_without_execution_credit(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    reservation = execution.state.reserve_sync_credit(eng, "recon", 2)
-    before = execution.state.sync_credit_remaining(eng, "recon")
+    reservation = state.reserve_sync_credit(eng, "recon", 2)
+    before = state.sync_credit_remaining(eng, "recon")
 
     def fail_start(*_args, **_kwargs):
         raise OSError("launch denied")
 
-    monkeypatch.setattr(execution.subprocess, "Popen", fail_start)
+    monkeypatch.setattr(subprocess, "Popen", fail_start)
     receipt = execution.execute(
         "nmap 10.10.10.10",
         argv=[sys.executable, "-c", "print('never')"],
@@ -106,15 +114,15 @@ def test_failed_to_start_is_audited_without_execution_credit(tmp_path, monkeypat
     )
     assert receipt["status"] == "failed_to_start"
     assert receipt["executed"] is False
-    assert execution.state.sync_credit_remaining(eng, "recon") == before
-    assert not execution.state.has_pending_sync(eng)
-    execution.state.release_reserved_sync_credit(eng, reservation)
-    assert execution.state.sync_credit_remaining(eng, "recon") == 10
+    assert state.sync_credit_remaining(eng, "recon") == before
+    assert not state.has_pending_sync(eng)
+    state.release_reserved_sync_credit(eng, reservation)
+    assert state.sync_credit_remaining(eng, "recon") == 10
 
 
 def test_failed_to_track_terminates_and_accounts_conservatively(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    monkeypatch.setattr(execution, "_process_create_time", lambda _proc: None)
+    monkeypatch.setattr(execution_process, "_process_create_time", lambda _proc: None)
     receipt = execution.execute(
         "tracked command",
         argv=[sys.executable, "-c", "import time; time.sleep(10)"],
@@ -125,8 +133,8 @@ def test_failed_to_track_terminates_and_accounts_conservatively(tmp_path, monkey
     )
     assert receipt["status"] == "failed_to_track"
     assert receipt["executed"] is True
-    assert execution.state.sync_credit_remaining(eng, "recon") == 9
-    assert execution.state.has_pending_sync(eng)
+    assert state.sync_credit_remaining(eng, "recon") == 9
+    assert state.has_pending_sync(eng)
 
 
 def test_background_execution_is_tracked_until_completion(tmp_path):
@@ -168,9 +176,9 @@ def test_background_target_execution_is_accounted_at_launch(tmp_path):
     )
 
     assert receipt["status"] == "running"
-    assert execution.state.sync_credit_remaining(eng, "recon") == 9
-    assert execution.state.read_counts(eng)["commands"] == 1
-    pending = execution.state.get_pending_sync(eng)
+    assert state.sync_credit_remaining(eng, "recon") == 9
+    assert state.read_counts(eng)["commands"] == 1
+    pending = state.get_pending_sync(eng)
     assert pending["commands"][0]["execution_id"] == receipt["execution_id"]
 
 
@@ -191,8 +199,8 @@ def test_identical_commands_are_separate_execution_history_entries(tmp_path):
     assert receipts[0]["execution_id"] != receipts[1]["execution_id"]
     history = (eng / "state" / "history.md").read_text(encoding="utf-8")
     assert history.count(" | execution_id=") == 2
-    assert execution.state.read_counts(eng)["commands"] == 2
-    pending = execution.state.get_pending_sync(eng)
+    assert state.read_counts(eng)["commands"] == 2
+    pending = state.get_pending_sync(eng)
     assert [item["execution_id"] for item in pending["commands"]] == [
         receipts[0]["execution_id"],
         receipts[1]["execution_id"],
@@ -201,7 +209,7 @@ def test_identical_commands_are_separate_execution_history_entries(tmp_path):
 
 def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    original_seal = execution.seal_execution_receipt
+    original_seal = execution_lifecycle.seal_execution_receipt
     failed = False
 
     def fail_first_seal(receipt, engagement):
@@ -211,7 +219,7 @@ def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, m
             raise OSError("simulated crash before receipt publication")
         return original_seal(receipt, engagement)
 
-    monkeypatch.setattr(execution, "seal_execution_receipt", fail_first_seal)
+    monkeypatch.setattr(execution_lifecycle, "seal_execution_receipt", fail_first_seal)
     with pytest.raises(OSError, match="simulated crash"):
         execution.execute(
             "echo recover-finalizer",
@@ -226,7 +234,7 @@ def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, m
     assert incomplete["terminal"]["status"] == "completed"
     assert (eng / "state" / "history.md").read_text(encoding="utf-8").count(" | execution_id=") == 1
 
-    monkeypatch.setattr(execution, "seal_execution_receipt", original_seal)
+    monkeypatch.setattr(execution_lifecycle, "seal_execution_receipt", original_seal)
     recovered = execution.status(str(eng), incomplete["execution_id"])
     assert recovered["status"] == "completed"
     assert recovered["history_recorded"] is True
@@ -255,19 +263,19 @@ def test_stale_launch_intent_is_charged_and_finalized_as_unknown(tmp_path):
         },
         "declared_evidence_outputs": [],
     }
-    execution.state.atomic_json(manifest, record)
+    state.atomic_json(manifest, record)
 
     recovered = execution.status(str(eng), execution_id)
 
     assert recovered["status"] == "lost"
-    assert execution.state.sync_credit_remaining(eng, "recon") == 9
-    assert execution.state.read_counts(eng)["commands"] == 1
-    assert execution.state.get_pending_sync(eng)["commands"][0]["execution_id"] == execution_id
+    assert state.sync_credit_remaining(eng, "recon") == 9
+    assert state.read_counts(eng)["commands"] == 1
+    assert state.get_pending_sync(eng)["commands"][0]["execution_id"] == execution_id
 
 
 def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    original_mutate = execution.state.mutate_json
+    original_mutate = state.mutate_json
     failed_counts_write = False
 
     def fail_first_counts_write(path, mutation):
@@ -277,15 +285,13 @@ def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkey
             raise OSError("simulated crash after sync accounting")
         return original_mutate(path, mutation)
 
-    monkeypatch.setattr(execution.state, "mutate_json", fail_first_counts_write)
+    monkeypatch.setattr(state, "mutate_json", fail_first_counts_write)
     with pytest.raises(OSError, match="after sync accounting"):
-        execution.state.commit_execution_start(
-            eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
-        )
-    first_retry = execution.state.commit_execution_start(
+        state.commit_execution_start(eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1")
+    first_retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
     )
-    second_retry = execution.state.commit_execution_start(
+    second_retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
     )
 
@@ -293,19 +299,19 @@ def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkey
     assert first_retry[0] == 9
     assert first_retry[3] is True
     assert second_retry[3] is False
-    assert execution.state.read_counts(eng)["commands"] == 1
-    pending = execution.state.get_pending_sync(eng)
+    assert state.read_counts(eng)["commands"] == 1
+    pending = state.get_pending_sync(eng)
     assert [item["execution_id"] for item in pending["commands"]] == ["execution-1"]
 
 
 def test_reserved_launch_accounting_is_idempotent(tmp_path):
     eng = _engagement(tmp_path)
-    reservation = execution.state.reserve_sync_credit(eng, "recon", 2)
+    reservation = state.reserve_sync_credit(eng, "recon", 2)
 
-    first = execution.state.commit_execution_start(
+    first = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1", reservation
     )
-    retry = execution.state.commit_execution_start(
+    retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1", reservation
     )
 
@@ -314,12 +320,9 @@ def test_reserved_launch_accounting_is_idempotent(tmp_path):
     assert retry[3] is False
     assert first[0] == 8
     assert first[1] is True
-    assert execution.state.read_counts(eng)["commands"] == 1
+    assert state.read_counts(eng)["commands"] == 1
     assert (
-        execution.state.read_json(eng / "state" / "sync.json")["reservations"][reservation][
-            "remaining"
-        ]
-        == 1
+        state.read_json(eng / "state" / "sync.json")["reservations"][reservation]["remaining"] == 1
     )
 
 
@@ -345,14 +348,28 @@ def test_background_execution_can_be_cancelled_by_execution_id(tmp_path):
 
 
 def test_process_identity_rejects_reused_pid():
-    proc = execution.psutil.Process(os.getpid())
+    proc = psutil.Process(os.getpid())
     record = {"pid": proc.pid, "pid_create_time": proc.create_time()}
-    assert execution._matching_process(record) is not None
+    assert execution_support._matching_process(record) is not None
     record["pid_create_time"] += 10
-    assert execution._matching_process(record) is None
+    assert execution_support._matching_process(record) is None
 
 
 def test_executor_rejects_cwd_escape(tmp_path):
     eng = _engagement(tmp_path)
     with pytest.raises(ValueError, match="inside the engagement"):
         execution.execute("echo blocked", eng_dir=str(eng), phase="recon", cwd="..")
+
+
+def _write_file_argv(path: Path, content: str) -> list[str]:
+    return [
+        sys.executable,
+        "-c",
+        "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2], encoding='utf-8')",
+        str(path),
+        content,
+    ]
+
+
+def _manifest_record(eng: Path, receipt: dict) -> dict:
+    return json.loads((eng / receipt["evidence_paths"]["manifest"]).read_text(encoding="utf-8"))
