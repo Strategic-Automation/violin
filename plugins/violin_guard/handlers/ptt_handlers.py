@@ -7,7 +7,8 @@ from typing import Any
 
 from ..core.engagement import ptt, state
 from ..core.engagement.phases import requires_hypothesis
-from ..core.skills.skill_receipts import HermesSkillViewAdapter, bind_task
+from ..core.skills.skill_receipts import bind_task
+from ..core.skills.skill_view import HermesSkillViewAdapter
 from .base import (
     _eng_path,
     _hypothesis_route_context,

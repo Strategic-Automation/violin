@@ -9,7 +9,8 @@ from typing import Any
 from ..core.engagement import ptt, state
 from ..core.engagement.phases import requires_hypothesis
 from ..core.evidence.history import history_contains
-from ..core.skills.skill_receipts import HermesSkillViewAdapter, get_binding
+from ..core.skills.skill_receipts import get_binding
+from ..core.skills.skill_view import HermesSkillViewAdapter
 from .base import (
     _eng_path,
     _json,

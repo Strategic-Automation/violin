@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from ...core.engagement import state
 from ...core.skills.skill_policy import validate_skill_selection
-
-try:
-    from tools.skills_tool import skill_view as _hermes_skill_view  # type: ignore[import-not-found]
-except ImportError:
-    _hermes_skill_view = None
+from .skill_receipt_store import (
+    _context,
+    _delivery_key,
+    _is_sha256_digest,
+    _load,
+    _mutate,
+    _now,
+    _path,
+    _preparing_expired,
+    _preparing_expires_at,
+    _prune,
+    skill_content_digest,
+)
 
 __all__ = [
     "DeliveryReservation",
-    "HermesSkillViewAdapter",
     "SkillViewResult",
     "advance_context_generation",
     "bind_task",
@@ -33,135 +35,7 @@ __all__ = [
     "record_delivery_turn",
     "skill_content_digest",
     "prepare_delivery",
-    "SkillViewReservation",
-    "reserve_skill_view",
-    "finish_skill_view",
 ]
-
-_FILE_NAME = "skills.json"
-_SCHEMA_VERSION = 3
-_MAX_DELIVERIES = 200
-_PREPARING_TTL_SECONDS = 300
-
-
-def _now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _digest(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def skill_content_digest(content: str) -> str:
-    """Return the SHA-256 digest of the exact UTF-8 skill text returned by Hermes."""
-
-    return _digest(content)
-
-
-def _is_sha256_digest(value: str) -> bool:
-    return (
-        len(value) == 71
-        and value.startswith("sha256:")
-        and all(character in "0123456789abcdef" for character in value[7:])
-    )
-
-
-def _preparing_expired(entry: dict[str, Any]) -> bool:
-    value = str(entry.get("expires_at") or "").strip()
-    if value:
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")) <= datetime.now(UTC)
-        except ValueError:
-            return True
-    updated = str(entry.get("updated_at") or entry.get("created_at") or "").strip()
-    if not updated:
-        return True
-    try:
-        started = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-    except ValueError:
-        return True
-    return (datetime.now(UTC) - started).total_seconds() >= _PREPARING_TTL_SECONDS
-
-
-def _preparing_expires_at() -> str:
-    return (
-        (datetime.now(UTC) + timedelta(seconds=_PREPARING_TTL_SECONDS))
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-
-
-def _path(eng_dir: str | Path) -> Path:
-    return state.resolve_eng_dir(eng_dir) / "state" / _FILE_NAME
-
-
-def _empty(session_id: str = "", generation: int = 0) -> dict[str, Any]:
-    return {
-        "schema_version": _SCHEMA_VERSION,
-        "context": {"session_id": session_id, "generation": generation},
-        "deliveries": {},
-        "bindings": {},
-        "view_reservations": {},
-    }
-
-
-def _load(path: Path) -> tuple[dict[str, Any], bool]:
-    """Load valid receipt state; recover malformed/old documents fail-closed."""
-
-    if not path.exists():
-        return _empty(), False
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return _empty(), True
-    if not isinstance(raw, dict) or raw.get("schema_version") != _SCHEMA_VERSION:
-        return _empty(), True
-    if not isinstance(raw.get("context"), dict) or not isinstance(raw.get("deliveries"), dict):
-        return _empty(), True
-    raw.setdefault("bindings", {})
-    raw.setdefault("view_reservations", {})
-    return raw, False
-
-
-def _mutate(eng_dir: str | Path, mutation: Callable[[dict[str, Any]], Any]) -> Any:
-    path = _path(eng_dir)
-    state.ensure_dir(path.parent)
-    with state.lock_file(path):
-        data, recovered = _load(path)
-        if recovered:
-            data["recovered_at"] = _now()
-        result = mutation(data)
-        state.atomic_json(path, data)
-        return result
-
-
-def _context(data: dict[str, Any], session_id: str) -> tuple[str, int]:
-    context = data.setdefault("context", {"session_id": "", "generation": 0})
-    recorded = str(context.get("session_id") or "")
-    if recorded and recorded != session_id:
-        # A new Hermes session is a new context, never proof of the old load.
-        context["session_id"] = session_id
-        context["generation"] = int(context.get("generation") or 0) + 1
-    elif not recorded:
-        context["session_id"] = session_id
-    return str(context["session_id"]), int(context.get("generation") or 0)
-
-
-def _delivery_key(session_id: str, generation: int, skill: str, content_digest: str) -> str:
-    return _digest(f"{session_id}\0{generation}\0{skill}\0{content_digest}")
-
-
-def _prune(data: dict[str, Any]) -> None:
-    deliveries = data["deliveries"]
-    if len(deliveries) <= _MAX_DELIVERIES:
-        return
-    bound = {str(binding.get("delivery_id") or "") for binding in data["bindings"].values()}
-    removable = sorted(
-        (entry for entry in deliveries.values() if entry.get("id") not in bound),
-        key=lambda entry: str(entry.get("updated_at") or ""),
-    )
-    for entry in removable[: max(0, len(deliveries) - _MAX_DELIVERIES)]:
-        deliveries.pop(entry["id"], None)
 
 
 @dataclass(frozen=True)
@@ -177,51 +51,11 @@ class DeliveryReservation:
 
 
 @dataclass(frozen=True)
-class SkillViewReservation:
-    id: str
-    session_id: str
-    context_generation: int
-    skill: str
-    owner: bool
-    status: str
-    owner_token: str = ""
-    delivery_id: str = ""
-    content_digest: str = ""
-
-
-@dataclass(frozen=True)
 class SkillViewResult:
     ready: bool
     content: str = ""
     error: str = ""
     path: str = ""
-
-
-class HermesSkillViewAdapter:
-    """Small adapter around Hermes's JSON-returning ``skill_view`` helper."""
-
-    def __init__(self, view: Callable[..., str] | None = None):
-        self._view = view
-
-    def view(self, skill: str, task_id: str | None = None) -> SkillViewResult:
-        try:
-            view = self._view or _hermes_skill_view
-            if view is None:
-                return SkillViewResult(
-                    False, error="skill_view unavailable: tools.skills_tool not found"
-                )
-            raw = view(skill, task_id=task_id)
-            payload = json.loads(raw) if isinstance(raw, str) else raw
-            if not isinstance(payload, dict) or not payload.get("success"):
-                return SkillViewResult(
-                    False, error=str((payload or {}).get("error") or "skill_view failed")
-                )
-            content = str(payload.get("content") or "")
-            if not content:
-                return SkillViewResult(False, error="skill_view returned no skill content")
-            return SkillViewResult(True, content=content, path=str(payload.get("path") or ""))
-        except Exception as exc:  # Hermes availability is an external dependency.
-            return SkillViewResult(False, error=f"skill_view unavailable: {exc}")
 
 
 def prepare_delivery(
@@ -300,68 +134,6 @@ def prepare_delivery(
         )
 
     return _mutate(eng_dir, reserve)
-
-
-def _skill_view_key(session_id: str, generation: int, skill: str) -> str:
-    return _digest(f"{session_id}\0{generation}\0{skill}")
-
-
-def reserve_skill_view(
-    eng_dir: str | Path,
-    *,
-    session_id: str,
-    skill: str,
-    phase: str,
-    vulnerability_class: str | None = None,
-    candidate_source: str | None = None,
-) -> SkillViewReservation:
-    """Reserve one Hermes read; reuse only a content-addressed receipt for this context."""
-    if not session_id.strip():
-        raise ValueError("session_id is required")
-    policy = validate_skill_selection(skill, phase, vulnerability_class, candidate_source)
-    if policy.mismatch_reasons:
-        raise ValueError("; ".join(policy.mismatch_reasons))
-
-    def reserve(data: dict[str, Any]) -> SkillViewReservation:
-        current_session, generation = _context(data, session_id.strip())
-        key = _skill_view_key(current_session, generation, skill)
-        existing = data["view_reservations"].get(key)
-        if existing and not _preparing_expired(existing):
-            return SkillViewReservation(key, current_session, generation, skill, False, "preparing")
-        owner_token = uuid.uuid4().hex
-        now = _now()
-        data["view_reservations"][key] = {
-            "status": "preparing",
-            "session_id": current_session,
-            "context_generation": generation,
-            "skill": skill,
-            "created_at": now,
-            "updated_at": now,
-            "expires_at": _preparing_expires_at(),
-            "owner_token": owner_token,
-        }
-        return SkillViewReservation(
-            key, current_session, generation, skill, True, "preparing", owner_token
-        )
-
-    return _mutate(eng_dir, reserve)
-
-
-def finish_skill_view(
-    eng_dir: str | Path,
-    reservation: SkillViewReservation,
-) -> None:
-    """Release the exclusive slot after this request's Hermes view attempt."""
-
-    def finish(data: dict[str, Any]) -> None:
-        if not reservation.owner or not reservation.owner_token:
-            raise ValueError("only the skill view reservation owner may finish it")
-        entry = data["view_reservations"].get(reservation.id)
-        if not entry or entry.get("owner_token") != reservation.owner_token:
-            raise ValueError("skill view reservation owner is stale")
-        data["view_reservations"].pop(reservation.id, None)
-
-    _mutate(eng_dir, finish)
 
 
 def complete_delivery(
