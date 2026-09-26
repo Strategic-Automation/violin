@@ -106,9 +106,6 @@ RUN sed -i '/^\[tool\.pytest\.ini_options\]/,$d' /violin/pyproject.toml \
 # Install the violin profile into Hermes per official distribution.yaml spec
 RUN hermes profile install /violin --name violin -y
 
-# Keep benchmark inference on OpenRouter regardless of the host Hermes provider.
-RUN hermes config set model.provider openrouter
-
 # Create home profile link so script paths resolve consistently under Hermes profile execution
 RUN mkdir -p /root/.hermes/profiles/violin/home \
     && ln -sf /root/.hermes /root/.hermes/profiles/violin/home/.hermes
