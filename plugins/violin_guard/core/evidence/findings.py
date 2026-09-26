@@ -9,12 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from ...core import schemas
 from ...core.engagement import state
 from ...core.evidence import receipt_integrity
 from ..results import GuardResult
+from . import finding_reports
 
 FINDINGS_PATH = Path("evidence/findings.jsonl")
 _SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")
@@ -159,11 +158,11 @@ def _verified_evidence_files(
             )
         normalized = candidate.relative_to(engagement).as_posix()
         if normalized not in authenticated_paths:
-            if normalized in stale_paths:
-                raise _stale_evidence_error([normalized])
             if fallback_authenticated is None:
                 fallback_authenticated = _all_authenticated_paths(engagement)
             if normalized not in fallback_authenticated:
+                if normalized in stale_paths:
+                    raise _stale_evidence_error([normalized])
                 raise ValueError(
                     "evidence_paths must be authenticated by an execution receipt; "
                     "declare each saved file through violin_exec evidence_outputs"
@@ -313,115 +312,17 @@ def _validated_records(engagement: Path) -> list[dict[str, Any]]:
 
 
 def generate_findings_yaml(eng_dir: str | Path, *, force: bool = False) -> Path:
-    """Render a machine-readable finding summary from the canonical JSONL store."""
     engagement = state.resolve_eng_dir(eng_dir)
-    records = _validated_records(engagement)
-    if not records:
-        raise ValueError("no validated findings in evidence/findings.jsonl")
-    output = engagement / "evidence" / "reporting" / "findings.yaml"
-    if output.exists() and not force:
-        raise ValueError("findings.yaml exists; pass force=True to regenerate")
-    state.ensure_dir(output.parent)
-    output.write_text(
-        yaml.safe_dump(
-            {"engagement": engagement.name, "findings": records},
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
+    return finding_reports.generate_findings_yaml(
+        engagement, _validated_records(engagement), force=force
     )
-    return output
-
-
-def _evidence_lines(record: dict[str, Any]) -> list[str]:
-    """Render the per-finding Evidence section with both proof roles labelled.
-
-    Receipts authenticate that the cited command executed and name the files it
-    wrote; the declared ``evidence_paths`` carry the decisive response bytes the
-    finding rests on. Both sets are rendered, the difference between them is
-    stated when they are not identical (rather than dropping either), and a
-    finding with no declared evidence is visibly marked under the
-    ``evidence_complete`` semantics of #124.
-    """
-    receipts = list(record.get("receipt_paths") or [])
-    evidence = list(record.get("evidence_paths") or [])
-    lines = [
-        "### Evidence",
-        "",
-        "**Authenticating receipts (signed execution receipts):**",
-        "",
-        *[f"- `{path}`" for path in receipts],
-        "",
-        "**Declared evidence (decisive response bytes):**",
-        "",
-    ]
-    if evidence:
-        lines.extend(f"- `{path}`" for path in evidence)
-    else:
-        lines.append(
-            "> Note: no declared evidence_paths — evidence_complete: false "
-            "(proof carries no literal HTTP response bytes)."
-        )
-    lines.append("")
-    if set(evidence) != set(receipts):
-        lines.extend(
-            [
-                "> The declared evidence and the authenticating receipts are distinct "
-                + "sets: the receipts prove the command executed, while the declared "
-                + "evidence holds the decisive response bytes.",
-                "",
-            ]
-        )
-    return lines
 
 
 def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False) -> Path:
-    """Render the human report from canonical structured finding records."""
     engagement = state.resolve_eng_dir(eng_dir)
-    records = _validated_records(engagement)
-    if not records:
-        raise ValueError("no validated findings in evidence/findings.jsonl")
-    output = engagement / "reporting" / "report.md"
-    if output.exists() and not force:
-        raise ValueError("report.md exists; pass force=True to regenerate")
-    counts = {
-        severity: sum(1 for record in records if record["severity"] == severity)
-        for severity in _SEVERITY_ORDER
-    }
-    lines = [
-        f"# Security Assessment Report — {target}",
-        "",
-        f"- **Engagement:** {engagement.name}",
-        f"- **Target:** {target}",
-        f"- **Findings:** {len(records)}",
-        "",
-        "## Executive Summary",
-        "",
-        "<!-- Describe engagement posture, threat context, and overall risk here. -->",
-        "",
-        "",
-        "## Severity Summary",
-        "",
-        "| Severity | Count |",
-        "|----------|-------|",
-        *[f"| {severity} | {counts[severity]} |" for severity in _SEVERITY_ORDER],
-        "",
-    ]
-    for record in records:
-        lines.extend(
-            [
-                f"## {record['finding_id']}: {record['title']}",
-                "",
-                f"- **Severity:** {record['severity']}",
-                "",
-                record["summary"],
-                "",
-                *_evidence_lines(record),
-            ]
-        )
-    state.ensure_dir(output.parent)
-    output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-    return output
+    return finding_reports.generate_report_md(
+        engagement, _validated_records(engagement), target=target, force=force
+    )
 
 
 def generate_closeout(eng_dir: str | Path, *, target: str, force: bool = False) -> GuardResult:

@@ -125,6 +125,34 @@ def test_citing_stale_evidence_names_the_conflicting_file(tmp_path: Path) -> Non
         )
 
 
+def test_a_new_receipt_can_authenticate_a_path_stale_in_a_cited_receipt(
+    tmp_path: Path,
+) -> None:
+    engagement = tmp_path
+    stale_receipt, first, _ = _sealed_evidence(engagement)
+    stale_receipt_path = _write_receipt(engagement, "stale-copy", stale_receipt)
+    first.write_text("newly authenticated bytes\n", encoding="utf-8")
+    fresh_receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "fresh-copy",
+            "status": "completed",
+            "exit_code": 0,
+            "declared_evidence_outputs": ["evidence/recon/first.txt"],
+        },
+        engagement,
+    )
+    _write_receipt(engagement, "fresh-copy", fresh_receipt)
+
+    findings.submit_finding(
+        engagement,
+        title="The current file has a valid receipt",
+        severity="High",
+        summary="A newer signed receipt authenticates the current evidence bytes.",
+        receipt_paths=[stale_receipt_path],
+        evidence_paths=["evidence/recon/first.txt"],
+    )
+
+
 def test_citing_a_receipt_that_has_no_proof_left_is_rejected(tmp_path: Path) -> None:
     engagement = tmp_path
     receipt, first, second = _sealed_evidence(engagement)

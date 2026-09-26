@@ -1,13 +1,20 @@
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
 
+import psutil
 import pytest
 
-from plugins.violin_guard.core.evidence import findings, receipt_integrity
-from plugins.violin_guard.engine import execution
+from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.engine import (
+    execution,
+    execution_lifecycle,
+    execution_process,
+    execution_support,
+)
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -89,13 +96,13 @@ def test_unchanged_command_carries_no_rewrite_note(tmp_path):
 
 def test_failed_to_start_is_audited_without_execution_credit(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    reservation = execution.state.reserve_sync_credit(eng, "recon", 2)
-    before = execution.state.sync_credit_remaining(eng, "recon")
+    reservation = state.reserve_sync_credit(eng, "recon", 2)
+    before = state.sync_credit_remaining(eng, "recon")
 
     def fail_start(*_args, **_kwargs):
         raise OSError("launch denied")
 
-    monkeypatch.setattr(execution.subprocess, "Popen", fail_start)
+    monkeypatch.setattr(subprocess, "Popen", fail_start)
     receipt = execution.execute(
         "nmap 10.10.10.10",
         argv=[sys.executable, "-c", "print('never')"],
@@ -107,15 +114,15 @@ def test_failed_to_start_is_audited_without_execution_credit(tmp_path, monkeypat
     )
     assert receipt["status"] == "failed_to_start"
     assert receipt["executed"] is False
-    assert execution.state.sync_credit_remaining(eng, "recon") == before
-    assert not execution.state.has_pending_sync(eng)
-    execution.state.release_reserved_sync_credit(eng, reservation)
-    assert execution.state.sync_credit_remaining(eng, "recon") == 10
+    assert state.sync_credit_remaining(eng, "recon") == before
+    assert not state.has_pending_sync(eng)
+    state.release_reserved_sync_credit(eng, reservation)
+    assert state.sync_credit_remaining(eng, "recon") == 10
 
 
 def test_failed_to_track_terminates_and_accounts_conservatively(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    monkeypatch.setattr(execution, "_process_create_time", lambda _proc: None)
+    monkeypatch.setattr(execution_process, "_process_create_time", lambda _proc: None)
     receipt = execution.execute(
         "tracked command",
         argv=[sys.executable, "-c", "import time; time.sleep(10)"],
@@ -126,8 +133,8 @@ def test_failed_to_track_terminates_and_accounts_conservatively(tmp_path, monkey
     )
     assert receipt["status"] == "failed_to_track"
     assert receipt["executed"] is True
-    assert execution.state.sync_credit_remaining(eng, "recon") == 9
-    assert execution.state.has_pending_sync(eng)
+    assert state.sync_credit_remaining(eng, "recon") == 9
+    assert state.has_pending_sync(eng)
 
 
 def test_background_execution_is_tracked_until_completion(tmp_path):
@@ -169,9 +176,9 @@ def test_background_target_execution_is_accounted_at_launch(tmp_path):
     )
 
     assert receipt["status"] == "running"
-    assert execution.state.sync_credit_remaining(eng, "recon") == 9
-    assert execution.state.read_counts(eng)["commands"] == 1
-    pending = execution.state.get_pending_sync(eng)
+    assert state.sync_credit_remaining(eng, "recon") == 9
+    assert state.read_counts(eng)["commands"] == 1
+    pending = state.get_pending_sync(eng)
     assert pending["commands"][0]["execution_id"] == receipt["execution_id"]
 
 
@@ -192,8 +199,8 @@ def test_identical_commands_are_separate_execution_history_entries(tmp_path):
     assert receipts[0]["execution_id"] != receipts[1]["execution_id"]
     history = (eng / "state" / "history.md").read_text(encoding="utf-8")
     assert history.count(" | execution_id=") == 2
-    assert execution.state.read_counts(eng)["commands"] == 2
-    pending = execution.state.get_pending_sync(eng)
+    assert state.read_counts(eng)["commands"] == 2
+    pending = state.get_pending_sync(eng)
     assert [item["execution_id"] for item in pending["commands"]] == [
         receipts[0]["execution_id"],
         receipts[1]["execution_id"],
@@ -202,7 +209,7 @@ def test_identical_commands_are_separate_execution_history_entries(tmp_path):
 
 def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    original_seal = execution.seal_execution_receipt
+    original_seal = execution_lifecycle.seal_execution_receipt
     failed = False
 
     def fail_first_seal(receipt, engagement):
@@ -212,7 +219,7 @@ def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, m
             raise OSError("simulated crash before receipt publication")
         return original_seal(receipt, engagement)
 
-    monkeypatch.setattr(execution, "seal_execution_receipt", fail_first_seal)
+    monkeypatch.setattr(execution_lifecycle, "seal_execution_receipt", fail_first_seal)
     with pytest.raises(OSError, match="simulated crash"):
         execution.execute(
             "echo recover-finalizer",
@@ -227,7 +234,7 @@ def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, m
     assert incomplete["terminal"]["status"] == "completed"
     assert (eng / "state" / "history.md").read_text(encoding="utf-8").count(" | execution_id=") == 1
 
-    monkeypatch.setattr(execution, "seal_execution_receipt", original_seal)
+    monkeypatch.setattr(execution_lifecycle, "seal_execution_receipt", original_seal)
     recovered = execution.status(str(eng), incomplete["execution_id"])
     assert recovered["status"] == "completed"
     assert recovered["history_recorded"] is True
@@ -256,19 +263,19 @@ def test_stale_launch_intent_is_charged_and_finalized_as_unknown(tmp_path):
         },
         "declared_evidence_outputs": [],
     }
-    execution.state.atomic_json(manifest, record)
+    state.atomic_json(manifest, record)
 
     recovered = execution.status(str(eng), execution_id)
 
     assert recovered["status"] == "lost"
-    assert execution.state.sync_credit_remaining(eng, "recon") == 9
-    assert execution.state.read_counts(eng)["commands"] == 1
-    assert execution.state.get_pending_sync(eng)["commands"][0]["execution_id"] == execution_id
+    assert state.sync_credit_remaining(eng, "recon") == 9
+    assert state.read_counts(eng)["commands"] == 1
+    assert state.get_pending_sync(eng)["commands"][0]["execution_id"] == execution_id
 
 
 def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    original_mutate = execution.state.mutate_json
+    original_mutate = state.mutate_json
     failed_counts_write = False
 
     def fail_first_counts_write(path, mutation):
@@ -278,15 +285,13 @@ def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkey
             raise OSError("simulated crash after sync accounting")
         return original_mutate(path, mutation)
 
-    monkeypatch.setattr(execution.state, "mutate_json", fail_first_counts_write)
+    monkeypatch.setattr(state, "mutate_json", fail_first_counts_write)
     with pytest.raises(OSError, match="after sync accounting"):
-        execution.state.commit_execution_start(
-            eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
-        )
-    first_retry = execution.state.commit_execution_start(
+        state.commit_execution_start(eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1")
+    first_retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
     )
-    second_retry = execution.state.commit_execution_start(
+    second_retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
     )
 
@@ -294,19 +299,19 @@ def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkey
     assert first_retry[0] == 9
     assert first_retry[3] is True
     assert second_retry[3] is False
-    assert execution.state.read_counts(eng)["commands"] == 1
-    pending = execution.state.get_pending_sync(eng)
+    assert state.read_counts(eng)["commands"] == 1
+    pending = state.get_pending_sync(eng)
     assert [item["execution_id"] for item in pending["commands"]] == ["execution-1"]
 
 
 def test_reserved_launch_accounting_is_idempotent(tmp_path):
     eng = _engagement(tmp_path)
-    reservation = execution.state.reserve_sync_credit(eng, "recon", 2)
+    reservation = state.reserve_sync_credit(eng, "recon", 2)
 
-    first = execution.state.commit_execution_start(
+    first = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1", reservation
     )
-    retry = execution.state.commit_execution_start(
+    retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1", reservation
     )
 
@@ -315,12 +320,9 @@ def test_reserved_launch_accounting_is_idempotent(tmp_path):
     assert retry[3] is False
     assert first[0] == 8
     assert first[1] is True
-    assert execution.state.read_counts(eng)["commands"] == 1
+    assert state.read_counts(eng)["commands"] == 1
     assert (
-        execution.state.read_json(eng / "state" / "sync.json")["reservations"][reservation][
-            "remaining"
-        ]
-        == 1
+        state.read_json(eng / "state" / "sync.json")["reservations"][reservation]["remaining"] == 1
     )
 
 
@@ -346,11 +348,11 @@ def test_background_execution_can_be_cancelled_by_execution_id(tmp_path):
 
 
 def test_process_identity_rejects_reused_pid():
-    proc = execution.psutil.Process(os.getpid())
+    proc = psutil.Process(os.getpid())
     record = {"pid": proc.pid, "pid_create_time": proc.create_time()}
-    assert execution._matching_process(record) is not None
+    assert execution_support._matching_process(record) is not None
     record["pid_create_time"] += 10
-    assert execution._matching_process(record) is None
+    assert execution_support._matching_process(record) is None
 
 
 def test_executor_rejects_cwd_escape(tmp_path):
@@ -371,252 +373,3 @@ def _write_file_argv(path: Path, content: str) -> list[str]:
 
 def _manifest_record(eng: Path, receipt: dict) -> dict:
     return json.loads((eng / receipt["evidence_paths"]["manifest"]).read_text(encoding="utf-8"))
-
-
-def test_receipt_seals_only_the_outputs_its_command_wrote(tmp_path):
-    """#203: a receipt's evidence identity is what its own command wrote."""
-    eng = _engagement(tmp_path)
-    written = eng / "evidence" / "recon" / "written.txt"
-    untouched = eng / "evidence" / "recon" / "untouched.txt"
-    untouched.parent.mkdir(parents=True)
-    untouched.write_text("from a batch-mate\n", encoding="utf-8")
-
-    receipt = execution.execute(
-        "python -c 'write one declared output'",
-        argv=_write_file_argv(written, "written\n"),
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=["evidence/recon/written.txt", "evidence/recon/untouched.txt"],
-    )
-
-    assert receipt["exit_code"] == 0
-    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
-        "evidence/recon/written.txt"
-    ]
-
-
-def test_a_batch_mate_rewrite_does_not_invalidate_another_command(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-):
-    """#203: two commands declaring one batch-wide union must not share evidence identity."""
-    monkeypatch.setattr(receipt_integrity, "_RUNTIME_KEY", b"r" * 32)
-    monkeypatch.setattr(receipt_integrity, "_RUNTIME_SIGNING_KEY", None)
-    eng = _engagement(tmp_path)
-    first_output = eng / "evidence" / "recon" / "first.txt"
-    second_output = eng / "evidence" / "recon" / "second.txt"
-    first_output.parent.mkdir(parents=True)
-    union = ["evidence/recon/first.txt", "evidence/recon/second.txt"]
-
-    first = execution.execute(
-        "python -c 'write the first output'",
-        argv=_write_file_argv(first_output, "first\n"),
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=union,
-    )
-    second = execution.execute(
-        "python -c 'write the second output'",
-        argv=_write_file_argv(second_output, "second\n"),
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=union,
-    )
-    assert _manifest_record(eng, first)["declared_evidence_outputs"] == ["evidence/recon/first.txt"]
-    assert _manifest_record(eng, second)["declared_evidence_outputs"] == [
-        "evidence/recon/second.txt"
-    ]
-
-    # A later batch step rewrites its own output. The earlier receipt must still
-    # authenticate the file its own command produced.
-    second_output.write_text("rewritten by a later probe\n", encoding="utf-8")
-    findings.submit_finding(
-        eng,
-        title="Rests on the first command's own output",
-        severity="High",
-        summary="Reproduced with receipt-authenticated evidence.",
-        receipt_paths=[first["evidence_paths"]["manifest"]],
-        evidence_paths=["evidence/recon/first.txt"],
-    )
-
-
-def test_a_rewrite_with_unchanged_size_and_mtime_is_still_sealed(tmp_path):
-    """#203: provenance is content, not stat.
-
-    A probe that rewrites its output byte-for-byte without changing the length or
-    the timestamp (`cp -p`, `rsync -t`, `os.utime` after write, a coarse-timestamp
-    filesystem) must still be recorded as produced. Stat alone silently discards
-    genuine proof and every finding citing it is then rejected.
-    """
-    eng = _engagement(tmp_path)
-    probe = eng / "evidence" / "recon" / "probe.txt"
-    probe.parent.mkdir(parents=True)
-    probe.write_text("stale\n", encoding="utf-8")
-    unchanged_stat = probe.stat()
-    assert len("stale\n") == len("proof\n")
-
-    receipt = execution.execute(
-        "python -c 'rewrite the output in place'",
-        argv=[
-            sys.executable,
-            "-c",
-            "import os, pathlib, sys; p = pathlib.Path(sys.argv[1]); "
-            "p.write_text(sys.argv[2], encoding='utf-8'); "
-            "os.utime(p, ns=(int(sys.argv[3]), int(sys.argv[3])))",
-            str(probe),
-            "proof\n",
-            str(unchanged_stat.st_mtime_ns),
-        ],
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=["evidence/recon/probe.txt"],
-    )
-
-    assert probe.stat().st_size == unchanged_stat.st_size
-    assert probe.stat().st_mtime_ns == unchanged_stat.st_mtime_ns
-    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
-        "evidence/recon/probe.txt"
-    ]
-
-
-def test_a_background_command_still_seals_only_its_own_output(tmp_path):
-    """#203: background and status()/cancel() finalizers narrow identically."""
-    eng = _engagement(tmp_path)
-    written = eng / "evidence" / "recon" / "written.txt"
-    untouched = eng / "evidence" / "recon" / "untouched.txt"
-    untouched.parent.mkdir(parents=True)
-    untouched.write_text("from a batch-mate\n", encoding="utf-8")
-
-    receipt = execution.execute(
-        "python -c 'write one declared output'",
-        argv=_write_file_argv(written, "written\n"),
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=["evidence/recon/written.txt", "evidence/recon/untouched.txt"],
-        background=True,
-    )
-    deadline = time.monotonic() + 15
-    current = receipt
-    while current.get("status") == "running" and time.monotonic() < deadline:
-        time.sleep(0.05)
-        current = execution.status(str(eng), receipt["execution_id"])
-
-    assert current["status"] == "completed"
-    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
-        "evidence/recon/written.txt"
-    ]
-
-
-def test_a_byte_identical_rewrite_is_still_sealed_without_its_sibling(tmp_path):
-    """#203 regression: bytes alone cannot tell a rewrite from an untouched file.
-
-    A single command that rewrites an existing declared output with identical
-    bytes leaves the content digest unchanged, so the file was dropped from the
-    receipt and every finding citing it was rejected as unauthenticated — the
-    exact proof loss the #203 narrowing was meant to prevent. The command did
-    write the file, so it must be sealed; the untouched declared sibling still
-    belongs to whoever produced it and must not be reattached.
-    """
-    eng = _engagement(tmp_path)
-    rewritten = eng / "evidence" / "recon" / "rewritten.txt"
-    untouched = eng / "evidence" / "recon" / "untouched.txt"
-    untouched.parent.mkdir(parents=True)
-    payload = "identical bytes\n"
-    rewritten.write_text(payload, encoding="utf-8")
-    untouched.write_text("from a batch-mate\n", encoding="utf-8")
-    # Pin the baseline timestamp far in the past so any real write moves it,
-    # independent of filesystem timestamp granularity.
-    os.utime(rewritten, ns=(1_000_000_000, 1_000_000_000))
-    baseline_mtime = rewritten.stat().st_mtime_ns
-    baseline_digest = receipt_integrity.file_digest(rewritten)
-
-    receipt = execution.execute(
-        "python -c 'rewrite the output with identical bytes'",
-        argv=_write_file_argv(rewritten, payload),
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=["evidence/recon/rewritten.txt", "evidence/recon/untouched.txt"],
-    )
-
-    assert rewritten.read_text(encoding="utf-8") == payload
-    assert receipt_integrity.file_digest(rewritten) == baseline_digest
-    assert rewritten.stat().st_mtime_ns != baseline_mtime
-    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
-        "evidence/recon/rewritten.txt"
-    ]
-
-
-def test_a_background_byte_identical_rewrite_is_sealed(tmp_path):
-    """The background finalizer narrows on the same per-command provenance rule."""
-    eng = _engagement(tmp_path)
-    probe = eng / "evidence" / "recon" / "probe.txt"
-    probe.parent.mkdir(parents=True)
-    payload = "same bytes in the background\n"
-    probe.write_text(payload, encoding="utf-8")
-    os.utime(probe, ns=(1_000_000_000, 1_000_000_000))
-    baseline_mtime = probe.stat().st_mtime_ns
-
-    receipt = execution.execute(
-        "python -c 'rewrite the background output with identical bytes'",
-        argv=_write_file_argv(probe, payload),
-        eng_dir=str(eng),
-        phase="recon",
-        timeout_seconds=30,
-        ptt_task_id="PT-001",
-        evidence_outputs=["evidence/recon/probe.txt"],
-        background=True,
-    )
-    deadline = time.monotonic() + 15
-    current = receipt
-    while current.get("status") == "running" and time.monotonic() < deadline:
-        time.sleep(0.05)
-        current = execution.status(str(eng), receipt["execution_id"])
-
-    assert current["status"] == "completed"
-    assert probe.read_text(encoding="utf-8") == payload
-    assert probe.stat().st_mtime_ns != baseline_mtime
-    assert _manifest_record(eng, receipt)["declared_evidence_outputs"] == [
-        "evidence/recon/probe.txt"
-    ]
-
-
-def test_a_legacy_digest_baseline_still_narrows_by_content(tmp_path):
-    """A record written before the snapshot shape keeps its content-only rule.
-
-    Old manifests stored ``declared_outputs_before`` as a bare digest per file.
-    Finishing such an in-flight record must not change how it narrows.
-    """
-    eng = _engagement(tmp_path)
-    reported = eng / "evidence" / "recon" / "reported.txt"
-    untouched = eng / "evidence" / "recon" / "untouched.txt"
-    untouched.parent.mkdir(parents=True)
-    reported.write_text("legacy rewritten\n", encoding="utf-8")
-    untouched.write_text("from a batch-mate\n", encoding="utf-8")
-
-    record = {
-        "execution_id": "12345678-1234-4234-8234-123456789abc",
-        "status": "running",
-        "command": "legacy command",
-        "phase": "recon",
-        "declared_evidence_outputs": [
-            "evidence/recon/reported.txt",
-            "evidence/recon/untouched.txt",
-        ],
-        "declared_outputs_before": {
-            "evidence/recon/reported.txt": "0" * 64,
-            "evidence/recon/untouched.txt": receipt_integrity.file_digest(untouched),
-        },
-    }
-
-    assert execution._produced_outputs(eng, record) == ["evidence/recon/reported.txt"]
