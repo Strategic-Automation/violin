@@ -45,16 +45,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /root/.local/bin && ln -sf /usr/bin/httpx-toolkit /root/.local/bin/httpx
 
 
-# Install uv package manager & hermes-agent CLI + violin plugin deps.
-# hermes-agent >=0.16 requires Python <3.14 and Kali rolling now ships 3.14,
-# so system pip cannot resolve it — pin the CLI to an isolated uv-managed
-# Python 3.13 environment instead of the distro python.
+# Install uv and pinned Hermes v0.21.5 into a Python 3.13 environment.
+# The upstream project declares requires-python >=3.11,<3.14; keep the CLI
+# runtime inside that supported range and install the immutable audited source.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:/root/.cargo/bin:/opt/hermes/bin:${PATH}"
 ENV HOME="/root"
-RUN uv venv /opt/hermes --python 3.13 \
+ARG HERMES_TAG=v2026.9.24
+ARG HERMES_COMMIT=f97608f178d1ffeca59860195ab7da295f7c8e5f
+RUN git clone --depth 1 --branch "$HERMES_TAG" https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent \
+    && test "$(git -C /opt/hermes-agent rev-parse HEAD)" = "$HERMES_COMMIT" \
+    && uv venv /opt/hermes --python 3.13 \
     && uv pip install --python /opt/hermes/bin/python \
-        "hermes-agent>=0.18.0,<0.20" \
+        --editable /opt/hermes-agent \
         duckduckgo-search \
         tirith \
         filelock \
@@ -88,7 +91,7 @@ COPY plugins /violin/plugins/
 COPY skills /violin/skills/
 COPY scripts /violin/scripts/
 COPY assets /violin/assets/
-COPY benchmark/run.py /violin/benchmark/run.py
+COPY benchmark/run.py benchmark/engagement.py /violin/benchmark/
 COPY benchmark/targets/duck-store/scope.yaml benchmark/targets/duck-store/engage.md /violin/benchmark/targets/duck-store/
 
 # The image has no tests/ tree (whitelist above), so pytest must not be
