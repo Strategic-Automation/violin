@@ -376,6 +376,65 @@ details[id] {
 .home-bottom a {
   font-weight: 700;
 }
+/* Sponsorship stays on its own page, with one short invitation on the homepage. */
+.home-support {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  padding-top: 28px;
+}
+.home-support h2 {
+  font-size: 1.25rem;
+}
+.home-support p {
+  max-width: 70ch;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.home-support a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.support-content {
+  max-width: 960px;
+  padding-block: 48px 56px;
+}
+.support-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 20px;
+  margin-block: 28px;
+}
+.support-option {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 3px;
+  padding: 24px;
+}
+.support-option p:last-child {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+.support-amount {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+.support-amount span {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.support-alternatives {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 20px;
+}
+.support .notice-callout p {
+  margin-bottom: 0;
+}
 /* Documentation uses readable measures and a small, persistent page directory. */
 .docs-layout {
   display: grid;
