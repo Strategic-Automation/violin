@@ -222,7 +222,17 @@ def handle_exec_burst(args: dict, **kwargs):
         try:
             reservation_id = state.reserve_sync_credit(eng_dir, phase, required_slots)
         except ValueError as exc:
-            return _json("denied", executed=0, results=[], reason=str(exc))
+            return _json(
+                "denied",
+                executed=0,
+                results=[],
+                reason=(
+                    f"{exc}. A burst costs one sync slot per target command: "
+                    f"{required_slots} slot(s) for {len(preflight)} command(s) in phase "
+                    f"{phase}. Split it into a smaller burst, or run violin_review_batch to "
+                    "refresh the sync window."
+                ),
+            )
 
     results = []
     executed = 0
