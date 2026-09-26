@@ -190,6 +190,7 @@ def _run_manifest(
 ) -> dict:
     source_paths = [
         Path(__file__),
+        REPO_ROOT / "benchmark" / "engagement.py",
         REPO_ROOT / "benchmark" / "targets" / "duck-store" / "scope.yaml",
         REPO_ROOT / "benchmark" / "targets" / "duck-store" / "engage.md",
         REPO_ROOT / "plugins" / "violin_guard" / "core" / "evidence" / "findings.py",
