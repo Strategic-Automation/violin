@@ -47,3 +47,39 @@ def test_malformed_history_line_does_not_create_a_false_repeat(tmp_path: Path) -
 
     errors, _, _ = check_history_staleness(tmp_path, "echo done")
     assert not errors
+
+
+def test_exact_repeat_after_a_failed_run_is_allowed(tmp_path: Path) -> None:
+    """A re-run after a failed attempt is legitimate, not drift.
+
+    Denying it forces a cosmetic edit to the command, which wastes a round trip
+    and contaminates the execution receipts with probes that were only ever
+    varied to satisfy the dedup check.
+    """
+    command = "curl -o evidence/recon/tech.json https://shop.example.test/openapi.json"
+    history = tmp_path / "state" / "history.md"
+    history.parent.mkdir()
+    history.write_text(
+        "- 2026-07-14T10:00:00Z | phase=RECON | exit_code=23 | status=failed"
+        f" | command={command}\n",
+        encoding="utf-8",
+    )
+
+    errors, _, infos = check_history_staleness(tmp_path, command)
+    assert not errors, errors
+    assert any("did not complete successfully" in info for info in infos), infos
+
+
+def test_exact_repeat_after_a_successful_run_is_still_rejected(tmp_path: Path) -> None:
+    command = "nmap -sV 10.10.10.10"
+    history = tmp_path / "state" / "history.md"
+    history.parent.mkdir()
+    history.write_text(
+        "- 2026-07-14T10:00:00Z | phase=RECON | exit_code=0 | status=completed"
+        f" | command={command}\n",
+        encoding="utf-8",
+    )
+
+    errors, _, infos = check_history_staleness(tmp_path, command)
+    assert errors, "a repeat after a successful run is still drift"
+    assert not infos
