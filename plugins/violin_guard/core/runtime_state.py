@@ -102,7 +102,7 @@ def load_runtime_state(path: Path) -> RuntimeState:
         names = ", ".join(legacy)
         raise RuntimeStateError(
             f"Violin 3.3 state ({names}) cannot be used by Violin 4.0; "
-            "reinitialize the engagement or start a new engagement before continuing"
+            "start a new engagement directory before continuing"
         )
 
     if path.exists():

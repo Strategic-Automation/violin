@@ -11,7 +11,7 @@ from plugins.violin_guard.core.engagement import runtime, state
 from plugins.violin_guard.core.runtime_state import RuntimeStateError
 
 
-def test_legacy_engagement_state_requires_reinitialization(tmp_path: Path) -> None:
+def test_legacy_engagement_state_requires_new_engagement(tmp_path: Path) -> None:
     engagement_state = tmp_path / "engagement" / "state"
     engagement_state.mkdir(parents=True)
     legacy_sync = engagement_state / "sync.json"
@@ -19,9 +19,7 @@ def test_legacy_engagement_state_requires_reinitialization(tmp_path: Path) -> No
         json.dumps({"credit": 6, "pending": {"batch_id": "batch-1"}}), encoding="utf-8"
     )
 
-    with pytest.raises(
-        RuntimeStateError, match="reinitialize the engagement or start a new engagement"
-    ):
+    with pytest.raises(RuntimeStateError, match="start a new engagement directory"):
         state.sync_credit_remaining(tmp_path / "engagement", "RECON")
     assert not (engagement_state / "runtime.json").exists()
     assert legacy_sync.exists()
@@ -99,5 +97,5 @@ def test_legacy_state_blocks_even_if_runtime_file_exists(tmp_path: Path) -> None
         json.dumps({"pending": True}), encoding="utf-8"
     )
 
-    with pytest.raises(RuntimeStateError, match="reinitialize the engagement"):
+    with pytest.raises(RuntimeStateError, match="start a new engagement directory"):
         state.has_heartbeat_pending(tmp_path / "engagement")
