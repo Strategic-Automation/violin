@@ -73,7 +73,8 @@ and are not silently added to its score. `/vulnerabilities` remains excluded fro
 
 `finding_score_pct` is the article-aligned detection rate: distinct confirmed cases divided
 by 20. `reported_false_positive_rate` mirrors the article's secondary HIGH/MEDIUM finding
-metric. Coverage, methodology, and Violin's 85% release gate are separate quality controls;
+metric. Coverage, methodology, and Violin's 75% release gate (15/20) are
+separate quality controls;
 they must not be presented as part of Escape's detection-rate formula.
 
 `demonstrated_score_pct` separately scans every authenticated execution receipt with the same
@@ -82,9 +83,14 @@ credit. `unreported_demonstrated_ids` is the reporting gap between what the run 
 what it submitted. The article-aligned headline remains the confirmed-finding score because
 Escape counted reported findings; publish both values when diagnosing an agent.
 
-Every run records protocol checks. A score from a mutable target without a reset/snapshot ID,
-or from a scope that withholds OpenAPI, is diagnostic and must not be compared with 15/20.
-For a publishable result, also pin the source commit and runtime image and use a clean tree.
+Every run records protocol checks. A mutable target date/time label identifies
+its run window but does not make the target reproducible. For this operator-
+approved hosted Duck Store benchmark, use `escape-duck-store-online:<UTC-start>`
+and record each observed reset. Evaluate it against Violin's internal 15/20
+threshold and describe it as hosted-window evidence; Escape's pinned April
+snapshot is a separate protocol. A scope that withholds OpenAPI remains
+diagnostic. Pin the source commit and runtime image and use a clean tree for
+publishable comparisons.
 
 ## Stronger evaluation model
 
@@ -135,18 +141,22 @@ checks the evaluator only; it is not a live benchmark result.
 
 ```powershell
 uv run python -m benchmark.run \
-  --target http://localhost:<published-port> \
-  --provider <provider> \
-  --api-base <openai-compatible-base-url> \
+  --target https://duck-store.escape.tech \
+  --provider openrouter \
+  --api-base https://openrouter.ai/api/v1 \
   --model <model-id> \
-  --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
+  --target-isolation-id escape-duck-store-online:<UTC-launch-timestamp>
 ```
 
-A publishable run needs an immutable target identity, signed receipts, structured findings,
-completed coverage and methodology disposition, and a successful host-side private
-evaluation. A repository test pass or calibration result is not a live benchmark score.
-Using the hosted training instance is useful for diagnostics, but it is not a substitute for
-the article's early-April-2026 Docker snapshot.
+A live merge-gate run needs a pinned source commit and runtime image in its manifest,
+a target identity, signed receipts, structured findings, completed coverage and
+methodology disposition, and successful host-side private evaluation. For the
+operator-approved hosted Duck Store, use `escape-duck-store-online:<UTC-launch-timestamp>`.
+That identity records the online instance and run time; it does not claim an immutable
+snapshot or reset. Record any observed reset separately. This hosted-window benchmark
+qualifies for Violin's internal 15/20 gate, but it is not comparable to the article's
+pinned early-April-2026 Docker snapshot. A repository test pass or calibration result is
+not a live benchmark score.
 
 ## Non-determinism (multi-run accounting)
 
