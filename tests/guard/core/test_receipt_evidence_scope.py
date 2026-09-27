@@ -9,6 +9,7 @@ The contract these tests pin:
 * a receipt seals only the files its own command wrote;
 * a sealed file whose bytes changed is stale, and never disqualifies its siblings;
 * citing a stale file fails naming the file that conflicts.
+* every evidence file is authenticated by a receipt cited on its finding.
 """
 
 import json
@@ -141,15 +142,73 @@ def test_a_new_receipt_can_authenticate_a_path_stale_in_a_cited_receipt(
         },
         engagement,
     )
-    _write_receipt(engagement, "fresh-copy", fresh_receipt)
+    fresh_receipt_path = _write_receipt(engagement, "fresh-copy", fresh_receipt)
+
+    with pytest.raises(ValueError, match="has changed evidence: evidence/recon/first.txt"):
+        findings.submit_finding(
+            engagement,
+            title="The current file has a valid receipt",
+            severity="High",
+            summary="A newer signed receipt authenticates the current evidence bytes.",
+            receipt_paths=[stale_receipt_path],
+            evidence_paths=["evidence/recon/first.txt"],
+        )
 
     findings.submit_finding(
         engagement,
         title="The current file has a valid receipt",
         severity="High",
         summary="A newer signed receipt authenticates the current evidence bytes.",
-        receipt_paths=[stale_receipt_path],
+        receipt_paths=[stale_receipt_path, fresh_receipt_path],
         evidence_paths=["evidence/recon/first.txt"],
+    )
+
+
+def test_evidence_from_another_receipt_must_cite_that_receipt(tmp_path: Path) -> None:
+    engagement = tmp_path
+    first = engagement / "evidence" / "recon" / "first.txt"
+    second = engagement / "evidence" / "recon" / "second.txt"
+    first.parent.mkdir(parents=True)
+    first.write_text("first\n", encoding="utf-8")
+    second.write_text("second\n", encoding="utf-8")
+    first_receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "first",
+            "status": "completed",
+            "exit_code": 0,
+            "declared_evidence_outputs": ["evidence/recon/first.txt"],
+        },
+        engagement,
+    )
+    first_path = _write_receipt(engagement, "first", first_receipt)
+    second_receipt = receipt_integrity.seal_execution_receipt(
+        {
+            "execution_id": "second",
+            "status": "completed",
+            "exit_code": 0,
+            "declared_evidence_outputs": ["evidence/recon/second.txt"],
+        },
+        engagement,
+    )
+    second_path = _write_receipt(engagement, "second", second_receipt)
+
+    with pytest.raises(ValueError, match="receipt_paths; include the receipt"):
+        findings.submit_finding(
+            engagement,
+            title="Both files needed",
+            severity="High",
+            summary="Proof needs both command responses.",
+            receipt_paths=[first_path],
+            evidence_paths=["evidence/recon/first.txt", "evidence/recon/second.txt"],
+        )
+
+    findings.submit_finding(
+        engagement,
+        title="Both files needed",
+        severity="High",
+        summary="Proof needs both command responses.",
+        receipt_paths=[first_path, second_path],
+        evidence_paths=["evidence/recon/first.txt", "evidence/recon/second.txt"],
     )
 
 

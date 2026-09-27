@@ -20,9 +20,8 @@ class FindingClaimModel(BaseModel):
         description=(
             "One to eight engagement-relative signed execution receipt JSON paths beneath "
             "evidence/executions. Every cited receipt must have a reviewable result; "
-            "evidence_paths may be authenticated by any signed receipt in the engagement, "
-            "not only the cited receipt_paths. Validation never exposes benchmark identities "
-            "or score."
+            "each evidence_path must be authenticated by a cited receipt. Validation never "
+            "exposes benchmark identities or score."
         ),
     )
     evidence_paths: list[str] = Field(
