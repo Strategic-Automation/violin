@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -36,6 +37,17 @@ def _reserve(eng: Path, **overrides):
     }
     values.update(overrides)
     return prepare_delivery(eng, **values)
+
+
+def test_prepare_delivery_rejects_missing_digest(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="complete sha256 content_digest"):
+        prepare_delivery(
+            tmp_path,
+            session_id="session-a",
+            skill="pentest",
+            content_digest=cast(str, None),
+            phase="recon",
+        )
 
 
 def _deliver(eng: Path, **overrides):

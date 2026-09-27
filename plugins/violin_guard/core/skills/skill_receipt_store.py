@@ -31,12 +31,10 @@ def skill_content_digest(content: str) -> str:
     return _digest(content)
 
 
-def _is_sha256_digest(value: str) -> bool:
-    return (
-        len(value) == 71
-        and value.startswith("sha256:")
-        and all(character in "0123456789abcdef" for character in value[7:])
-    )
+def _is_sha256_digest(value: str | None) -> bool:
+    if not isinstance(value, str) or len(value) != 71 or not value.startswith("sha256:"):
+        return False
+    return all(character in "0123456789abcdef" for character in value[7:])
 
 
 def _preparing_expired(entry: dict[str, Any]) -> bool:
