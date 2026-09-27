@@ -8,7 +8,7 @@ from pathlib import Path
 import psutil
 import pytest
 
-from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.core.engagement import runtime, state
 from plugins.violin_guard.engine import (
     execution,
     execution_lifecycle,
@@ -275,18 +275,18 @@ def test_stale_launch_intent_is_charged_and_finalized_as_unknown(tmp_path):
 
 def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkeypatch):
     eng = _engagement(tmp_path)
-    original_mutate = state.mutate_json
-    failed_counts_write = False
+    original_atomic_json = runtime.atomic_json
+    failed_runtime_write = False
 
-    def fail_first_counts_write(path, mutation):
-        nonlocal failed_counts_write
-        if path.name == "counts.json" and not failed_counts_write:
-            failed_counts_write = True
-            raise OSError("simulated crash after sync accounting")
-        return original_mutate(path, mutation)
+    def fail_first_runtime_write(path, data):
+        nonlocal failed_runtime_write
+        if path.name == "runtime.json" and not failed_runtime_write:
+            failed_runtime_write = True
+            raise OSError("simulated runtime replace failure")
+        return original_atomic_json(path, data)
 
-    monkeypatch.setattr(state, "mutate_json", fail_first_counts_write)
-    with pytest.raises(OSError, match="after sync accounting"):
+    monkeypatch.setattr(runtime, "atomic_json", fail_first_runtime_write)
+    with pytest.raises(OSError, match="runtime replace failure"):
         state.commit_execution_start(eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1")
     first_retry = state.commit_execution_start(
         eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
@@ -321,9 +321,8 @@ def test_reserved_launch_accounting_is_idempotent(tmp_path):
     assert first[0] == 8
     assert first[1] is True
     assert state.read_counts(eng)["commands"] == 1
-    assert (
-        state.read_json(eng / "state" / "sync.json")["reservations"][reservation]["remaining"] == 1
-    )
+    runtime_data = state.read_json(eng / "state" / "runtime.json")
+    assert runtime_data["sync"]["reservations"][reservation]["remaining"] == 1
 
 
 def test_background_execution_can_be_cancelled_by_execution_id(tmp_path):

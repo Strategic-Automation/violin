@@ -54,10 +54,11 @@ def test_record_ptt_refuses_to_reconcile_a_pending_batch(tmp_path: Path) -> None
 def test_appending_work_invalidates_an_earlier_review(tmp_path: Path) -> None:
     eng = _engagement(tmp_path)
     state.mark_pending_sync(eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010")
-    sync_path = eng / "state" / "sync.json"
-    sync_data = state.read_json(sync_path)
-    sync_data["pending"]["ptt_reviewed"] = True
-    state.atomic_json(sync_path, sync_data)
+
+    def mark_reviewed(runtime):
+        runtime.sync.pending.ptt_reviewed = True
+
+    state._mutate_runtime(eng, mark_reviewed)
     state.mark_pending_sync(eng, "nmap -p 443 10.10.10.10", "RECON", "PT-010")
     assert state.get_pending_sync(eng)["ptt_reviewed"] is False
 
@@ -110,9 +111,9 @@ def test_confirmed_rebind_is_audited_but_does_not_review_or_unlock(tmp_path: Pat
     assert pending["ptt_task_id"] == "PT-011"
     assert pending["ptt_reviewed"] is False
     assert state.has_pending_sync(eng)
-    sync_data = json.loads((eng / "state" / "sync.json").read_text(encoding="utf-8"))
-    assert sync_data["rebind_audit"][-1]["old_task_id"] == "PT-010"
-    assert sync_data["rebind_audit"][-1]["new_task_id"] == "PT-011"
+    audit = state._read_runtime(eng).sync.rebind_audit[-1]
+    assert audit.old_task_id == "PT-010"
+    assert audit.new_task_id == "PT-011"
 
 
 def test_rebind_requires_confirmation_and_current_batch_identity(tmp_path: Path) -> None:

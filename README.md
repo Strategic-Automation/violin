@@ -194,6 +194,14 @@ $ENG_DIR/
 └── retrospective/
 ```
 
+### Upgrading from Violin 3.3
+
+Violin 4.0 stores executor state in `state/runtime.json` and does not migrate
+the 3.3 `sync.json`, `counts.json`, or `heartbeat.json` files. Start a new
+engagement in a new directory; keep the 3.3 directory as a historical record.
+Reusing its directory leaves the legacy state files in place, so Violin 4.0
+will reject it.
+
 ### Skill delivery
 
 Skills are loaded on demand. The first `violin_record_ptt` call for a routed

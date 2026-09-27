@@ -1,220 +1,136 @@
-"""State machine, advisory file locking, and JSON storage."""
+"""Engagement state API, semantic progress tracking, and local command classification."""
 
 from __future__ import annotations
 
-import contextlib
-import json
-import os
-import time
-import uuid
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from filelock import FileLock
-
 from ...core.commands.bash_ast import parse_bash_segments
 from ...core.commands.targets import extract_target_candidates
-from ...core.engagement.phases import normalize_phase, suppresses_heartbeat
+from ..runtime_state import (
+    ExecutionAccount,
+    HeartbeatState,
+    LastCheck,
+    PendingBatch,
+    PendingCommand,
+    RebindAuditEntry,
+    Reservation,
+    RuntimeState,
+    load_runtime_state,
+    timestamp,
+)
+from .runtime import (
+    _RUNTIME_FILE,
+    COMMAND_INTERVAL,
+    DEFAULT_SYNC_CREDIT,
+    PHASE_SYNC_CREDIT,
+    _mutate_runtime,
+    _read_runtime,
+    _runtime_path,
+    clear_heartbeat_pending,
+    clear_pending_sync,
+    commit_execution_start,
+    consume_reserved_sync_credit,
+    get_heartbeat_reason,
+    get_pending_sync,
+    has_heartbeat_pending,
+    has_pending_sync,
+    mark_pending_sync,
+    read_counts,
+    rebind_pending_sync,
+    record_ok_check,
+    release_reserved_sync_credit,
+    reserve_sync_credit,
+    set_heartbeat_pending,
+    spend_sync_credit,
+    sync_credit_limit,
+    sync_credit_remaining,
+    tick_command,
+    tick_message,
+)
+from .storage import (
+    _SESSION_FILE,
+    _STATE_DIR,
+    _atomic_write,
+    _eng_root,
+    _state_dir,
+    atomic_json,
+    atomic_text,
+    ensure_dir,
+    lock_file,
+    mutate_json,
+    read_json,
+    record_session_id,
+    resolve_eng_dir,
+    resolve_session_id,
+    workflow_lock,
+)
 
-# Constants
+__all__ = [
+    "COMMAND_INTERVAL",
+    "DEFAULT_SYNC_CREDIT",
+    "PHASE_SYNC_CREDIT",
+    "MAX_BURST_COMMANDS",
+    "LOCAL_TOOLS",
+    "_STATE_DIR",
+    "_SESSION_FILE",
+    "_RUNTIME_FILE",
+    "_runtime_path",
+    "_read_runtime",
+    "_mutate_runtime",
+    "_eng_root",
+    "resolve_eng_dir",
+    "resolve_session_id",
+    "record_session_id",
+    "ensure_dir",
+    "_state_dir",
+    "lock_file",
+    "workflow_lock",
+    "read_json",
+    "_atomic_write",
+    "atomic_json",
+    "atomic_text",
+    "mutate_json",
+    "ExecutionAccount",
+    "HeartbeatState",
+    "LastCheck",
+    "PendingBatch",
+    "PendingCommand",
+    "RebindAuditEntry",
+    "Reservation",
+    "RuntimeState",
+    "load_runtime_state",
+    "timestamp",
+    "sync_credit_limit",
+    "sync_credit_remaining",
+    "spend_sync_credit",
+    "reserve_sync_credit",
+    "consume_reserved_sync_credit",
+    "release_reserved_sync_credit",
+    "mark_pending_sync",
+    "commit_execution_start",
+    "clear_pending_sync",
+    "has_pending_sync",
+    "get_pending_sync",
+    "rebind_pending_sync",
+    "set_heartbeat_pending",
+    "clear_heartbeat_pending",
+    "has_heartbeat_pending",
+    "get_heartbeat_reason",
+    "read_counts",
+    "tick_command",
+    "tick_message",
+    "record_ok_check",
+    "is_local_bookkeeping_command",
+    "record_semantic_review",
+    "record_research_attempt",
+    "semantic_lock",
+]
 
-DEFAULT_SYNC_CREDIT = 5
-COMMAND_INTERVAL = 50
 MAX_BURST_COMMANDS = 20
-PHASE_SYNC_CREDIT = {
-    "RECON": 10,
-    "VULN_RESEARCH": 10,
-    "EXPLOITATION": 20,
-    "POST_EXPLOITATION": 20,
-    "PRIVESC": 20,
-    "FLAGS": 20,
-}
-
-# Local tools
 LOCAL_TOOLS = {"echo", "true", "false", "printf", "pwd", "ls", "cat", "date"}
-
-_STATE_DIR = "state"
-_SYNC_FILE = "sync.json"
-_HEARTBEAT_FILE = "heartbeat.json"
-_COUNTS_FILE = "counts.json"
-_SESSION_FILE = "session.json"
 _SEMANTIC_FILE = "semantic-progress.json"
-
-
-# Path helpers
-
-
-def _eng_root() -> Path:
-    """Return Violin's stable profile/repository root for relative paths."""
-    override = os.environ.get("VIOLIN_ENG_ROOT", "").strip()
-    if override:
-        return Path(override).expanduser().resolve()
-    container_root = Path("/violin")
-    if container_root.exists() and (container_root / "engagements").exists():
-        return container_root.resolve()
-    return Path(__file__).resolve().parents[4]
-
-
-def resolve_eng_dir(eng_dir: str | Path) -> Path:
-    """Resolve an engagement directory path (absolute or relative to profile root)."""
-    env_root = (
-        Path(os.environ.get("ENG_DIR", "").strip()).expanduser().resolve()
-        if os.environ.get("ENG_DIR", "").strip()
-        else None
-    )
-
-    if not str(eng_dir).strip() or str(eng_dir).strip() == ".":
-        if env_root is not None:
-            return env_root
-        cwd = Path.cwd().resolve()
-        if (cwd / "scope" / "scope.yaml").exists() or (cwd / "hypotheses.md").exists():
-            return cwd
-        return _eng_root()
-
-    path = Path(eng_dir).expanduser()
-    if not path.is_absolute():
-        profile_candidate = (_eng_root() / path).resolve()
-        cwd_candidate = (Path.cwd() / path).resolve()
-        if not profile_candidate.exists() and cwd_candidate.exists():
-            return cwd_candidate
-        resolved = profile_candidate
-    else:
-        resolved = path.resolve()
-
-    return resolved
-
-
-def resolve_session_id(eng_dir: str | Path, session_id: str | None = None) -> str:
-    """Return an explicit session id or the engagement's recorded session.
-
-    Tool calls should not fail merely because the runtime omitted a value it
-    already supplied to the lifecycle hook.  Older engagements are supported
-    by inferring the id when they contain exactly one skill-load marker.
-    """
-    if session_id and session_id.strip():
-        return session_id.strip()
-    root = resolve_eng_dir(eng_dir)
-    recorded = str(read_json(root / _STATE_DIR / _SESSION_FILE).get("session_id") or "").strip()
-    if recorded:
-        return recorded
-    markers = (
-        list((root / _STATE_DIR).glob(".skill-loaded-*")) if (root / _STATE_DIR).exists() else []
-    )
-    return markers[0].name.removeprefix(".skill-loaded-") if len(markers) == 1 else ""
-
-
-def record_session_id(eng_dir: str | Path, session_id: str | None) -> None:
-    if session_id and session_id.strip():
-        path = _state_dir(eng_dir) / _SESSION_FILE
-        with lock_file(path):
-            atomic_json(path, {"session_id": session_id.strip()})
-
-
-def ensure_dir(path: Path) -> Path:
-    """Ensure directory exists fail-safe against symlinks and cross-platform FileExistsError [Errno 17]."""
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        if not path.exists():
-            raise
-    return path
-
-
-def _state_dir(eng_dir: str | Path) -> Path:
-    state_path = resolve_eng_dir(eng_dir) / _STATE_DIR
-    ensure_dir(state_path)
-    return state_path
-
-
-# Storage primitives
-
-
-@contextmanager
-def lock_file(path: Path):
-    """Acquire an exclusive advisory lock on ``path`` for the duration of a ``with`` block."""
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    ensure_dir(lock_path.parent)
-    with FileLock(str(lock_path), timeout=20):
-        yield
-
-
-@contextmanager
-def workflow_lock(eng_dir: str | Path):
-    """Serialize multi-file workflow transitions for one engagement.
-
-    Callers acquire this lock before any narrower JSON or receipt file lock.
-    """
-    lock_path = _state_dir(eng_dir) / "workflow.lock"
-    with FileLock(str(lock_path), timeout=20):
-        yield
-
-
-def read_json(path: Path) -> dict[str, Any]:
-    """Read a JSON document, returning an empty dict on missing file or non-dict root.
-
-    Raises OSError or json.JSONDecodeError on corrupt/locked file reads when the file exists,
-    preventing mutate_json from overwriting existing state with empty dictionaries.
-    """
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        # On read failure when file exists, attempt up to 3 retries for transient locks
-        for attempt in range(3):
-            time.sleep(0.02 * (attempt + 1))
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                return data if isinstance(data, dict) else {}
-            except (OSError, json.JSONDecodeError):
-                pass
-        raise
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    """Write text atomically by replacing a temporary swap file with retry on Windows."""
-    ensure_dir(path.parent)
-    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as temporary_file:
-        temporary_file.write(content)
-    try:
-        for attempt in range(5):
-            try:
-                tmp.replace(path)
-                return
-            except PermissionError:
-                if attempt == 4:
-                    raise
-                time.sleep(0.02 * (attempt + 1))
-    finally:
-        if tmp.exists():
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-
-
-def atomic_json(path: Path, data: dict[str, Any]) -> None:
-    """Write JSON atomically by replacing a temporary swap file."""
-    _atomic_write(path, json.dumps(data, indent=2, sort_keys=True))
-
-
-def atomic_text(path: Path, content: str) -> None:
-    """Write one UTF-8 text document with an atomic replace."""
-    _atomic_write(path, content)
-
-
-def mutate_json(path: Path, mutation) -> Any:
-    """Apply ``mutation`` to one state document under a single file lock."""
-    with lock_file(path):
-        data = read_json(path)
-        result = mutation(data)
-        atomic_json(path, data)
-        return result
-
-
-# Local command classification
 
 
 def is_local_bookkeeping_command(command: str) -> bool:
@@ -226,289 +142,6 @@ def is_local_bookkeeping_command(command: str) -> bool:
     if segment.executable not in LOCAL_TOOLS or segment.redirects:
         return False
     return not extract_target_candidates(command)
-
-
-# Sync credit / pending sync
-
-
-def _sync_path(eng_dir: str | Path) -> Path:
-    return _state_dir(eng_dir) / _SYNC_FILE
-
-
-def sync_credit_limit(phase: str | None = None) -> int:
-    key = str(phase or "").strip().upper().replace("-", "_")
-    return PHASE_SYNC_CREDIT.get(key, DEFAULT_SYNC_CREDIT)
-
-
-def sync_credit_remaining(eng_dir: str | Path, phase: str | None = None) -> int:
-    data = read_json(_sync_path(eng_dir))
-    return max(0, data.get("credit", sync_credit_limit(phase)))
-
-
-def spend_sync_credit(eng_dir: str | Path, phase: str) -> int:
-    path = _sync_path(eng_dir)
-
-    def spend(data: dict[str, Any]) -> int:
-        starting_credit = data.get("credit", sync_credit_limit(phase))
-        credit = max(0, starting_credit - 1)
-        data["credit"] = credit
-        return credit
-
-    return mutate_json(path, spend)
-
-
-def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
-    """Atomically reserve credit for a burst before any command starts."""
-    if count < 1:
-        raise ValueError("a sync reservation must contain at least one command")
-    path = _sync_path(eng_dir)
-
-    def reserve(data: dict[str, Any]) -> str:
-        credit = max(0, int(data.get("credit", sync_credit_limit(phase))))
-        if credit < count:
-            raise ValueError(f"insufficient sync credit for burst: need {count}, have {credit}")
-        reservation_id = f"burst-{uuid.uuid4().hex}"
-        data["credit"] = credit - count
-        data.setdefault("reservations", {})[reservation_id] = {
-            "phase": phase,
-            "remaining": count,
-            "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
-        return reservation_id
-
-    return mutate_json(path, reserve)
-
-
-def consume_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
-    """Consume one previously reserved slot without decrementing credit twice."""
-    path = _sync_path(eng_dir)
-
-    def consume(data: dict[str, Any]) -> int:
-        reservation = (data.get("reservations") or {}).get(reservation_id)
-        if not reservation or int(reservation.get("remaining", 0)) < 1:
-            raise ValueError("sync reservation is missing or exhausted")
-        reservation["remaining"] = int(reservation["remaining"]) - 1
-        if reservation["remaining"] == 0:
-            data["reservations"].pop(reservation_id, None)
-        return max(0, int(data.get("credit", 0)))
-
-    return mutate_json(path, consume)
-
-
-def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
-    """Return every unconsumed slot in a reservation to the sync window."""
-    path = _sync_path(eng_dir)
-
-    def release(data: dict[str, Any]) -> int:
-        reservation = (data.get("reservations") or {}).pop(reservation_id, None)
-        if reservation:
-            data["credit"] = int(data.get("credit", 0)) + max(
-                0, int(reservation.get("remaining", 0))
-            )
-        return max(0, int(data.get("credit", 0)))
-
-    return mutate_json(path, release)
-
-
-def mark_pending_sync(
-    eng_dir: str | Path,
-    command: str,
-    command_phase: str,
-    ptt_task_id: str,
-) -> None:
-    path = _sync_path(eng_dir)
-
-    def mark(data: dict[str, Any]) -> None:
-        old = data.get("pending") or {}
-        commands = list(old.get("commands") or [])
-        if old.get("command") and not commands:
-            commands = [{"command": old["command"], "phase": old.get("phase", command_phase)}]
-        commands.append({"command": command, "phase": command_phase})
-        task_id = old.get("ptt_task_id") or ptt_task_id
-        if not task_id:
-            raise ValueError("pending execution requires a captured active PTT task")
-        data["pending"] = {
-            "batch_id": old.get("batch_id") or str(uuid.uuid4()),
-            "commands": commands,
-            "phase": command_phase,
-            "created_at": old.get("created_at")
-            or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "ptt_task_id": task_id,
-            "ptt_reviewed": False,
-            "credit_limit": old.get("credit_limit") or sync_credit_limit(command_phase),
-        }
-
-    mutate_json(path, mark)
-
-
-def commit_execution_start(
-    eng_dir: str | Path,
-    command: str,
-    command_phase: str,
-    ptt_task_id: str,
-    execution_id: str,
-    sync_reservation: str | None = None,
-) -> tuple[int, bool, int, bool]:
-    """Account one launched execution exactly once across retryable state writes.
-
-    Sync credit, pending review, and the execution-ID ledger share sync.json's
-    atomic replacement. Command count and last-check metadata share counts.json.
-    The workflow lock makes the two document updates a single serialized
-    workflow operation; the execution ID makes a retry after the first write
-    resume the second without charging or appending the pending command twice.
-    """
-    if not execution_id:
-        raise ValueError("execution accounting requires an execution_id")
-    if not ptt_task_id:
-        raise ValueError("pending execution requires a captured active PTT task")
-
-    root = resolve_eng_dir(eng_dir)
-    sync_path = _sync_path(root)
-    counts_path = _counts_path(root)
-    with workflow_lock(root):
-
-        def account_sync(data: dict[str, Any]) -> tuple[int, bool]:
-            accounts = data.setdefault("execution_accounts", {})
-            prior = accounts.get(execution_id)
-            if prior:
-                return max(0, int(data.get("credit", 0))), bool(prior.get("reserved"))
-
-            consumed = False
-            if sync_reservation:
-                reservation = (data.get("reservations") or {}).get(sync_reservation)
-                if not reservation or int(reservation.get("remaining", 0)) < 1:
-                    raise ValueError("sync reservation is missing or exhausted")
-                reservation["remaining"] = int(reservation["remaining"]) - 1
-                if reservation["remaining"] == 0:
-                    data["reservations"].pop(sync_reservation, None)
-                remaining = max(0, int(data.get("credit", 0)))
-                consumed = True
-            else:
-                remaining = max(0, int(data.get("credit", sync_credit_limit(command_phase))) - 1)
-                data["credit"] = remaining
-
-            pending = data.get("pending") or {}
-            commands = list(pending.get("commands") or [])
-            if pending.get("command") and not commands:
-                commands = [
-                    {"command": pending["command"], "phase": pending.get("phase", command_phase)}
-                ]
-            commands.append(
-                {
-                    "command": command,
-                    "phase": command_phase,
-                    "execution_id": execution_id,
-                }
-            )
-            data["pending"] = {
-                "batch_id": pending.get("batch_id") or str(uuid.uuid4()),
-                "commands": commands,
-                "phase": command_phase,
-                "created_at": pending.get("created_at")
-                or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                "ptt_task_id": pending.get("ptt_task_id") or ptt_task_id,
-                "ptt_reviewed": False,
-                "credit_limit": pending.get("credit_limit") or sync_credit_limit(command_phase),
-            }
-            accounts[execution_id] = {
-                "command": command,
-                "phase": command_phase,
-                "reserved": consumed,
-                "accounted_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            }
-            return remaining, consumed
-
-        remaining, consumed = mutate_json(sync_path, account_sync)
-
-        def account_count(data: dict[str, Any]) -> tuple[int, bool]:
-            execution_ids = data.setdefault("execution_ids", [])
-            if execution_id in execution_ids:
-                return int(data.get("commands", 0)), False
-            data["commands"] = int(data.get("commands", 0)) + 1
-            execution_ids.append(execution_id)
-            data["last_check"] = {
-                "command": command,
-                "phase": command_phase,
-                "execution_id": execution_id,
-                "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            }
-            return data["commands"], True
-
-        count, counted = mutate_json(counts_path, account_count)
-        phase_enum = normalize_phase(command_phase)
-        if counted and count % COMMAND_INTERVAL == 0 and not suppresses_heartbeat(phase_enum):
-            set_heartbeat_pending(
-                root,
-                f"Reached {count} executed target commands. Review engagement files for drift.",
-            )
-        return remaining, consumed, count, counted
-
-
-def clear_pending_sync(eng_dir: str | Path) -> None:
-    path = _sync_path(eng_dir)
-
-    def clear(data: dict[str, Any]) -> None:
-        data.pop("pending", None)
-        data.pop("credit", None)
-        data.pop("reservations", None)
-
-    mutate_json(path, clear)
-
-
-def has_pending_sync(eng_dir: str | Path) -> bool:
-    data = read_json(_sync_path(eng_dir))
-    return "pending" in data
-
-
-def get_pending_sync(eng_dir: str | Path) -> dict | None:
-    data = read_json(_sync_path(eng_dir))
-    return data.get("pending")
-
-
-def rebind_pending_sync(
-    eng_dir: str | Path,
-    *,
-    expected_batch_id: str,
-    current_task_id: str,
-    replacement_task_id: str,
-    note: str,
-) -> dict[str, Any]:
-    """Rebind a completed pending batch without certifying its PTT review."""
-    path = _sync_path(eng_dir)
-
-    def rebind(data: dict[str, Any]) -> dict[str, Any]:
-        pending = data.get("pending")
-        if not pending:
-            raise ValueError("no pending execution batch")
-        batch_id = str(pending.get("batch_id") or "")
-        if batch_id != expected_batch_id:
-            raise ValueError(
-                f"stale batch id {expected_batch_id!r}; current pending batch is {batch_id!r}"
-            )
-        captured = str(pending.get("ptt_task_id") or "")
-        if captured != current_task_id:
-            raise ValueError(
-                f"current task {current_task_id!r} does not match batch task {captured!r}"
-            )
-        if current_task_id == replacement_task_id:
-            raise ValueError("replacement task must differ from the current batch task")
-
-        entry = {
-            "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "batch_id": batch_id,
-            "old_task_id": current_task_id,
-            "new_task_id": replacement_task_id,
-            "note": note.strip(),
-        }
-        data.setdefault("rebind_audit", []).append(entry)
-        pending["ptt_task_id"] = replacement_task_id
-        pending["ptt_reviewed"] = False
-        pending.pop("ptt_note", None)
-        pending.pop("ptt_reviewed_at", None)
-        data["pending"] = pending
-        return entry
-
-    return mutate_json(path, rebind)
 
 
 def _recorded_findings(eng_dir: Path) -> int:
@@ -640,102 +273,3 @@ def record_research_attempt(eng_dir: str | Path, tool_name: str, success: bool) 
 
 def semantic_lock(eng_dir: str | Path) -> dict[str, Any] | None:
     return read_json(_state_dir(eng_dir) / _SEMANTIC_FILE).get("lock")
-
-
-# ---------------------------------------------------------------------------
-# Heartbeat
-# ---------------------------------------------------------------------------
-
-
-def _heartbeat_path(eng_dir: str | Path) -> Path:
-    return _state_dir(eng_dir) / _HEARTBEAT_FILE
-
-
-def set_heartbeat_pending(eng_dir: str | Path, reason: str) -> None:
-    path = _heartbeat_path(eng_dir)
-
-    def mark(data: dict[str, Any]) -> None:
-        data["pending"] = True
-        data["reason"] = reason
-        data["created_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-    mutate_json(path, mark)
-
-
-def clear_heartbeat_pending(eng_dir: str | Path) -> None:
-    path = _heartbeat_path(eng_dir)
-
-    def clear(data: dict[str, Any]) -> None:
-        data["pending"] = False
-        data.pop("reason", None)
-
-    mutate_json(path, clear)
-
-
-def has_heartbeat_pending(eng_dir: str | Path) -> bool:
-    data = read_json(_heartbeat_path(eng_dir))
-    return data.get("pending", False)
-
-
-def get_heartbeat_reason(eng_dir: str | Path) -> str | None:
-    data = read_json(_heartbeat_path(eng_dir))
-    return data.get("reason")
-
-
-# ---------------------------------------------------------------------------
-# Command / message counters
-# ---------------------------------------------------------------------------
-
-
-def _counts_path(eng_dir: str | Path) -> Path:
-    return _state_dir(eng_dir) / _COUNTS_FILE
-
-
-def read_counts(eng_dir: str | Path) -> dict[str, int]:
-    data = read_json(_counts_path(eng_dir))
-    return {
-        "commands": data.get("commands", 0),
-        "messages": data.get("messages", 0),
-    }
-
-
-def tick_command(eng_dir: str | Path) -> int:
-    path = _counts_path(eng_dir)
-
-    def tick(data: dict[str, Any]) -> int:
-        data["commands"] = data.get("commands", 0) + 1
-        return data["commands"]
-
-    return mutate_json(path, tick)
-
-
-def tick_message(eng_dir: str | Path) -> int:
-    path = _counts_path(eng_dir)
-
-    def tick(data: dict[str, Any]) -> int:
-        data["messages"] = data.get("messages", 0) + 1
-        return data["messages"]
-
-    # Windows can briefly deny the replace/read sequence immediately after a
-    # prior hook writes this same file.  Lifecycle hooks intentionally do not
-    # fail the model turn, so retry here rather than silently dropping a tick.
-    for attempt in range(3):
-        try:
-            return mutate_json(path, tick)
-        except OSError:
-            if attempt == 2:
-                raise
-            time.sleep(0.02 * (attempt + 1))
-
-
-def record_ok_check(eng_dir: str | Path, command: str, phase: str) -> None:
-    path = _counts_path(eng_dir)
-
-    def record(data: dict[str, Any]) -> None:
-        data["last_check"] = {
-            "command": command,
-            "phase": phase,
-            "at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-        }
-
-    mutate_json(path, record)
