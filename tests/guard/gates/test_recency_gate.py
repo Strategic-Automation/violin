@@ -118,7 +118,9 @@ def test_recency_gate_suppressed_when_batch_in_progress(tmp_path: Path) -> None:
 
     eng = _make_engagement(tmp_path, _STALE_HYP, evidence_age=2 * 3600)
     # Simulate an active pending sync batch
-    state.mark_pending_sync(eng, "curl http://10.129.47.140/probe", "exploitation", "PT-103")
+    state.commit_execution_start(
+        eng, "curl http://10.129.47.140/probe", "EXPLOITATION", "PT-103", "recency-pending"
+    )
     result = command.check_hypothesis_freshness(
         eng,
         Phase.EXPLOITATION,

@@ -42,7 +42,7 @@ def test_fresh_engagement_gets_combined_defaults_on_first_write(tmp_path: Path) 
     assert not state.has_heartbeat_pending(engagement)
     assert not (engagement / "state" / "runtime.json").exists()
 
-    state.tick_command(engagement)
+    state.tick_message(engagement)
     persisted = json.loads((engagement / "state" / "runtime.json").read_text(encoding="utf-8"))
     assert persisted == {
         "schema_version": 1,
@@ -53,7 +53,7 @@ def test_fresh_engagement_gets_combined_defaults_on_first_write(tmp_path: Path) 
             "rebind_audit": [],
             "execution_accounts": {},
         },
-        "counts": {"commands": 1, "messages": 0, "last_check": None, "execution_ids": []},
+        "counts": {"commands": 0, "messages": 1, "last_check": None, "execution_ids": []},
         "heartbeat": {"pending": False, "reason": None, "created_at": None},
     }
 
@@ -73,7 +73,7 @@ def test_runtime_write_failure_keeps_the_previous_complete_state(
     tmp_path: Path, monkeypatch
 ) -> None:
     engagement = tmp_path / "engagement"
-    state.tick_command(engagement)
+    state.tick_message(engagement)
     runtime_path = engagement / "state" / "runtime.json"
     before = runtime_path.read_text(encoding="utf-8")
 

@@ -69,6 +69,8 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     # 2. Scope checks
     eng_dir = state.resolve_eng_dir(args.eng_dir)
+    isolation_result = check_cross_engagement_paths(args.command, eng_dir)
+    result.errors.extend(isolation_result.errors)
     canonical_scope_path = (eng_dir / "scope" / "scope.yaml").resolve()
     requested_scope_path = (
         Path(args.scope).expanduser().resolve() if args.scope else canonical_scope_path

@@ -17,7 +17,6 @@ def _review(eng, **changes):
         "evidence_paths": [],
         "next_action": "research a different approach",
         "next_technique": "directory-enumeration",
-        "research_attempted": False,
     }
     values.update(changes)
     return state.record_semantic_review(eng, **values)
@@ -32,7 +31,6 @@ def test_semantic_reviews_warn_then_hard_lock_and_require_research_pivot(tmp_pat
     assert locked["locked"]
     assert state.semantic_lock(tmp_path)
 
-    assert _review(tmp_path, research_attempted=True)["locked"]
     assert _review(tmp_path, next_technique="parameter-discovery")["locked"]
     state.record_research_attempt(tmp_path, "web_search", True)
     unlocked = _review(tmp_path, next_technique="parameter-discovery")

@@ -1,4 +1,4 @@
-"""Tests for Violin's execute_code audit and receipt persistence."""
+"""Tests for execute_code task requirements and command accounting."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from tests.guard.engine._code_execution_helpers import (
     _engagement,
     _no_active_task_engagement,
 )
+from tests.guard.receipt_fixture import record_started_command
 
 
 def test_local_execute_code_runs_with_no_active_ptt_task(tmp_path) -> None:
@@ -218,9 +219,11 @@ def test_local_execute_code_is_recorded_without_target_sync_credit(tmp_path) -> 
 
 def test_local_execute_code_remains_available_when_target_credit_is_exhausted(tmp_path) -> None:
     eng = _engagement(tmp_path)
-    for _ in range(state.sync_credit_limit("RECON")):
-        state.spend_sync_credit(eng, "RECON")
+    for index in range(state.sync_credit_limit("RECON")):
+        record_started_command(eng, f"nmap -p {index + 1} 10.10.10.10")
     assert state.sync_credit_remaining(eng, "RECON") == 0
+    pending_before = state.get_pending_sync(eng)
+    counts_before = state.read_counts(eng)
 
     source = _code(eng)
     assert (
@@ -241,4 +244,5 @@ def test_local_execute_code_remains_available_when_target_credit_is_exhausted(tm
         tool_call_id="exhausted-local-analysis",
     )
     assert state.sync_credit_remaining(eng, "RECON") == 0
-    assert not state.has_pending_sync(eng)
+    assert state.get_pending_sync(eng) == pending_before
+    assert state.read_counts(eng) == counts_before

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from plugins.violin_guard.core.engagement import bootstrap, state
 from plugins.violin_guard.core.evidence import history
-from tests.guard.receipt_fixture import bind_active_task
+from tests.guard.receipt_fixture import bind_active_task, record_started_command
 
 
 def _engagement(tmp_path: Path) -> Path:
@@ -51,4 +51,4 @@ def _pending_batch(eng: Path) -> None:
         },
     )
     history.append_history(eng, command, "RECON", 0, manifest.relative_to(eng).as_posix())
-    state.mark_pending_sync(eng, command, "RECON", "PT-010")
+    record_started_command(eng, command)

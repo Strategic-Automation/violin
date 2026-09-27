@@ -31,9 +31,6 @@ from .schema_tasks import (
     RecordPttArgsModel,
     ReviewBatchArgsModel,
 )
-from .schema_tasks import (
-    ReviewOutcomeFields as ReviewOutcomeFields,
-)
 
 T = TypeVar("T", bound=BaseModel)
 

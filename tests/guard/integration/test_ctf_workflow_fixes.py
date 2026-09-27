@@ -6,7 +6,7 @@ from plugins.violin_guard import handlers as service
 from plugins.violin_guard.core.engagement import ptt, state
 from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult
 from plugins.violin_guard.handlers import ptt_handlers
-from tests.guard.receipt_fixture import bind_active_task
+from tests.guard.receipt_fixture import bind_active_task, record_started_command
 
 _SCOPE_YAML = """targets:
   ip_addresses: ["10.129.2.5"]
@@ -119,8 +119,8 @@ def test_semantic_lock_requires_research_plus_meaningful_pivot(ctf_eng):
 def test_batch_review_with_running_background_tunnel(ctf_eng):
     """Verify reviewing a batch with a still-running background command succeeds."""
     bind_active_task(ctf_eng)
-    state.mark_pending_sync(
-        ctf_eng, "ssh -f -N -L 8080:127.0.0.1:80 user@10.129.2.5", "RECON", "PT-001"
+    record_started_command(
+        ctf_eng, "ssh -f -N -L 8080:127.0.0.1:80 user@10.129.2.5", task_id="PT-001"
     )
 
     # Create background execution receipt

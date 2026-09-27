@@ -67,18 +67,6 @@ def sync_credit_remaining(eng_dir: str | Path, phase: str | None = None) -> int:
     return max(0, credit if credit is not None else sync_credit_limit(phase))
 
 
-def spend_sync_credit(eng_dir: str | Path, phase: str) -> int:
-    def spend(runtime: RuntimeState) -> int:
-        starting_credit = runtime.sync.credit
-        credit = max(
-            0, (starting_credit if starting_credit is not None else sync_credit_limit(phase)) - 1
-        )
-        runtime.sync.credit = credit
-        return credit
-
-    return _mutate_runtime(eng_dir, spend)
-
-
 def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
     """Atomically reserve credit for a burst before any command starts."""
     if count < 1:
@@ -99,24 +87,6 @@ def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
     return _mutate_runtime(eng_dir, reserve)
 
 
-def consume_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
-    """Consume one previously reserved slot without decrementing credit twice."""
-
-    def consume(runtime: RuntimeState) -> int:
-        reservation = runtime.sync.reservations.get(reservation_id)
-        if reservation is None or reservation.remaining < 1:
-            raise ValueError("sync reservation is missing or exhausted")
-        if reservation.remaining == 1:
-            del runtime.sync.reservations[reservation_id]
-        else:
-            runtime.sync.reservations[reservation_id] = reservation.model_copy(
-                update={"remaining": reservation.remaining - 1}
-            )
-        return max(0, runtime.sync.credit or 0)
-
-    return _mutate_runtime(eng_dir, consume)
-
-
 def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
     """Return every unconsumed slot in a reservation to the sync window."""
 
@@ -127,31 +97,6 @@ def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> in
         return max(0, runtime.sync.credit or 0)
 
     return _mutate_runtime(eng_dir, release)
-
-
-def mark_pending_sync(
-    eng_dir: str | Path, command: str, command_phase: str, ptt_task_id: str
-) -> None:
-    def mark(runtime: RuntimeState) -> None:
-        old = runtime.sync.pending
-        commands = list(old.commands) if old else []
-        commands.append(PendingCommand(command=command, phase=command_phase))
-        task_id = old.ptt_task_id if old and old.ptt_task_id else ptt_task_id
-        if not task_id:
-            raise ValueError("pending execution requires a captured active PTT task")
-        runtime.sync.pending = PendingBatch(
-            batch_id=old.batch_id if old else str(uuid.uuid4()),
-            commands=commands,
-            phase=command_phase,
-            created_at=old.created_at if old else timestamp(),
-            ptt_task_id=task_id,
-            ptt_reviewed=False,
-            credit_limit=(
-                old.credit_limit if old and old.credit_limit else sync_credit_limit(command_phase)
-            ),
-        )
-
-    _mutate_runtime(eng_dir, mark)
 
 
 def commit_execution_start(
@@ -341,14 +286,6 @@ def read_counts(eng_dir: str | Path) -> dict[str, int]:
     return {"commands": counts.commands, "messages": counts.messages}
 
 
-def tick_command(eng_dir: str | Path) -> int:
-    def tick(runtime: RuntimeState) -> int:
-        runtime.counts.commands += 1
-        return runtime.counts.commands
-
-    return _mutate_runtime(eng_dir, tick)
-
-
 def tick_message(eng_dir: str | Path) -> int:
     def tick(runtime: RuntimeState) -> int:
         runtime.counts.messages += 1
@@ -362,10 +299,3 @@ def tick_message(eng_dir: str | Path) -> int:
                 raise
             time.sleep(0.02 * (attempt + 1))
     raise RuntimeError("unreachable")
-
-
-def record_ok_check(eng_dir: str | Path, command: str, phase: str) -> None:
-    def record(runtime: RuntimeState) -> None:
-        runtime.counts.last_check = LastCheck(command=command, phase=phase, at=timestamp())
-
-    _mutate_runtime(eng_dir, record)
