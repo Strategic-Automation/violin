@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from plugins.violin_guard.core.engagement import state
+from plugins.violin_guard.core.engagement import runtime, state
 from plugins.violin_guard.core.runtime_state import RuntimeStateError
 
 
@@ -82,7 +82,7 @@ def test_runtime_write_failure_keeps_the_previous_complete_state(
     def fail_write(*args, **kwargs):
         raise OSError("simulated replace failure")
 
-    monkeypatch.setattr(state, "atomic_json", fail_write)
+    monkeypatch.setattr(runtime, "atomic_json", fail_write)
     with pytest.raises(OSError, match="simulated replace failure"):
         state.set_heartbeat_pending(engagement, "review cadence")
     assert runtime_path.read_text(encoding="utf-8") == before

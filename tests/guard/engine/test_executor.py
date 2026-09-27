@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from plugins.violin_guard.core.engagement import runtime
 from plugins.violin_guard.engine import execution
 
 
@@ -277,7 +278,7 @@ def test_launch_accounting_retry_does_not_double_charge_or_tick(tmp_path, monkey
             raise OSError("simulated runtime replace failure")
         return original_atomic_json(path, data)
 
-    monkeypatch.setattr(execution.state, "atomic_json", fail_first_runtime_write)
+    monkeypatch.setattr(runtime, "atomic_json", fail_first_runtime_write)
     with pytest.raises(OSError, match="runtime replace failure"):
         execution.state.commit_execution_start(
             eng, "nmap 10.0.0.1", "recon", "PT-001", "execution-1"
