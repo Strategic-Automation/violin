@@ -114,7 +114,7 @@ Follow [docs/BENCHMARKS.md](docs/BENCHMARKS.md). Inspect available options with
 in PowerShell and Bash after replacing the quoted placeholders:
 
 ```text
-uv run python -m benchmark.run --target "<authorized-local-target-url>" --provider "<provider>" --api-base "<api-base-url>" --model "<model-id>" --target-isolation-id "<immutable-image-digest-or-reset-id>"
+uv run python -m benchmark.run --target "https://duck-store.escape.tech" --provider "openrouter" --api-base "https://openrouter.ai/api/v1" --model "<model-id>" --target-isolation-id "escape-duck-store-online:<UTC-launch-timestamp>"
 ```
 
 - Use an authorized target with a recorded reset/snapshot identity; pin the
