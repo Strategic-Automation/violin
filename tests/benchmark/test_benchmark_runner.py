@@ -12,6 +12,7 @@ from benchmark.run import (
     _run_manifest,
     _scope_for_target,
     init_benchmark_engagement,
+    main,
     parse_args,
 )
 
@@ -32,6 +33,27 @@ def test_benchmark_runner_does_not_select_model_or_provider_defaults() -> None:
     assert args.model == ""
     assert args.provider == ""
     assert args.api_base == ""
+
+
+def test_benchmark_runner_passes_explicit_provider_to_hermes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "benchmark.run",
+            "--dry-run",
+            "--eng-dir",
+            str(tmp_path / "engagement"),
+            "--model",
+            "xiaomi/mimo-v2.6-pro",
+            "--provider",
+            "openrouter",
+        ],
+    )
+
+    assert main() == 0
+    assert "--provider openrouter" in capsys.readouterr().out
 
 
 def test_run_manifest_uses_explicit_source_metadata_without_git(
@@ -64,6 +86,23 @@ def test_run_manifest_fails_closed_when_source_metadata_is_missing(
     )
     assert manifest["source"]["git_commit"] == "unknown"
     assert manifest["source"]["git_dirty"] is False
+
+
+def test_run_manifest_marks_online_instance_identity_as_not_a_reset(
+    tmp_path: Path,
+) -> None:
+    identity = "escape-duck-store-online:2026-09-27T07:22:03Z"
+    manifest = _run_manifest(
+        parse_args(["--target-isolation-id", identity]),
+        tmp_path / "run-1",
+        public_key=b"public",
+        started_at="2026-09-27T07:22:03+00:00",
+    )
+
+    assert manifest["target_isolation"]["snapshot_or_reset_id"] == identity
+    assert manifest["target_isolation"]["reason"] == (
+        "mutable hosted instance; timestamp identifies a run, not a reset"
+    )
 
 
 def test_hermes_environment_forwards_only_selected_provider_key(

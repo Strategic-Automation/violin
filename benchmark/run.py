@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Automated Hermes profile benchmark runner for OpenAI-compatible providers.
-
-Executes Hermes non-interactively using the target profile against a benchmark lab target,
-manages engagement state, and evaluates it only when the private evaluator is present.
-"""
+"""Run Hermes non-interactively against the benchmark target and score its output."""
 
 import argparse
 import hashlib
@@ -118,7 +114,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--target-isolation-id",
         default="",
-        help="Immutable snapshot/reset identifier supplied by the target orchestrator",
+        help="Target identity, e.g. escape-duck-store-online:<UTC launch time> (not a reset)",
     )
     parser.add_argument(
         "--json-out",
@@ -211,9 +207,13 @@ def _run_manifest(
         "target_isolation": {
             "declared": bool(isolation_id),
             "snapshot_or_reset_id": isolation_id or None,
-            "reason": None
-            if isolation_id
-            else "no immutable target snapshot/reset identity was supplied",
+            "reason": (
+                "mutable hosted instance; timestamp identifies a run, not a reset"
+                if isolation_id.startswith("escape-duck-store-online:")
+                else "no target identity was supplied"
+                if not isolation_id
+                else None
+            ),
         },
         "model": args.model,
         "provider": args.provider,
@@ -293,8 +293,8 @@ def main() -> int:
         cmd.extend(["-s", args.skill])
     if args.model:
         cmd.extend(["-m", args.model])
-    # A custom base URL is supplied through the child environment. Model
-    # selection remains an explicit operator input or Hermes configuration.
+    if args.provider:
+        cmd.extend(["--provider", args.provider])
 
     print(f"\nExecution Command: {' '.join(cmd)}")
 
