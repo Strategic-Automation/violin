@@ -286,7 +286,7 @@ def main() -> int:
         "-q",
         f"/goal Perform an exhaustive authorized security assessment of {args.target} using the engagement in {eng_dir.resolve()}. "
         "Test every in-scope obligation and submit one finding per confirmed vulnerability — never bundle distinct flaws into one finding. "
-        "Follow the pentest skill and its references end-to-end. "
+        "Follow the pentest skill and its references end-to-end; route every target request, including scripted traffic, through `violin_exec` or `violin_exec_burst`. "
         "Record any tool friction, guard errors, or framework bugs you encounter in state/framework_feedback.md.",
     ]
     if args.skill:

@@ -53,7 +53,9 @@ def test_benchmark_runner_passes_explicit_provider_to_hermes(
     )
 
     assert main() == 0
-    assert "--provider openrouter" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "--provider openrouter" in output
+    assert "route every target request, including scripted traffic, through `violin_exec`" in output
 
 
 def test_run_manifest_uses_explicit_source_metadata_without_git(
