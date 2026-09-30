@@ -1,5 +1,26 @@
 # Changelog
 
+## 4.0.0 (Unreleased)
+
+### Breaking changes
+
+- Require Hermes 0.21.5 or later. The container pins Hermes v2026.9.24 to commit f97608f178d1ffeca59860195ab7da295f7c8e5f and runs it in a supported Python 3.13 environment.
+- Version engagement runtime state and bind loaded skills to their delivered content. Start a new engagement when moving from Violin 3.3; existing engagement state is not migrated.
+
+### Fixed
+
+- Authenticate saved finding proof with explicitly cited receipts, scope each command receipt to its own outputs, and preserve authentication for identical-byte rewrites.
+- Keep burst review and bootstrap state updates atomic, explain denied burst slot accounting, and allow an exact repeat after a failed execution.
+- Provision research and discovery tools in the container, resolve the Kali httpx command correctly, and avoid requiring the optional SecLists archive.
+- Bound coverage-close diagnostics while retaining actionable status, evidence, and key guidance.
+
+### Changed
+
+- Pin benchmark source and runtime metadata, pass provider selection explicitly to Hermes, and keep the persisted Hermes model/provider defaults intact.
+- Require at least 15 of 20 confirmed findings together with complete coverage, methodology, and a comparable benchmark protocol.
+- Defer container browser provisioning until redirect and subresource scope enforcement is available.
+- Remove obsolete accounting paths and split runtime, skill-receipt, and test modules into cohesive units.
+
 ## 3.3.4
 
 ### Fixed
