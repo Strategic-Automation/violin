@@ -232,10 +232,22 @@ def record_semantic_review(
                 "reason": "five technique no-progress reviews without a pivot or evidence",
             }
         data["findings"] = max(recorded_findings, int(data.get("findings") or 0))
+        warning = total_stuck >= 3
+        locked = bool(data.get("lock"))
         return {
             "count": count,
-            "warning": total_stuck >= 3,
-            "locked": bool(data.get("lock")),
+            "warning": warning,
+            "locked": locked,
+            "warning_reason": (
+                f"{total_stuck} unproductive reviews remain across techniques." if warning else ""
+            ),
+            "next_action": (
+                "Record a research attempt and pivot techniques, or capture new decisive evidence."
+                if locked
+                else "Pivot to another technique or capture new evidence."
+                if warning
+                else ""
+            ),
         }
 
     return mutate_json(path, record)

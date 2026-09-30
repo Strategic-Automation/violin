@@ -128,3 +128,23 @@ def test_new_finding_resets_a_counter_that_re_cited_evidence_grew(tmp_path) -> N
     result = _review(tmp_path, outcome="reviewed", evidence_paths=shared)
     assert result["count"] == 0
     assert state.semantic_lock(tmp_path) is None
+
+
+def test_semantic_warning_explains_advisory_and_locked_recovery(tmp_path) -> None:
+    for _ in range(3):
+        advisory = _review(tmp_path)
+    assert advisory["warning"]
+    assert not advisory["locked"]
+    assert "3 unproductive reviews" in advisory["warning_reason"]
+    assert "Pivot" in advisory["next_action"]
+
+    for _ in range(2):
+        locked = _review(tmp_path)
+    assert locked["locked"]
+    assert "research attempt" in locked["next_action"]
+
+    recovered = _review(tmp_path, evidence_paths=["evidence/recon/new.txt"])
+    assert not recovered["warning"]
+    assert not recovered["locked"]
+    assert recovered["warning_reason"] == ""
+    assert recovered["next_action"] == ""

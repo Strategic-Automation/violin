@@ -13,6 +13,7 @@
 - Keep burst review and bootstrap state updates atomic, explain denied burst slot accounting, and allow an exact repeat after a failed execution.
 - Provision research and discovery tools in the container, resolve the Kali httpx command correctly, and avoid requiring the optional SecLists archive.
 - Bound coverage-close diagnostics while retaining actionable status, evidence, and key guidance.
+- Explain semantic no-progress warnings and distinguish advisory pivots from active-lock recovery.
 
 ### Changed
 
