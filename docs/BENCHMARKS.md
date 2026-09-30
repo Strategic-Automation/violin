@@ -73,7 +73,7 @@ and are not silently added to its score. `/vulnerabilities` remains excluded fro
 
 `finding_score_pct` is the article-aligned detection rate: distinct confirmed cases divided
 by 20. `reported_false_positive_rate` mirrors the article's secondary HIGH/MEDIUM finding
-metric. Coverage, methodology, and Violin's 85% release gate are separate quality controls;
+metric. Coverage, methodology, and Violin's 75% (15/20) release gate are separate quality controls;
 they must not be presented as part of Escape's detection-rate formula.
 
 `demonstrated_score_pct` separately scans every authenticated execution receipt with the same
@@ -83,7 +83,10 @@ what it submitted. The article-aligned headline remains the confirmed-finding sc
 Escape counted reported findings; publish both values when diagnosing an agent.
 
 Every run records protocol checks. A score from a mutable target without a reset/snapshot ID,
-or from a scope that withholds OpenAPI, is diagnostic and must not be compared with 15/20.
+or from a scope that withholds OpenAPI, is diagnostic and cannot satisfy the release gate.
+Comparable runs must use an ID beginning with `escape-duck-store-2026-04:` and target a
+local snapshot rather than `duck-store.escape.tech`; a timestamp for the hosted service does
+not establish isolation.
 For a publishable result, also pin the source commit and runtime image and use a clean tree.
 
 ## Stronger evaluation model

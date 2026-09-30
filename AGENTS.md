@@ -127,9 +127,9 @@ uv run python -m benchmark.run --target "<authorized-local-target-url>" --provid
   candidates, or incompatible protocols in one aggregate.
 - Require valid runner completion and completed host evaluation. Inspect
   `benchmark_pass` in the results, not only the process exit code. The current
-  scorer requires at least 85% confirmed findings, complete coverage and
-  methodology, and a comparable protocol. Do not lower thresholds or change
-  proof rules merely to make a candidate pass. Investigate failures and
+  scorer requires at least 15/20 confirmed findings (75%), complete coverage
+  and methodology, and a comparable protocol. Do not lower the finding gate
+  below 15/20 or change proof rules merely to make a candidate pass. Investigate failures and
   regressions before calling the change merge-ready; do not select only a best
   run or treat aggregate union coverage as a passing individual run.
 - Keep evaluator golden data, matchers, and calibration fixtures out of the

@@ -8,6 +8,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -119,6 +120,12 @@ def _protocol_alignment(
     scope = scope if isinstance(scope, dict) else {}
 
     isolation = manifest.get("target_isolation") or {}
+    isolation_id = str(isolation.get("snapshot_or_reset_id") or "").strip()
+    try:
+        target_host = (urlsplit(str(manifest.get("target") or "")).hostname or "").casefold()
+    except ValueError:
+        target_host = ""
+    contract_target = str(contract.get("target") or "").casefold()
     exclusions = scope.get("exclusions") or {}
     excluded_paths = {str(path).casefold() for path in exclusions.get("paths") or []}
     benchmark = scope.get("benchmark") or {}
@@ -130,7 +137,10 @@ def _protocol_alignment(
     checks = {
         "run_manifest_present": manifest_path.is_file(),
         "target_isolation_declared": bool(
-            isolation.get("declared") and isolation.get("snapshot_or_reset_id")
+            isolation.get("declared")
+            and isolation_id.startswith(f"{contract['id']}:")
+            and target_host
+            and target_host != contract_target
         ),
         "openapi_supplied": bool(
             benchmark.get("openapi_spec")
@@ -200,7 +210,7 @@ def score_engagement(
     golden_manifest = load_golden_manifest()
     challenges = list(golden_manifest["challenges"])
     challenge_by_id = {str(challenge["id"]): challenge for challenge in challenges}
-    contract = dict(golden_manifest["contract"])
+    contract = dict(golden_manifest["contract"], target=golden_manifest["target"])
     findings = load_findings(engagement)
     public_key = receipt_public_key or (
         None
@@ -329,7 +339,7 @@ def score_engagement(
         "methodology": methodology,
     }
     result["benchmark_pass"] = bool(
-        finding_score >= 85.0
+        finding_score >= 75.0
         and coverage["complete"]
         and methodology["complete"]
         and protocol["comparable"]

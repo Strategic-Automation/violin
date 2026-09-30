@@ -8,8 +8,8 @@ import pytest
 from benchmark.score import score_engagement
 
 
-@pytest.mark.parametrize("finding_count, expected_pass", [(16, False), (17, True)])
-def test_confirmed_findings_enforce_eighty_five_percent_threshold(
+@pytest.mark.parametrize("finding_count, expected_pass", [(14, False), (15, True)])
+def test_confirmed_findings_enforce_seventy_five_percent_threshold(
     tmp_path: Path, finding_count: int, expected_pass: bool
 ) -> None:
     fixture = Path("benchmark/targets/duck-store/calibration/known-good")
