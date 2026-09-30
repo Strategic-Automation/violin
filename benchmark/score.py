@@ -329,7 +329,7 @@ def score_engagement(
         "methodology": methodology,
     }
     result["benchmark_pass"] = bool(
-        finding_score >= 75.0
+        finding_score >= 85.0
         and coverage["complete"]
         and methodology["complete"]
         and protocol["comparable"]

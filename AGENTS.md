@@ -114,15 +114,12 @@ Follow [docs/BENCHMARKS.md](docs/BENCHMARKS.md). Inspect available options with
 in PowerShell and Bash after replacing the quoted placeholders:
 
 ```text
-uv run python -m benchmark.run --target "https://duck-store.escape.tech" --provider "openrouter" --api-base "https://openrouter.ai/api/v1" --model "<model-id>" --target-isolation-id "escape-duck-store-online:<UTC-launch-timestamp>"
+uv run python -m benchmark.run --target "<authorized-local-target-url>" --provider "<provider>" --api-base "<api-base-url>" --model "<model-id>" --target-isolation-id "<immutable-image-digest-or-reset-id>"
 ```
 
-- Use an authorized target with a recorded reset/snapshot identity; pin the
-  source revision, runtime image, model/provider, and settings. Reset isolated
-  targets between independent runs. For this operator-approved hosted Duck Store
-  target, label each run `escape-duck-store-online:<UTC-start>`, append every
-  observed reset time, and disclose that the target is mutable. Do not rely on
-  the runner's hosted default without explicit operator approval.
+- Use an authorized isolated target, reset between independent runs, and pin the
+  target identity, source revision, runtime image, model/provider, and settings.
+  Never rely on the runner's default hosted target for merge evidence.
 - Compare the candidate with its `dev` baseline under the same conditions. Use
   at least three independent runs per revision; report all runs and failures,
   mean pass@1, variation, pass@k/pass^k, and per-case regressions. Use
@@ -130,10 +127,9 @@ uv run python -m benchmark.run --target "https://duck-store.escape.tech" --provi
   candidates, or incompatible protocols in one aggregate.
 - Require valid runner completion and completed host evaluation. Inspect
   `benchmark_pass` in the results, not only the process exit code. The current
-  scorer requires at least 75% confirmed findings (15/20), complete coverage and
-  methodology, and a comparable protocol. Keep all four requirements enabled.
-  Do not alter proof rules or relax remaining checks to make a candidate pass.
-  Investigate failures and
+  scorer requires at least 85% confirmed findings, complete coverage and
+  methodology, and a comparable protocol. Do not lower thresholds or change
+  proof rules merely to make a candidate pass. Investigate failures and
   regressions before calling the change merge-ready; do not select only a best
   run or treat aggregate union coverage as a passing individual run.
 - Keep evaluator golden data, matchers, and calibration fixtures out of the
