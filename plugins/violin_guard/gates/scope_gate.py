@@ -213,8 +213,9 @@ def check_scope_authorization(scope: dict[str, Any] | None, phase: Phase) -> Sco
             f"phase {phase.value} is not permitted by scope.rules_of_engagement.allowed_actions "
             f"(current allowed_actions: [{current_str}]). "
             f"Recognized mappings: [{mapped_str}]. Unrecognized entries: [{unknown_str}]. "
-            f"Select and add one of the following valid action strings for {phase.value} to "
-            f"rules_of_engagement.allowed_actions in scope/scope.yaml (one of: [{formatted_options}])"
+            f"Stop and request operator approval before changing scope/scope.yaml. "
+            f"An approved amendment to rules_of_engagement.allowed_actions must explicitly "
+            f"authorize {phase.value} (one of: [{formatted_options}]); do not widen your own scope."
         )
     return result
 

@@ -77,13 +77,19 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                         "coverage_obligations"
                     ) or []
                     evaluation = evaluate_dispositions(entries, obligations=obligations)
+                    existing_keys = {str(key).strip().lower() for key in entries}
+                    absent_obligations = [
+                        obligation
+                        for obligation in evaluation.missing_obligations
+                        if obligation not in existing_keys
+                    ]
                     unresolved_coverage = [
                         f"{obligation} (no coverage-matrix cell)"
-                        for obligation in evaluation.missing_obligations
+                        for obligation in absent_obligations
                     ]
                     unresolved_coverage.extend(evaluation.entry_errors)
                     unresolved_coverage.extend(evaluation.unrecognized_entries)
-                    first_missing = next(iter(evaluation.missing_obligations), None)
+                    first_missing = next(iter(absent_obligations), None)
                     if unresolved_coverage:
                         hints = [
                             "how to fix: each obligation needs a coverage-matrix cell",

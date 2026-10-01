@@ -78,6 +78,17 @@ def test_credential_stuffing_does_not_match_hydra_by_substring() -> None:
     assert not any("forbidden" in error for error in result.errors)
 
 
+def test_scope_denial_requires_operator_approval_for_amendment() -> None:
+    scope = {"rules_of_engagement": {"allowed_actions": ["recon"]}}
+    result = check_scope_authorization(scope, Phase.PRIVESC)
+
+    assert result.errors
+    message = " ".join(result.errors)
+    assert "request operator approval" in message
+    assert "do not widen your own scope" in message
+    assert scope == {"rules_of_engagement": {"allowed_actions": ["recon"]}}
+
+
 def test_runtime_command_rejects_scope_substitution(tmp_path: Path) -> None:
     engagement = tmp_path / "engagement"
     assert bootstrap.init_engagement(engagement, host="10.10.10.10") == 0
@@ -110,3 +121,54 @@ def test_command_scope_diagnostic_uses_canonical_path_without_mutation(tmp_path:
 
     assert any(str(scope_path.resolve()) in warning for warning in result.warnings)
     assert scope_path.read_bytes() == original_scope
+
+
+def test_parenthetical_scope_actions_are_permitted() -> None:
+    from plugins.violin_guard.core.engagement.phases import Phase
+    from plugins.violin_guard.gates.command import check_scope_authorization
+
+    scope = {
+        "rules_of_engagement": {
+            "allowed_actions": ["exploit validation (in-scope, non-destructive)"],
+            "forbidden_actions": [],
+        }
+    }
+    res = check_scope_authorization(scope, Phase.EXPLOITATION)
+    assert not res.errors
+
+
+def test_vulnerability_research_permits_vuln_research_phase() -> None:
+    from plugins.violin_guard.core.engagement.phases import Phase
+    from plugins.violin_guard.gates.command import check_scope_authorization
+
+    scope = {
+        "rules_of_engagement": {
+            "allowed_actions": ["vulnerability research"],
+            "forbidden_actions": [],
+        }
+    }
+    res = check_scope_authorization(scope, Phase.VULN_RESEARCH)
+    assert not res.errors
+
+
+def test_scope_authorization_error_message_provides_selection_list() -> None:
+    from plugins.violin_guard.core.engagement.phases import Phase
+    from plugins.violin_guard.gates.command import check_scope_authorization
+
+    scope = {
+        "rules_of_engagement": {
+            "allowed_actions": ["vulnerability scanning"],
+            "forbidden_actions": [],
+        }
+    }
+    res = check_scope_authorization(scope, Phase.VULN_RESEARCH)
+    assert len(res.errors) == 1
+    err = res.errors[0]
+    assert "scope/scope.yaml" in err
+    assert (
+        "An approved amendment to rules_of_engagement.allowed_actions must explicitly authorize VULN_RESEARCH"
+        in err
+    )
+    assert "'vulnerability research'" in err
+    assert "'cve-research'" in err
+    assert "current allowed_actions: ['vulnerability scanning']" in err
