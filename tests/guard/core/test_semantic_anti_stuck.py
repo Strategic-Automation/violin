@@ -136,12 +136,14 @@ def test_semantic_warning_explains_advisory_and_locked_recovery(tmp_path) -> Non
     assert advisory["warning"]
     assert not advisory["locked"]
     assert "3 unproductive reviews" in advisory["warning_reason"]
+    assert "separate from the batch sync lock" in advisory["warning_reason"]
     assert "Pivot" in advisory["next_action"]
 
     for _ in range(2):
         locked = _review(tmp_path)
     assert locked["locked"]
     assert "research attempt" in locked["next_action"]
+    assert "Semantic-progress warnings and locks" in locked["warning_reason"]
 
     recovered = _review(tmp_path, evidence_paths=["evidence/recon/new.txt"])
     assert not recovered["warning"]

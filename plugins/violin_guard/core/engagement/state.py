@@ -239,7 +239,10 @@ def record_semantic_review(
             "warning": warning,
             "locked": locked,
             "warning_reason": (
-                f"{total_stuck} unproductive reviews remain across techniques." if warning else ""
+                f"{total_stuck} unproductive reviews remain across techniques. "
+                "Semantic-progress warnings and locks are separate from the batch sync lock."
+                if warning
+                else ""
             ),
             "next_action": (
                 "Record a research attempt and pivot techniques, or capture new decisive evidence."

@@ -130,12 +130,13 @@ def test_json_evidence_still_requires_receipt_authentication(tmp_path: Path) -> 
     response = engagement / "evidence/vuln-research/response.json"
     response.parent.mkdir(parents=True)
     response.write_text('{"ok": true}', encoding="utf-8")
-    with pytest.raises(ValueError, match="authenticated by an execution receipt"):
+    with pytest.raises(ValueError, match="authenticated by an execution receipt") as error:
         findings._verified_evidence_files(
             engagement,
             ["evidence/vuln-research/response.json"],
             set(),
         )
+    assert "unbound evidence: 'evidence/vuln-research/response.json'" in str(error.value)
 
 
 def test_resubmitting_a_finding_updates_one_record(

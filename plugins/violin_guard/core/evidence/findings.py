@@ -142,7 +142,7 @@ def _verified_evidence_files(
                 raise _stale_evidence_error([normalized])
             raise ValueError(
                 "evidence_paths must be authenticated by an execution receipt cited in "
-                "receipt_paths; include the receipt that sealed each saved file"
+                f"receipt_paths; unbound evidence: {normalized!r}; include the receipt that sealed this file"
             )
         valid.append(normalized)
     return valid

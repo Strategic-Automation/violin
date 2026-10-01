@@ -192,7 +192,7 @@ def test_evidence_from_another_receipt_must_cite_that_receipt(tmp_path: Path) ->
     )
     second_path = _write_receipt(engagement, "second", second_receipt)
 
-    with pytest.raises(ValueError, match="receipt_paths; include the receipt"):
+    with pytest.raises(ValueError, match="unbound evidence: 'evidence/recon/second.txt'"):
         findings.submit_finding(
             engagement,
             title="Both files needed",
