@@ -49,68 +49,47 @@ jobs:
       - name: Sync Dependencies
         run: uv sync --dev
 
-      - name: Install Hermes
-        env:
-          HERMES_COMMIT: f97608f178d1ffeca59860195ab7da295f7c8e5f
-        run: |
-          HERMES_SOURCE="$RUNNER_TEMP/hermes-agent"
-          HERMES_VENV="$RUNNER_TEMP/hermes-venv"
-          git init "$HERMES_SOURCE"
-          git -C "$HERMES_SOURCE" remote add origin https://github.com/NousResearch/hermes-agent.git
-          git -C "$HERMES_SOURCE" fetch --depth 1 origin "$HERMES_COMMIT"
-          git -C "$HERMES_SOURCE" checkout --detach FETCH_HEAD
-          cd "$RUNNER_TEMP"
-          uv venv "$HERMES_VENV" --python 3.13
-          uv pip install --python "$HERMES_VENV/bin/python" --editable "$HERMES_SOURCE"
-          "$HERMES_VENV/bin/hermes" --version
-          echo "$HERMES_VENV/bin" >> "$GITHUB_PATH"
-
       # ── Tier 1 gate: scorer calibration must pass before live run ──
       - name: Scorer Calibration Gate
         run: |
           uv run pytest tests/benchmark/test_benchmark_runner.py -v
 
-      # ── Tier 2: live LLM benchmark (only if Hermes is available) ──
-      - name: Check Hermes Availability
-        id: hermes_check
-        run: |
-          if command -v hermes &>/dev/null; then
-            echo "available=true" >> $GITHUB_OUTPUT
-          else
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "::warning::Hermes not installed. Skipping live benchmark. Scorer calibration passed."
-          fi
+      # ── Tier 2: live LLM benchmark in the pinned Violin runtime image ──
+      - name: Build Violin Runtime Image
+        run: docker build --tag violin-benchmark:${GITHUB_SHA} .
 
-      - name: Run Live Benchmark
-        if: steps.hermes_check.outputs.available == 'true'
+      - name: Run Live Benchmark in Docker
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MODEL_ID: ${{ inputs.model }}
           TARGET_URL: ${{ inputs.target_url }}
           TARGET_ISOLATION_ID: ${{ inputs.target_isolation_id }}
         run: |
-          uv run python benchmark/run.py \
+          mkdir -p engagements
+          docker run --rm \
+            --name "violin-benchmark-${GITHUB_RUN_ID}" \
+            --env OPENROUTER_API_KEY \
+            --mount "type=bind,source=$PWD/engagements,target=/violin/engagements" \
+            "violin-benchmark:${GITHUB_SHA}" \
+            uv run --no-dev python -m benchmark.run \
+            --eng-dir "/violin/engagements/benchmark-run-${GITHUB_RUN_ID}" \
             --model "$MODEL_ID" \
             --provider openrouter \
             --api-base https://openrouter.ai/api/v1 \
             --target "$TARGET_URL" \
             --target-isolation-id "$TARGET_ISOLATION_ID" \
-            --json-out benchmark_results.json \
-            --markdown-out benchmark_summary.md
-
-      - name: Score-Only Fallback (No Hermes)
-        if: steps.hermes_check.outputs.available == 'false'
-        run: |
-          uv run python -m benchmark.score \
-            --calibrate known-good \
-            --json-out benchmark_results.json \
-            --markdown-out benchmark_summary.md
+            --json-out "/violin/engagements/benchmark_results.json" \
+            --markdown-out "/violin/engagements/benchmark_summary.md"
+          docker run --rm --network none \
+            --mount "type=bind,source=$PWD/engagements,target=/results,readonly" \
+            "violin-benchmark:${GITHUB_SHA}" \
+            /bin/sh -lc 'jq -e ".benchmark_pass == true" /results/benchmark_results.json'
 
       - name: Publish Step Summary
         if: always()
         run: |
-          if [ -f benchmark_summary.md ]; then
-            cat benchmark_summary.md >> $GITHUB_STEP_SUMMARY
+          if [ -f engagements/benchmark_summary.md ]; then
+            cat engagements/benchmark_summary.md >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload Benchmark Artifacts
@@ -119,6 +98,6 @@ jobs:
         with:
           name: hermes-benchmark-results-${{ github.run_id }}
           path: |
-            benchmark_results.json
-            benchmark_summary.md
+            engagements/benchmark_results.json
+            engagements/benchmark_summary.md
             engagements/benchmark-run-*/
