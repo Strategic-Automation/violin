@@ -48,6 +48,7 @@ class FindingRecordModel(FindingClaimModel):
     finding_id: str = Field(..., pattern=r"^FIND-\d{3,}$")
     status: Literal["validated"] = "validated"
     execution_ids: list[str] = Field(default_factory=list)
+    receipt_paths: list[str] = Field(..., min_length=1)
     evidence_paths: list[str] = Field(default_factory=list)
     created_at: str = ""
     engagement_id: str = ""

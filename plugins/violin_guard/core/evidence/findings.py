@@ -16,7 +16,6 @@ from ..results import GuardResult
 from . import finding_reports
 
 FINDINGS_PATH = Path("evidence/findings.jsonl")
-_SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")
 
 
 def _store_path(engagement: Path) -> Path:
@@ -266,6 +265,7 @@ def submit_finding(
             "created_at": previous.get("created_at") or datetime.now(UTC).isoformat(),
             "engagement_id": engagement.name,
         }
+        record = schemas.FindingRecordModel.model_validate(record).model_dump()
         if index is None:
             records.append(record)
         else:
@@ -285,21 +285,17 @@ def submit_finding(
         }
 
 
-def _validated_records(engagement: Path) -> list[dict[str, Any]]:
-    return load_findings(engagement)
-
-
 def generate_findings_yaml(eng_dir: str | Path, *, force: bool = False) -> Path:
     engagement = state.resolve_eng_dir(eng_dir)
     return finding_reports.generate_findings_yaml(
-        engagement, _validated_records(engagement), force=force
+        engagement, load_findings(engagement), force=force
     )
 
 
 def generate_report_md(eng_dir: str | Path, *, target: str, force: bool = False) -> Path:
     engagement = state.resolve_eng_dir(eng_dir)
     return finding_reports.generate_report_md(
-        engagement, _validated_records(engagement), target=target, force=force
+        engagement, load_findings(engagement), target=target, force=force
     )
 
 

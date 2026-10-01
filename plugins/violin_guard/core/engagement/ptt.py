@@ -34,7 +34,7 @@ __all__ = [
 _PAREN_SPLIT_RE = re.compile(r"\s*\(")
 _TASK_ID_RE = re.compile(r"PT-[\w-]+")
 
-# Canonical status tokens the guard accepts without a warning.
+# Canonical status tokens accepted by the guard.
 _VALID_STATUSES = ("[ ]", "[~]", "[x]", "[!]", "[-]")
 
 
@@ -141,8 +141,6 @@ def _ptt_rows(source: str) -> list[tuple[PttTask, int]]:
             cells = _pipe_cells(lines[line_index])
             if len(cells) < 4 or not _TASK_ID_RE.fullmatch(cells[0]):
                 continue
-            if cells[1] not in _VALID_STATUSES or not cells[2]:
-                continue
             rows.append(
                 (
                     PttTask(
@@ -173,7 +171,7 @@ def validate_ptt(tasks: list[PttTask]) -> PttValidationResult:
             active_count += 1
             result.active_task = task.id
         elif task.status not in _VALID_STATUSES:
-            result.add_warning(f"{task.id}: non-standard status '{task.status}'")
+            result.add_error(f"{task.id}: non-standard status '{task.status}'")
 
         if not task.title.strip():
             result.add_error(f"{task.id}: empty title")
@@ -199,18 +197,13 @@ def find_active_task(tasks: list[PttTask]) -> PttTask | None:
 def task_matches_phase(task: PttTask, phase: Phase | str) -> bool:
     """Whether a task belongs to the requested execution phase."""
     requested = normalize_phase(phase) if isinstance(phase, str) else phase
-    expected = Phase.EXPLOITATION if requested is Phase.POST_EXPLOITATION else requested
-    return task.phase == expected.value
+    actual = normalize_phase(task.phase)
+    exploitation = {Phase.EXPLOITATION, Phase.POST_EXPLOITATION}
+    return actual == requested or {actual, requested} <= exploitation
 
 
 def update_tasks(path: Path, updates: dict[str, tuple[str, str]]) -> dict[str, PttTask]:
-    """Validate and atomically apply one or more task-row updates.
-
-    The PTT is a human-authored document (prose, multiple tables, headings).
-    This function rewrites only matching row lines and leaves every other
-    line untouched (audit P0: the previous implementation flattened the whole
-    document). Every target and status is validated before the atomic replace.
-    """
+    """Validate and atomically update matching task rows, preserving other Markdown."""
     normalized: dict[str, tuple[str, str]] = {}
     for task_id, (status, note) in updates.items():
         status = status.strip()

@@ -220,13 +220,12 @@ def test_finalization_retry_reuses_terminal_intent_and_history_entry(tmp_path, m
         return original_seal(receipt, engagement)
 
     monkeypatch.setattr(execution_lifecycle, "seal_execution_receipt", fail_first_seal)
-    with pytest.raises(OSError, match="simulated crash"):
-        execution.execute(
-            "echo recover-finalizer",
-            eng_dir=str(eng),
-            phase="recon",
-            timeout_seconds=10,
-        )
+    response = execution.execute(
+        "echo recover-finalizer", eng_dir=str(eng), phase="recon", timeout_seconds=10
+    )
+    assert response["executed"] is True
+    assert response["status"] == "failed_to_finalize"
+    assert "simulated crash" in response["finalization_error"]
 
     manifest_path = next((eng / "evidence" / "executions").glob("*.json"))
     incomplete = json.loads(manifest_path.read_text(encoding="utf-8"))

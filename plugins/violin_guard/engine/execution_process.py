@@ -44,7 +44,6 @@ from .execution_support import (
 def _execute(
     command: str,
     *,
-    eng_dir: str,
     phase: str,
     backend: str = "auto",
     timeout_seconds: Any = DEFAULT_TIMEOUT,
@@ -53,7 +52,6 @@ def _execute(
     docker_container: str = "kali-pentest",
     ptt_task_id: str = "",
     argv: list[str] | None = None,
-    evidence_outputs: list[str] | None = None,
     background: bool = False,
     sync_reservation: str | None = None,
     resolved_engagement: Path,
@@ -121,6 +119,7 @@ def _execute(
     proc: subprocess.Popen | None = None
     failure_status = ""
     accounting: tuple[int, bool, int, bool] | None = None
+    accounting_error = ""
 
     try:
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
@@ -221,37 +220,42 @@ def _execute(
         stderr_path.write_text(f"executor error: {exc}\n", encoding="utf-8")
 
     if proc is not None and accounting is None:
-        accounting = _commit_started_command(
-            engagement,
-            command,
-            phase,
-            ptt_task_id,
-            execution_id,
-            sync_reservation,
+        try:
+            accounting = _commit_started_command(
+                engagement, command, phase, ptt_task_id, execution_id, sync_reservation
+            )
+        except Exception as exc:
+            accounting_error = str(exc)
+    try:
+        receipt = _finalize_execution(
+            engagement=engagement,
+            manifest_path=manifest_path,
+            exit_code=exit_code,
+            status_name=failure_status
+            or (
+                "cancelled"
+                if cancelled
+                else "timed_out"
+                if timed_out
+                else "output_limited"
+                if output_limited
+                else "completed"
+            ),
+            timed_out=timed_out,
+            cancelled=cancelled,
+            output_limited=output_limited,
+            accounting_error=accounting_error,
         )
-    receipt = _finalize_execution(
-        engagement=engagement,
-        manifest_path=manifest_path,
-        exit_code=exit_code,
-        status_name=failure_status
-        or (
-            "cancelled"
-            if cancelled
-            else "timed_out"
-            if timed_out
-            else "output_limited"
-            if output_limited
-            else "completed"
-        ),
-        timed_out=timed_out,
-        cancelled=cancelled,
-        output_limited=output_limited,
-    )
+    except Exception as exc:
+        receipt = {**record, "status": "failed_to_finalize", "finalization_error": str(exc)}
     output_locks.release()
     remaining, consumed = (
         (accounting[0], accounting[1])
         if accounting is not None
-        else (state.sync_credit_remaining(str(engagement), phase), False)
+        else (
+            0 if accounting_error else state.sync_credit_remaining(str(engagement), phase),
+            False,
+        )
     )
 
     return {
@@ -289,7 +293,6 @@ def execute(
     try:
         return _execute(
             command,
-            eng_dir=eng_dir,
             phase=phase,
             backend=backend,
             timeout_seconds=timeout_seconds,
@@ -298,7 +301,6 @@ def execute(
             docker_container=docker_container,
             ptt_task_id=ptt_task_id,
             argv=argv,
-            evidence_outputs=evidence_outputs,
             background=background,
             sync_reservation=sync_reservation,
             resolved_engagement=engagement,

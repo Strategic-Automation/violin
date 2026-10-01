@@ -37,6 +37,7 @@ def _finalize_execution(
     timed_out: bool = False,
     cancelled: bool = False,
     output_limited: bool = False,
+    accounting_error: str = "",
 ) -> dict[str, Any]:
     """Persist a terminal intent, then idempotently publish history and receipt.
 
@@ -50,6 +51,9 @@ def _finalize_execution(
         record = state.read_json(manifest_path)
         if record.get("history_recorded"):
             return record
+        if accounting_error:
+            record["accounting_pending"] = True
+            record["accounting_error"] = accounting_error
         terminal = record.get("terminal")
         if not isinstance(terminal, dict):
             if record.get("cancel_requested"):
@@ -234,6 +238,17 @@ def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
         record = state.read_json(manifest_path)
     if not record:
         raise ValueError("execution not found")
+    if record.get("accounting_pending"):
+        try:
+            _reconcile_execution_accounting(engagement, record)
+        except Exception as exc:
+            return {**record, "accounting_error": str(exc)}
+        with state.lock_file(manifest_path):
+            record = state.read_json(manifest_path)
+            record["accounting_pending"] = False
+            record.pop("accounting_error", None)
+            record = seal_execution_receipt(record, engagement)
+            state.atomic_json(manifest_path, record)
     if record.get("status") == "finalizing":
         terminal = record.get("terminal") or {}
         return _finalize_execution(
@@ -308,7 +323,7 @@ def _reconcile_execution_accounting(engagement: Path, record: dict[str, Any]) ->
     """Finish launch accounting after a process identity was durably recorded."""
     execution_id = str(record.get("execution_id") or "")
     ptt_task_id = str(record.get("ptt_task_id") or "")
-    if not execution_id or not ptt_task_id:
+    if not execution_id:
         return
     _commit_started_command(
         engagement,

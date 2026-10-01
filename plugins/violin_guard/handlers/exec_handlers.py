@@ -93,11 +93,18 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             ),
         )
         execution_status = res.pop("status", None)
-        if not res.get("executed"):
+        if (
+            not res.get("executed")
+            or res.get("accounting_pending")
+            or res.get("finalization_error")
+        ):
             return _json(
                 "execution_failed",
                 execution_status=execution_status,
-                error=res.get("stderr_preview") or "process failed to start",
+                error=res.get("accounting_error")
+                or res.get("finalization_error")
+                or res.get("stderr_preview")
+                or "process failed to start",
                 **res,
             )
         hint = (

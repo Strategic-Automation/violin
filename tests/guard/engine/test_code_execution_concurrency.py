@@ -31,7 +31,8 @@ def test_execute_code_requires_tool_call_id_before_writing_intent(tmp_path) -> N
     assert not list((eng / "evidence" / "executions").glob("*-execute-code.json"))
 
 
-def test_execute_code_mismatched_completion_abandons_without_result(tmp_path) -> None:
+@pytest.mark.parametrize("mismatch", ["source", "session"])
+def test_execute_code_mismatched_completion_abandons_without_result(tmp_path, mismatch) -> None:
     class ResultMustNotBeInspected:
         marker = "must-not-be-persisted"
 
@@ -55,10 +56,12 @@ def test_execute_code_mismatched_completion_abandons_without_result(tmp_path) ->
     with pytest.raises(ValueError, match="does not match its intent receipt"):
         _post_tool_call_hook(
             tool_name="execute_code",
-            args={"code": source + "# changed after dispatch\n"},
+            args={
+                "code": source + "# changed after dispatch\n" if mismatch == "source" else source
+            },
             result=ResultMustNotBeInspected(),
             duration_ms=9,
-            session_id="test",
+            session_id="different" if mismatch == "session" else "test",
             tool_call_id="mismatched-completion",
         )
 
@@ -69,6 +72,14 @@ def test_execute_code_mismatched_completion_abandons_without_result(tmp_path) ->
     assert abandoned["command"] == intent["command"]
     assert "result" not in abandoned
     assert "must-not-be-persisted" not in manifest.read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="intent receipt is missing"):
+        _post_tool_call_hook(
+            tool_name="execute_code",
+            args={"code": source},
+            result="must not be credited",
+            session_id="test",
+            tool_call_id="mismatched-completion",
+        )
 
 
 def test_parallel_execute_code_calls_correlate_by_tool_call_id(tmp_path) -> None:
