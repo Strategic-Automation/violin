@@ -47,7 +47,9 @@ jobs:
 
       # ── Tier 2: live LLM benchmark in the pinned Violin runtime image ──
       - name: Build Violin Runtime Image
-        run: docker build --tag violin-benchmark:${GITHUB_SHA} .
+        run: |
+          test -z "$(git status --porcelain)"
+          docker build --tag violin-benchmark:${GITHUB_SHA} .
 
       - name: Run Live Benchmark in Docker
         env:
@@ -57,11 +59,15 @@ jobs:
           TARGET_ISOLATION_ID: ${{ inputs.target_isolation_id }}
         run: |
           mkdir -p engagements
+          RUNTIME_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "violin-benchmark:${GITHUB_SHA}")
           docker run --rm \
             --name "violin-benchmark-${GITHUB_RUN_ID}" \
             --env OPENROUTER_API_KEY \
+            --env "VIOLIN_SOURCE_COMMIT=${GITHUB_SHA}" \
+            --env VIOLIN_SOURCE_DIRTY=false \
+            --env "VIOLIN_BENCHMARK_IMAGE_DIGEST=${RUNTIME_IMAGE_ID}" \
             --mount "type=bind,source=$PWD/engagements,target=/violin/engagements" \
-            "violin-benchmark:${GITHUB_SHA}" \
+            "$RUNTIME_IMAGE_ID" \
             uv run --no-dev python -m benchmark.run \
             --eng-dir "/violin/engagements/benchmark-run-${GITHUB_RUN_ID}" \
             --model "$MODEL_ID" \

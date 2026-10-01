@@ -18,6 +18,7 @@ def test_live_benchmark_scores_runtime_output_in_separate_docker_image() -> None
     assert "uv run pytest tests/benchmark -q" in test_image
     assert "--calibrate known-good" in test_image
     assert "--calibrate known-bad" in test_image
+    assert "git jq" in test_image
     dockerignore = (workflow_path.parents[2] / ".dockerignore").read_text(encoding="utf-8")
     assert ".pytest-*" in dockerignore
     assert ".benchmark-live" in dockerignore
@@ -28,6 +29,11 @@ def test_live_benchmark_scores_runtime_output_in_separate_docker_image() -> None
     assert "--env OPENROUTER_API_KEY" in live_run
     assert "--target-isolation-id" in live_run
     assert "benchmark.score" not in live_run
+    assert 'test -z "$(git status --porcelain)"' in run_steps["Build Violin Runtime Image"]
+    assert '"VIOLIN_SOURCE_COMMIT=${GITHUB_SHA}"' in live_run
+    assert "VIOLIN_SOURCE_DIRTY=false" in live_run
+    assert '"VIOLIN_BENCHMARK_IMAGE_DIGEST=${RUNTIME_IMAGE_ID}"' in live_run
+    assert '"$RUNTIME_IMAGE_ID"' in live_run
 
     evaluator = run_steps["Evaluate and Gate Live Benchmark in Docker"]
     assert "docker run --rm --network none" in evaluator
