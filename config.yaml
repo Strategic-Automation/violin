@@ -137,8 +137,10 @@ approvals:
     - "*dd if=* of=/dev/*"
     - "*:(){ :|& };:*"
     - "*chmod -R 777 /*"
-    - "*curl*|*sh*"
-    - "*wget*|*sh*"
+    - "*curl*|*sh[ ]*"
+    - "*curl*|*sh"
+    - "*wget*|*sh[ ]*"
+    - "*wget*|*sh"
 
 security:
   redact_secrets: true
