@@ -9,6 +9,7 @@ auth.json
 node_modules
 __pycache__
 .pytest_cache
+.pytest-*
 .ruff_cache
 cache
 engagements

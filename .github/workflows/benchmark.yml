@@ -71,10 +71,20 @@ jobs:
             --target-isolation-id "$TARGET_ISOLATION_ID" \
             --json-out "/violin/engagements/benchmark_results.json" \
             --markdown-out "/violin/engagements/benchmark_summary.md"
+      - name: Evaluate and Gate Live Benchmark in Docker
+        run: |
           docker run --rm --network none \
-            --mount "type=bind,source=$PWD/engagements,target=/results,readonly" \
-            "violin-benchmark:${GITHUB_SHA}" \
-            /bin/sh -lc 'jq -e ".benchmark_pass == true" /results/benchmark_results.json'
+            --env GITHUB_RUN_ID \
+            --mount "type=bind,source=$PWD/engagements,target=/results" \
+            "violin-tests:${GITHUB_SHA}" \
+            /bin/sh -lc '
+              jq -e ".runner.valid == true" "/results/benchmark-run-${GITHUB_RUN_ID}/results.json" >/dev/null &&
+              uv run python -m benchmark.score \
+                "/results/benchmark-run-${GITHUB_RUN_ID}" \
+                --json-out /results/benchmark_results.json \
+                --markdown-out /results/benchmark_summary.md >/dev/null &&
+              jq -e ".benchmark_pass == true" /results/benchmark_results.json
+            '
 
       - name: Publish Step Summary
         if: always()
@@ -88,7 +98,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: hermes-benchmark-results-${{ github.run_id }}
-          path: |
-            engagements/benchmark_results.json
-            engagements/benchmark_summary.md
-            engagements/benchmark-run-*/
+          path: engagements/benchmark_summary.md
