@@ -21,6 +21,10 @@
 - Provision research and discovery tools in the container, resolve the Kali httpx command correctly, and avoid requiring the optional SecLists archive.
 - Bound coverage-close diagnostics while retaining actionable status, evidence, and key guidance.
 - Explain semantic no-progress warnings and distinguish advisory pivots from active-lock recovery.
+- Bound foreground execution to Hermes deadlines and report commands skipped after a burst stops.
+- Reject malformed task and hypothesis bindings before mutation, preserve inline hypothesis placeholders, and reset no-progress streaks after productive reviews.
+- Keep proof preflight consistent with execution normalization and explain coverage and scope-denial remedies.
+- Narrow remote-shell deny patterns so read-only tool discovery remains usable while curl and wget shell pipelines stay blocked.
 
 ### Changed
 
@@ -28,6 +32,8 @@
 - Require at least 15 of 20 confirmed findings together with complete coverage, methodology, and a comparable benchmark protocol.
 - Defer container browser provisioning until redirect and subresource scope enforcement is available.
 - Remove obsolete accounting paths and split runtime, skill-receipt, and test modules into cohesive units.
+- Run benchmark validation and calibration in Docker, keep the evaluator outside the agent image, and publish sanitized aggregate summaries.
+- Support Violin 4.x; end maintenance of the 3.x release line.
 
 ## 3.3.4
 
