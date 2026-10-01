@@ -106,7 +106,13 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                         close_errors.append(message + ". " + " ".join(hints))
 
         unresolved = [
-            f"H-{item.id}" for item in board if item.canonical_status() in {"Candidate", "Likely"}
+            f"H-{item.id}"
+            for item in board
+            if item.canonical_status() == "Candidate"
+            or (
+                item.canonical_status() == "Likely"
+                and not (item.cve_research.strip() and item.exploit_research.strip())
+            )
         ]
         if unresolved:
             close_errors.append("unresolved hypotheses: " + ", ".join(unresolved))
