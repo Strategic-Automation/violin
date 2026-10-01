@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from ..core.engagement import hypotheses, state
-from ..core.skills.skill_policy import routable_context, skill_spec, validate_skill_selection
+from ..core.skills.skill_catalog import skill_spec
+from ..core.skills.skill_policy import routable_context, validate_skill_selection
 from ..core.skills.skill_receipts import (
     complete_delivery,
     get_binding,
