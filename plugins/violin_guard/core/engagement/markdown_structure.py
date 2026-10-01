@@ -45,7 +45,8 @@ def iter_markdown_blocks(source: str) -> Iterator[MarkdownBlock]:
         elif token.type in {"fence", "code_block", "html_block"}:
             yield MarkdownBlock("protected", start, end)
         elif token.type == "inline" and any(
-            child.type == "html_inline" for child in token.children or ()
+            child.type == "html_inline" and child.content.startswith("<!--")
+            for child in token.children or ()
         ):
             # Inline HTML comments have no independent block token. Protect their
             # containing source line so comment examples cannot become records.
