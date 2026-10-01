@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core.commands.http_proof import normalize_http_proof_flags
 from ..core.commands.targets import (
     check_scope_targets,
     is_research_host,
@@ -126,8 +127,8 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     destructive_result = check_destructive_patterns(args.command)
     result.errors.extend(destructive_result.errors)
 
-    # 2c2. HTTP proof flags (review): `-i`/`-sv` so receipts are decisive
-    proof_result = check_http_proof_flags(args.command)
+    # Review the same status capture the executor will use, without rewriting authorization input.
+    proof_result = check_http_proof_flags(normalize_http_proof_flags(args.command))
     result.warnings.extend(proof_result.warnings)
     result.infos.extend(proof_result.infos)
 
