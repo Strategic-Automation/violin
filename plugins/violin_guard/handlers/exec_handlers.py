@@ -243,6 +243,7 @@ def handle_exec_burst(args: dict, **kwargs):
 
     results = []
     executed = 0
+    stopped_after_index = None
     try:
         for item in preflight:
             idx = item["index"]
@@ -275,6 +276,7 @@ def handle_exec_burst(args: dict, **kwargs):
                 if res.get("executed"):
                     executed += 1
                 if res.get("exit_code", 0) != 0 and not continue_on_error:
+                    stopped_after_index = idx
                     break
             except Exception as exc:  # noqa: BLE001
                 if not continue_on_error:
@@ -283,6 +285,8 @@ def handle_exec_burst(args: dict, **kwargs):
                         executed=executed,
                         results=results + [{"index": idx, "command": cmd, "error": str(exc)}],
                         error=str(exc),
+                        stopped_after_index=idx,
+                        skipped=len(preflight) - idx,
                     )
                 results.append({"index": idx, "command": cmd, "error": str(exc)})
     finally:
@@ -290,8 +294,16 @@ def handle_exec_burst(args: dict, **kwargs):
             state.release_reserved_sync_credit(eng_dir, reservation_id)
 
     return _json(
-        "batch_complete",
+        "batch_stopped" if stopped_after_index is not None else "batch_complete",
         executed=executed,
         results=results,
         review_required=any(item.get("review_required") for item in results),
+        **(
+            {
+                "stopped_after_index": stopped_after_index,
+                "skipped": len(preflight) - len(results),
+            }
+            if stopped_after_index is not None
+            else {}
+        ),
     )
