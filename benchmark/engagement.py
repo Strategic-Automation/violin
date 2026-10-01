@@ -130,6 +130,7 @@ def init_benchmark_engagement(eng_dir: Path, target: str) -> None:
         "recon",
         "recon/active",
         "recon/passive",
+        "recon/tech",
         "vuln-research",
         "exploitation",
         "post-exploitation",

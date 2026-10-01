@@ -145,3 +145,11 @@ def test_initialized_hypothesis_board_has_no_evaluator_fields(tmp_path: Path) ->
     board = (engagement / "hypotheses.md").read_text(encoding="utf-8").casefold()
     assert "challenge" not in board
     assert "golden" not in board
+
+
+def test_initialized_recon_evidence_matches_the_playbook_layout(tmp_path: Path) -> None:
+    engagement = tmp_path / "engagement"
+    init_benchmark_engagement(engagement, "https://duck-store.escape.tech")
+
+    for subphase in ("passive", "tech", "active"):
+        assert (engagement / "evidence" / "recon" / subphase).is_dir()
