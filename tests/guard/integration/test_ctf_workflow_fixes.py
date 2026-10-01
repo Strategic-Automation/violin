@@ -160,6 +160,11 @@ def test_batch_review_with_running_background_tunnel(ctf_eng):
 
 def test_stale_active_ptt_task_auto_superseded(ctf_eng, monkeypatch):
     """Verify starting a new task when no pending batch exists auto-supersedes the prior task."""
+    (ctf_eng / "hypotheses.md").write_text(
+        "# Hypotheses\n\n## Active Theories\n\n### H-001: Service exploit candidate\n"
+        "- Status: Candidate\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         ptt_handlers.HermesSkillViewAdapter,
         "view",

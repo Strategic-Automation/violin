@@ -163,7 +163,9 @@ def record_semantic_review(
     next_action: str,
     next_technique: str,
 ) -> dict[str, Any]:
-    """Track evidence-backed technique-pivot progress and the anti-stuck lock.
+    """Track evidence-backed progress and advisory anti-stuck state.
+
+    This state supplies execution hints; it does not block commands or batch sync.
 
     The anti-stuck lock is meant to catch *circular* recon — repeating the same
     path without learning.  It therefore counts evidence *novelty*, not raw
@@ -215,6 +217,11 @@ def record_semantic_review(
             }
         )
         entries[key] = entry
+        if novel:
+            # Counts are the current no-progress streak, not lifetime history.
+            # Keep prior outcomes/evidence while clearing stale technique counts.
+            for prior in entries.values():
+                prior["count"] = 0
         lock = data.get("lock") or {}
         # Whole-engagement stuck signal: total no-progress reviews across all
         # keys. Novel evidence resets it, so a busy CTF loop stays open; a pivot

@@ -22,7 +22,7 @@ def _review(eng, **changes):
     return state.record_semantic_review(eng, **values)
 
 
-def test_semantic_reviews_warn_then_hard_lock_and_require_research_pivot(tmp_path) -> None:
+def test_semantic_reviews_warn_then_research_pivot_clears_advisory_lock(tmp_path) -> None:
     for _ in range(2):
         assert not _review(tmp_path)["warning"]
     assert _review(tmp_path)["warning"]
@@ -150,3 +150,42 @@ def test_semantic_warning_explains_advisory_and_locked_recovery(tmp_path) -> Non
     assert not recovered["locked"]
     assert recovered["warning_reason"] == ""
     assert recovered["next_action"] == ""
+
+
+def test_decisive_progress_clears_historical_streak_across_techniques(tmp_path) -> None:
+    for _ in range(5):
+        _review(tmp_path)
+    assert state.semantic_lock(tmp_path)
+    _record_finding(tmp_path, "New finding from another technique")
+    recovered = _review(tmp_path, hypothesis_id="H-002", technique="different-technique")
+    assert recovered["count"] == 0
+    assert not recovered["warning"]
+    assert not recovered["locked"]
+    saved = json.loads((tmp_path / "state/semantic-progress.json").read_text(encoding="utf-8"))
+    previous = saved["entries"]["PT-010|H-001|pentest|directory-enumeration"]
+    assert previous["count"] == 0
+    assert previous["outcome"] == "no_progress"
+    for number in range(1, 6):
+        later = _review(
+            tmp_path,
+            hypothesis_id="H-002",
+            technique="different-technique",
+            next_technique="different-technique",
+        )
+        assert later["count"] == number
+        assert later["warning"] is (number >= 3)
+        assert later["locked"] is (number >= 5)
+
+
+def test_validated_outcome_clears_other_technique_streaks(tmp_path) -> None:
+    for _ in range(5):
+        _review(tmp_path)
+    recovered = _review(tmp_path, hypothesis_id="H-002", technique="proof", outcome="validated")
+    assert not recovered["warning"]
+    assert not recovered["locked"]
+    next_review = _review(
+        tmp_path, hypothesis_id="H-002", technique="proof", next_technique="proof"
+    )
+    assert next_review["count"] == 1
+    assert not next_review["warning"]
+    assert not next_review["locked"]

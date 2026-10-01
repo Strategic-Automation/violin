@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..core.engagement import ptt, state
+from ..core.engagement import hypotheses, ptt, state
 from ..core.engagement.phases import requires_hypothesis
+from ..core.skills.skill_policy import routable_context
 from ..core.skills.skill_receipts import bind_task
 from ..core.skills.skill_view import HermesSkillViewAdapter
 from .base import (
     _eng_path,
-    _hypothesis_route_context,
     _json,
     _prepare_skill_reservation_payload,
     _serialize_errors,
@@ -105,8 +105,14 @@ def _validate_record_ptt_inputs(
     vulnerability_class = ""
     candidate_source = ""
     if hypothesis_id:
-        vulnerability_class, candidate_source = _hypothesis_route_context(
-            args["eng_dir"], hypothesis_id
+        record = hypotheses.find_by_id(_eng_path(args["eng_dir"]) / "hypotheses.md", hypothesis_id)
+        if record is None:
+            raise ValueError(
+                f"hypothesis {hypothesis_id!r} does not exist; create it with "
+                "violin_record_hypothesis before binding the PTT task"
+            )
+        vulnerability_class, candidate_source = routable_context(
+            record.vuln_class, record.candidate_source
         )
 
     return task, note, skill, technique, phase, hypothesis_id, vulnerability_class, candidate_source
