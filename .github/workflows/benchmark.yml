@@ -19,9 +19,8 @@ permissions:
 
 # ---------------------------------------------------------------------------
 # Tier 1: Scorer Calibration (fast, deterministic, no Hermes/LLM needed)
-#   Runs on every push/PR via the main ci.yml workflow (pytest includes
-#   tests/benchmark/test_benchmark_runner.py which exercises known-good and
-#   known-bad calibration fixtures).
+#   Runs on every push/PR via the main ci.yml workflow. This manual workflow
+#   repeats benchmark tests and both scorer calibration fixtures in Docker.
 #
 # Tier 2: Live LLM Benchmark (manual trigger, needs Hermes + OpenRouter key)
 #   This workflow — triggered via workflow_dispatch only.
@@ -36,23 +35,15 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Sync Dependencies
-        run: uv sync --dev
-
       # ── Tier 1 gate: scorer calibration must pass before live run ──
+      - name: Build Test Image
+        run: docker build --file Dockerfile.test --tag violin-tests:${GITHUB_SHA} .
+
       - name: Scorer Calibration Gate
         run: |
-          uv run pytest tests/benchmark/test_benchmark_runner.py -v
+          docker run --rm --network none \
+            --name "violin-calibration-${GITHUB_RUN_ID}" \
+            "violin-tests:${GITHUB_SHA}"
 
       # ── Tier 2: live LLM benchmark in the pinned Violin runtime image ──
       - name: Build Violin Runtime Image

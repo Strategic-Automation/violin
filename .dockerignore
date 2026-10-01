@@ -12,3 +12,5 @@ __pycache__
 .ruff_cache
 cache
 engagements
+.benchmark-live
+.benchmark-live/**

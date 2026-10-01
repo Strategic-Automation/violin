@@ -11,6 +11,14 @@ def test_live_benchmark_runs_in_docker_and_requires_host_evaluation() -> None:
     steps = workflow["jobs"]["benchmark"]["steps"]
     run_steps = {step["name"]: step.get("run", "") for step in steps}
 
+    calibration = run_steps["Scorer Calibration Gate"]
+    assert "docker run --rm --network none" in calibration
+    assert "uv run pytest" not in calibration
+    test_image = (workflow_path.parents[2] / "Dockerfile.test").read_text(encoding="utf-8")
+    assert "uv run pytest tests/benchmark -q" in test_image
+    assert "--calibrate known-good" in test_image
+    assert "--calibrate known-bad" in test_image
+
     live_run = run_steps["Run Live Benchmark in Docker"]
     assert "docker run" in live_run
     assert "uv run --no-dev python -m benchmark.run" in live_run
