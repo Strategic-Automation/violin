@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from ..core.engagement import ptt, state
@@ -16,6 +17,24 @@ from .base import (
 )
 
 _MAX_COMMAND_FILE_BYTES = 64 * 1024
+
+
+def _foreground_deadline() -> float | None:
+    """Leave time for termination and receipts before Hermes abandons dispatch."""
+    try:
+        from agent.deadline import resolve_timeout
+    except ImportError:
+        deadlines = [420.0]  # Standalone administrative CLI has no Hermes runtime.
+    else:
+        concurrent = resolve_timeout(
+            "tools.concurrent_batch", default=420.0, env_var="HERMES_CONCURRENT_TOOL_TIMEOUT_S"
+        )
+        deadlines = [
+            concurrent,
+            resolve_timeout("tools.sequential_call", default=concurrent),
+        ]
+    finite = [deadline for deadline in deadlines if deadline is not None]
+    return time.monotonic() + min(finite) - 30 if finite else None
 
 
 def _commands_from_file(eng_dir: str, value: str) -> list[str]:
@@ -59,6 +78,21 @@ def _execution_allowed(exit_code: int) -> bool:
 
 @_serialize_errors
 def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, **kwargs):
+    background = (
+        bool(args.get("background", False))
+        if _internal_background is None
+        else bool(_internal_background)
+    )
+    if not background:
+        deadline = _foreground_deadline()
+        if (
+            deadline is not None
+            and args.get("timeout_seconds", 180) + 10 >= deadline - time.monotonic()
+        ):
+            raise ValueError(
+                "foreground timeout exceeds Hermes' tool deadline; use violin_exec with "
+                "background=true and violin_exec_status/violin_exec_cancel for long commands"
+            )
     result = _check_command_internal(args)
     exit_code = result.exit_code()
     if not _execution_allowed(exit_code):
@@ -86,11 +120,7 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             evidence_outputs=args.get("evidence_outputs", []),
             ptt_task_id=active_task.id if active_task else "",
             argv=_internal_argv,
-            background=(
-                bool(args.get("background", False))
-                if _internal_background is None
-                else bool(_internal_background)
-            ),
+            background=background,
         )
         execution_status = res.pop("status", None)
         if (
@@ -133,6 +163,7 @@ def handle_exec_cancel(args: dict, **kwargs):
 @_serialize_errors
 def handle_exec_burst(args: dict, **kwargs):
     """Authorize the complete bounded batch before executing any command."""
+    deadline = _foreground_deadline()
     eng_dir = args.get("eng_dir", "")
     phase = args.get("phase", "")
     scope = args.get("scope", "")
@@ -249,13 +280,25 @@ def handle_exec_burst(args: dict, **kwargs):
             idx = item["index"]
             cmd = item["command"]
             review_warnings = item["review_warnings"]
+            remaining = (
+                timeout_seconds if deadline is None else int(deadline - time.monotonic()) - 10
+            )
+            if remaining <= 0:
+                return _json(
+                    "batch_stopped",
+                    executed=executed,
+                    results=results,
+                    stopped_after_index=idx - 1,
+                    skipped=len(preflight) - len(results),
+                    reason="Hermes foreground budget exhausted; use tracked background execution for long commands",
+                )
             try:
                 res = execution.execute(
                     command=cmd,
                     eng_dir=eng_dir,
                     phase=phase,
                     backend=backend,
-                    timeout_seconds=timeout_seconds,
+                    timeout_seconds=min(timeout_seconds, remaining),
                     cwd=cwd,
                     label=label,
                     evidence_outputs=burst_evidence_outputs,

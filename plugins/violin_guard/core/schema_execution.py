@@ -42,7 +42,12 @@ class ExecArgsModel(BaseModel):
     target: str = Field(..., description="Explicit primary target host/IP/URL")
     session_id: str = ""
     backend: Literal["auto", "local", "docker"] = "auto"
-    timeout_seconds: int = Field(180, ge=1, le=1800)
+    timeout_seconds: int = Field(
+        180,
+        ge=1,
+        le=1800,
+        description="Command deadline; long foreground timeouts require background=true and tracked status/cancel",
+    )
     cwd: str = Field("", description="Engagement-relative working directory")
     label: str = ""
     evidence_outputs: list[str] = Field(
@@ -98,7 +103,12 @@ class ExecBurstArgsModel(BaseModel):
     )
     label: str = Field("", description="optional batch label for logging")
     backend: Literal["auto", "local", "docker"] = "auto"
-    timeout_seconds: int = Field(180, ge=1, le=1800)
+    timeout_seconds: int = Field(
+        180,
+        ge=1,
+        le=1800,
+        description="Per-command maximum, clamped to Hermes' remaining foreground batch budget; exhausted budgets stop before the next command",
+    )
     cwd: str = Field("", description="Engagement-relative working directory")
     continue_on_error: bool = False
     evidence_outputs: list[str] = Field(
