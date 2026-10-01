@@ -126,7 +126,10 @@ files are included in the signed receipt digest set.
 
 Run both fixtures before trusting a scorer revision:
 
-```powershell
+Run scorer calibration and aggregation inside the separate `Dockerfile.test` image
+with `--network none`. The commands in those sections run inside that container.
+
+```bash
 uv run python -m benchmark.score --calibrate known-good
 uv run python -m benchmark.score --calibrate known-bad
 ```
@@ -136,13 +139,16 @@ checks the evaluator only; it is not a live benchmark result.
 
 ## Live run
 
-```powershell
-uv run python -m benchmark.run \
-  --target http://localhost:<published-port> \
-  --provider <provider> \
-  --api-base <openai-compatible-base-url> \
-  --model <model-id> \
-  --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
+Run Hermes in the runtime Docker image. Build from a clean checkout, record its
+commit, and obtain the immutable image ID with `docker image inspect`. Supply the
+existing provenance fields explicitly because the image intentionally excludes Git.
+Set `OPENROUTER_API_KEY` in the launch environment; `--env` passes it without baking
+it into the image. Replace the quoted placeholders below; the single line works in
+PowerShell and Bash. The target must be a fresh authorized snapshot on the selected
+Docker network, and the run directory must already exist.
+
+```text
+docker run --rm --network "<benchmark-network>" --env OPENROUTER_API_KEY --env "VIOLIN_SOURCE_COMMIT=<clean-source-commit>" --env VIOLIN_SOURCE_DIRTY=false --env "VIOLIN_BENCHMARK_IMAGE_DIGEST=<immutable-runtime-image-id>" --mount "type=bind,source=<absolute-run-directory>,target=/violin/engagements/run" "<immutable-runtime-image-id>" uv run --no-dev python -m benchmark.run --eng-dir /violin/engagements/run --target "http://<isolated-target-host>:<port>" --provider openrouter --api-base https://openrouter.ai/api/v1 --model "<model-id>" --target-isolation-id "escape-duck-store-2026-04:<target-image-digest-or-reset-id>"
 ```
 
 A publishable run needs an immutable target identity, signed receipts, structured findings,
@@ -158,7 +164,7 @@ run-to-run — agentic benchmarks show pass@1 swings of several points even at
 temperature 0 (On Randomness in Agentic Evals, arXiv 2602.07150). A one-off score is
 therefore not a capability measure; report the distribution instead:
 
-```powershell
+```bash
 uv run python -m benchmark.aggregate --glob "engagements/benchmark-run-*" \
   --json-out benchmark/results/aggregate.json \
   --markdown-out benchmark/results/aggregate.md
