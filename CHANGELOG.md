@@ -32,6 +32,8 @@
 
 ### Changed
 
+- Open saved evidence before batch review and claim promotion, including relevant sections omitted from a truncated view.
+
 - Pin benchmark source and runtime metadata, pass provider selection explicitly to Hermes, and keep the persisted Hermes model/provider defaults intact.
 - Require at least 15 of 20 confirmed findings together with complete coverage, methodology, and a comparable benchmark protocol.
 - Defer container browser provisioning until redirect and subresource scope enforcement is available.
