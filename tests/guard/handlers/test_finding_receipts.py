@@ -300,3 +300,37 @@ def test_resubmitting_a_different_vulnerability_keeps_two_records(
         )
 
     assert len(findings.load_findings(engagement)) == 2
+
+
+def test_submit_finding_response_separates_storage_from_claim_review(monkeypatch):
+    from plugins.violin_guard.handlers import finding_handlers
+
+    monkeypatch.setattr(
+        finding_handlers.findings,
+        "submit_finding",
+        lambda *args, **kwargs: {
+            "finding_id": "FIND-001",
+            "status": "validated",
+            "duplicate": False,
+            "receipt_validation": "verified",
+            "warnings": ["evidence warning"],
+        },
+    )
+
+    response = json.loads(
+        finding_handlers.handle_submit_finding(
+            {
+                "eng_dir": "/engagement",
+                "title": "Example finding",
+                "severity": "Low",
+                "summary": "Stored with an authenticated receipt.",
+                "receipt_paths": ["evidence/executions/example.json"],
+            }
+        )
+    )
+
+    assert response["status"] == "ok"
+    assert response["finding_id"] == "FIND-001"
+    assert response["receipt_validation"] == "verified"
+    assert response["evidence_complete"] is False
+    assert response["claim_validation"] == "not_assessed"

@@ -22,7 +22,9 @@ class FindingClaimModel(BaseModel):
             "evidence/executions. Every cited receipt must have a reviewable result; "
             "each evidence_path must be authenticated by a cited receipt. "
             "receipt_validation=verified establishes "
-            "authenticity, not that the vulnerability claim is proven. evidence_complete "
+            "authenticity, not that the vulnerability claim is proven. A submission response "
+            "reports claim_validation=not_assessed; its stored status describes storage, "
+            "not independent claim review. evidence_complete "
             "only reports the HTTP-byte warning heuristic, not semantic proof. Review "
             "the saved request/response and relevant controls before marking a hypothesis Validated."
         ),
