@@ -20,8 +20,8 @@ class FindingClaimModel(BaseModel):
         description=(
             "One to eight engagement-relative signed execution receipt JSON paths beneath "
             "evidence/executions. Every cited receipt must have a reviewable result; "
-            "each evidence_path must be authenticated by a cited receipt. Validation never "
-            "exposes benchmark identities or score. receipt_validation=verified establishes "
+            "each evidence_path must be authenticated by a cited receipt. "
+            "receipt_validation=verified establishes "
             "authenticity, not that the vulnerability claim is proven. evidence_complete "
             "only reports the HTTP-byte warning heuristic, not semantic proof. Review "
             "the saved request/response and relevant controls before marking a hypothesis Validated."
@@ -33,13 +33,13 @@ class FindingClaimModel(BaseModel):
         description=(
             "Optional engagement-relative saved output files under evidence/ that hold the "
             "decisive request/response body (e.g. the exact payload or PII the receipt's "
-            "stdout only references). The scorer reads these as proof."
+            "stdout only references). Cite the saved bytes supporting the vulnerability claim."
         ),
     )
 
 
 class SubmitFindingArgsModel(FindingClaimModel):
-    """Submit a generic receipt-backed finding without evaluator metadata."""
+    """Submit an engagement finding backed by authenticated execution evidence."""
 
     eng_dir: str
 

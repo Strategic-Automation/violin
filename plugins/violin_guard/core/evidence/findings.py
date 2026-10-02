@@ -210,7 +210,7 @@ def submit_finding(
     receipt_paths: list[str],
     evidence_paths: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Persist one generic finding without exposing evaluator challenge metadata."""
+    """Persist one engagement finding with authenticated execution evidence."""
     engagement = state.resolve_eng_dir(eng_dir)
     normalized_receipts = list(
         dict.fromkeys(value.strip() for value in receipt_paths if value.strip())
