@@ -284,10 +284,14 @@ def handle_exec_burst(args: dict, **kwargs):
                 timeout_seconds if deadline is None else int(deadline - time.monotonic()) - 10
             )
             if remaining <= 0:
+                pending = state.get_pending_sync(eng_dir)
                 return _json(
                     "batch_stopped",
                     executed=executed,
                     results=results,
+                    review_required=bool(pending)
+                    or any(item.get("review_required") for item in results),
+                    pending_batch_id=(pending or {}).get("batch_id"),
                     stopped_after_index=idx - 1,
                     skipped=len(preflight) - len(results),
                     reason="Hermes foreground budget exhausted; use tracked background execution for long commands",
@@ -323,11 +327,15 @@ def handle_exec_burst(args: dict, **kwargs):
                     break
             except Exception as exc:  # noqa: BLE001
                 if not continue_on_error:
+                    pending = state.get_pending_sync(eng_dir)
                     return _json(
                         "execution_failed",
                         executed=executed,
                         results=results + [{"index": idx, "command": cmd, "error": str(exc)}],
                         error=str(exc),
+                        review_required=bool(pending)
+                        or any(item.get("review_required") for item in results),
+                        pending_batch_id=(pending or {}).get("batch_id"),
                         stopped_after_index=idx,
                         skipped=len(preflight) - idx,
                     )
@@ -336,11 +344,13 @@ def handle_exec_burst(args: dict, **kwargs):
         if reservation_id:
             state.release_reserved_sync_credit(eng_dir, reservation_id)
 
+    pending = state.get_pending_sync(eng_dir)
     return _json(
         "batch_stopped" if stopped_after_index is not None else "batch_complete",
         executed=executed,
         results=results,
-        review_required=any(item.get("review_required") for item in results),
+        review_required=bool(pending) or any(item.get("review_required") for item in results),
+        pending_batch_id=(pending or {}).get("batch_id"),
         **(
             {
                 "stopped_after_index": stopped_after_index,

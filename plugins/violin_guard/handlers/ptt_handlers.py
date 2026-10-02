@@ -82,7 +82,8 @@ def _validate_record_ptt_inputs(
         raise ValueError("skill and technique are required before a PTT update")
     if pending:
         raise ValueError(
-            "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
+            f"target batch {pending.get('batch_id')} is pending; "
+            "use violin_review_batch instead of violin_record_ptt"
         )
     active = ptt.find_active_task(doc)
     if (args.get("status") or "[~]").strip() == "[~]" and active and active.id != task:

@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Burst responses report pending workflow review from persisted batch state and identify the batch required by PTT updates.
 - Target commands now reject paths into another engagement through the normal single-command and burst guard.
 - PTT task updates no longer advertise ignored review fields; record execution outcomes with `violin_review_batch`. The ignored `research_attempted` batch-review input is removed, while hypothesis research recording remains available.
 - Execution accounting tests and smoke checks use the same retry-safe state transition as the runtime; obsolete state helpers are removed.
