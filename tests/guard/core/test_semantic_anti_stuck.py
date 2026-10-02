@@ -143,6 +143,9 @@ def test_semantic_warning_explains_advisory_and_locked_recovery(tmp_path) -> Non
         locked = _review(tmp_path)
     assert locked["locked"]
     assert "research attempt" in locked["next_action"]
+    for field in ("violin_review_batch", "evidence_paths", "outcome", "next_technique"):
+        assert field in locked["next_action"]
+    assert "prose" in locked["next_action"]
     assert "Semantic-progress warnings and locks" in locked["warning_reason"]
 
     recovered = _review(tmp_path, evidence_paths=["evidence/recon/new.txt"])

@@ -252,9 +252,9 @@ def record_semantic_review(
                 else ""
             ),
             "next_action": (
-                "Record a research attempt and pivot techniques, or capture new decisive evidence."
+                "Use violin_review_batch with new evidence_paths, outcome=validated/rejected, or a different next_technique; prose in note/next_action does not count as new evidence. Record a research attempt before a technique pivot when required."
                 if locked
-                else "Pivot to another technique or capture new evidence."
+                else "Pivot using next_technique or cite new evidence_paths in violin_review_batch; note/next_action prose alone does not establish progress."
                 if warning
                 else ""
             ),
