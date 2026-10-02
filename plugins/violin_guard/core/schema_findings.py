@@ -21,7 +21,10 @@ class FindingClaimModel(BaseModel):
             "One to eight engagement-relative signed execution receipt JSON paths beneath "
             "evidence/executions. Every cited receipt must have a reviewable result; "
             "each evidence_path must be authenticated by a cited receipt. Validation never "
-            "exposes benchmark identities or score."
+            "exposes benchmark identities or score. receipt_validation=verified establishes "
+            "authenticity, not that the vulnerability claim is proven. evidence_complete "
+            "only reports the HTTP-byte warning heuristic, not semantic proof. Review "
+            "the saved request/response and relevant controls before marking a hypothesis Validated."
         ),
     )
     evidence_paths: list[str] = Field(
