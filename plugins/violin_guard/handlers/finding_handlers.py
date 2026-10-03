@@ -21,6 +21,7 @@ def handle_submit_finding(args: dict, **kwargs) -> str:
         "ok",
         finding_id=result["finding_id"],
         status=result["status"],
+        claim_validation="not_assessed",
         duplicate=result["duplicate"],
         receipt_validation=result["receipt_validation"],
         evidence_complete=not warnings,

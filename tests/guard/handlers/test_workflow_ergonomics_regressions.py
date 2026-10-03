@@ -12,7 +12,12 @@ from plugins.violin_guard.core.commands.targets import check_scope_targets
 from plugins.violin_guard.core.engagement import bootstrap, hypotheses, ptt, state
 from plugins.violin_guard.core.engagement.phases import Phase
 from plugins.violin_guard.core.evidence.history import append_history, check_history_staleness
-from plugins.violin_guard.core.skills.skill_receipts import SkillViewResult
+from plugins.violin_guard.core.skills.skill_receipts import (
+    SkillViewResult,
+    get_binding,
+    get_delivery,
+    skill_content_digest,
+)
 from plugins.violin_guard.engine import execution
 from plugins.violin_guard.gates import command
 from plugins.violin_guard.gates.command import (
@@ -113,6 +118,23 @@ def test_missing_scope_blocks_targeted_but_not_untargeted_hypotheses(tmp_path: P
     assert allowed["status"] == "ok"
 
 
+def test_hypothesis_research_flag_still_records_a_research_attempt(tmp_path: Path) -> None:
+    eng = _engagement(tmp_path)
+    result = json.loads(
+        service.handle_record_hypothesis(
+            {
+                "eng_dir": str(eng),
+                "id": "002",
+                "title": "Review prior work",
+                "research_attempted": True,
+            }
+        )
+    )
+    assert result["status"] == "ok"
+    progress = state.read_json(eng / "state" / "semantic-progress.json")
+    assert progress["research_attempts"][-1]["tool"] == "hypothesis_research"
+
+
 def test_wildcard_scope_allows_subdomains(tmp_path: Path) -> None:
     scope = tmp_path / "scope.yaml"
     scope.write_text("targets:\n  domains: ['*.example.test']\n", encoding="utf-8")
@@ -175,6 +197,13 @@ def test_ptt_heading_parenthetical_and_explicit_task_create_close(
         )
     )
     assert created["task_created"] is True
+    binding = get_binding(eng, "PT-900")
+    assert binding is not None
+    digest = skill_content_digest("skill")
+    assert binding["content_digest"] == digest
+    delivery = get_delivery(eng, binding["delivery_id"])
+    assert delivery["content_digest"] == digest
+    assert f"[skill:pentest@{digest}]" in ptt_path.read_text(encoding="utf-8")
     # A fresh session must prepare again; do not rely on cross-task reuse here.
     state.record_session_id(eng, "close-session")
     close_args = {

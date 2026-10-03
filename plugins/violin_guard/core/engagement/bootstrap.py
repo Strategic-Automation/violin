@@ -151,7 +151,7 @@ def _ctf_ptt(host: str) -> str:
 def _seed_coverage_matrix(eng_dir: Path, scope_data: dict) -> None:
     """Pre-key state/coverage-matrix.yaml with the engagement's obligations.
 
-    Reuses the exact seeding shape from benchmark/run.py (lowercased obligation
+    Seeds coverage with the shared engagement shape (lowercased obligation
     keys, ``pending`` status) so a fresh engagement's matrix matches the keys the
     VULN_RESEARCH close gate expects instead of placeholder example paths.
     """

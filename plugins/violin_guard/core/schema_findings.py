@@ -1,0 +1,59 @@
+"""Receipt-backed finding argument and storage models."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class FindingClaimModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1)
+    severity: Literal["Critical", "High", "Medium", "Low", "Info"]
+    summary: str = Field(..., min_length=1)
+    receipt_paths: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=8,
+        description=(
+            "One to eight engagement-relative signed execution receipt JSON paths beneath "
+            "evidence/executions. Every cited receipt must have a reviewable result; "
+            "each evidence_path must be authenticated by a cited receipt. "
+            "receipt_validation=verified establishes "
+            "authenticity, not that the vulnerability claim is proven. A submission response "
+            "reports claim_validation=not_assessed; its stored status describes storage, "
+            "not independent claim review. evidence_complete "
+            "only reports the HTTP-byte warning heuristic, not semantic proof. Review "
+            "the saved request/response and relevant controls before marking a hypothesis Validated."
+        ),
+    )
+    evidence_paths: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description=(
+            "Optional engagement-relative saved output files under evidence/ that hold the "
+            "decisive request/response body (e.g. the exact payload or PII the receipt's "
+            "stdout only references). Cite the saved bytes supporting the vulnerability claim."
+        ),
+    )
+
+
+class SubmitFindingArgsModel(FindingClaimModel):
+    """Submit an engagement finding backed by authenticated execution evidence."""
+
+    eng_dir: str
+
+
+class FindingRecordModel(FindingClaimModel):
+    """Canonical stored finding record."""
+
+    schema_version: Literal[1] = 1
+    finding_id: str = Field(..., pattern=r"^FIND-\d{3,}$")
+    status: Literal["validated"] = "validated"
+    execution_ids: list[str] = Field(default_factory=list)
+    receipt_paths: list[str] = Field(..., min_length=1)
+    evidence_paths: list[str] = Field(default_factory=list)
+    created_at: str = ""
+    engagement_id: str = ""

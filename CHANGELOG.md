@@ -1,5 +1,46 @@
 # Changelog
 
+## 4.0.0 (Unreleased)
+
+### Breaking changes
+
+- Require Hermes 0.21.5 or later. The container pins Hermes v2026.9.24 to commit f97608f178d1ffeca59860195ab7da295f7c8e5f and runs it in a supported Python 3.13 environment.
+- Version engagement runtime state and bind loaded skills to their delivered content. Start a new engagement when moving from Violin 3.3; existing engagement state is not migrated.
+
+### Fixed
+
+- Distinguish receipt authenticity from demonstrated vulnerability proof and require claim-to-evidence review before reporting.
+
+- Burst responses report pending workflow review from persisted batch state and identify the batch required by PTT updates.
+- Target commands now reject paths into another engagement through the normal single-command and burst guard.
+- PTT task updates no longer advertise ignored review fields; record execution outcomes with `violin_review_batch`. The ignored `research_attempted` batch-review input is removed, while hypothesis research recording remains available.
+- Execution accounting tests and smoke checks use the same retry-safe state transition as the runtime; obsolete state helpers are removed.
+- Preserve canonical hypothesis and PTT sections during Markdown updates, normalize hypothesis arguments and vulnerability classes, and explain valid skill choices.
+- Finalize execution receipts safely on retries, keep captured HTTP response bodies intact, and apply a consistent secret-redaction contract.
+- Clarify closeout sequencing, local administrative command admission, and coverage/methodology disposition rules.
+- Reorganize guard code by commands, engagement state, evidence, and skills; avoid repeating heavy release checks after CI runs them separately.
+- Authenticate saved finding proof with explicitly cited receipts, scope each command receipt to its own outputs, and preserve authentication for identical-byte rewrites.
+- Keep burst review and bootstrap state updates atomic, explain denied burst slot accounting, and allow an exact repeat after a failed execution.
+- Provision research and discovery tools in the container, resolve the Kali httpx command correctly, and avoid requiring the optional SecLists archive.
+- Bound coverage-close diagnostics while retaining actionable status, evidence, and key guidance.
+- Explain semantic no-progress warnings and distinguish advisory pivots from active-lock recovery.
+- Bound foreground execution to Hermes deadlines and report commands skipped after a burst stops.
+- Reject malformed task and hypothesis bindings before mutation, preserve inline hypothesis placeholders, and reset no-progress streaks after productive reviews.
+- Keep proof preflight consistent with execution normalization and explain coverage and scope-denial remedies.
+- Narrow remote-shell deny patterns so read-only tool discovery remains usable while curl and wget shell pipelines stay blocked.
+- Initialize the documented reconnaissance technology evidence directory before benchmark execution.
+
+### Changed
+
+- Open saved evidence before batch review and claim promotion, including relevant sections omitted from a truncated view.
+
+- Pin benchmark source and runtime metadata, pass provider selection explicitly to Hermes, and keep the persisted Hermes model/provider defaults intact.
+- Require at least 15 of 20 confirmed findings together with complete coverage, methodology, and a comparable benchmark protocol.
+- Defer container browser provisioning until redirect and subresource scope enforcement is available.
+- Remove obsolete accounting paths and split runtime, skill-receipt, and test modules into cohesive units.
+- Run benchmark validation and calibration in Docker, keep the evaluator outside the agent image, and publish sanitized aggregate summaries.
+- Support Violin 4.x; end maintenance of the 3.x release line.
+
 ## 3.3.4
 
 ### Fixed

@@ -26,10 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     subfinder \
     wordlists \
     dirb \
-    nodejs \
-    npm \
     ripgrep \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3 /usr/bin/python
 
@@ -44,33 +41,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # client stays reachable as `python -m httpx`.
 RUN mkdir -p /root/.local/bin && ln -sf /usr/bin/httpx-toolkit /root/.local/bin/httpx
 
+# ripgrep backs Hermes' `search_files` tool (bounded broad search) and is in the
+# guard's read-only command allowlist, so it is provisioned as tooling rather
+# than pulled in as a browser dependency.
 
-# Install uv package manager & hermes-agent CLI + violin plugin deps.
-# hermes-agent >=0.16 requires Python <3.14 and Kali rolling now ships 3.14,
-# so system pip cannot resolve it — pin the CLI to an isolated uv-managed
-# Python 3.13 environment instead of the distro python.
+# No browser runtime is provisioned here. The previous attempt added nodejs/npm
+# plus a global `agent-browser` install (npm was unpinned, and the download grew
+# the image from 2.56GB to 4.78GB) for a browser whose redirect/subresource
+# scope is not yet enforced (#57) and which was never benchmarked. Do not
+# assume browser tools are absent merely because the CLI is missing: verify
+# runtime registration separately. Revisit provisioning only after #57 lands
+# and the cost and tool exposure are measured.
+
+
+# Install uv and pinned Hermes v0.21.5 into a Python 3.13 environment.
+# The upstream project declares requires-python >=3.11,<3.14; keep the CLI
+# runtime inside that supported range and install the immutable audited source.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:/root/.cargo/bin:/opt/hermes/bin:${PATH}"
 ENV HOME="/root"
-RUN uv venv /opt/hermes --python 3.13 \
+ARG HERMES_TAG=v2026.9.24
+ARG HERMES_COMMIT=f97608f178d1ffeca59860195ab7da295f7c8e5f
+RUN git clone --depth 1 --branch "$HERMES_TAG" https://github.com/NousResearch/hermes-agent.git /opt/hermes-agent \
+    && test "$(git -C /opt/hermes-agent rev-parse HEAD)" = "$HERMES_COMMIT" \
+    && uv venv /opt/hermes --python 3.13 \
     && uv pip install --python /opt/hermes/bin/python \
-        "hermes-agent>=0.18.0,<0.20" \
+        --editable /opt/hermes-agent \
         duckduckgo-search \
         tirith \
         filelock \
         bashlex \
         netaddr \
         yarl
-
-# Browser tooling. The `browser` toolset drives the agent-browser CLI, which
-# is an npm package with its own Chromium download -- neither comes with
-# hermes-agent. Without this step the toolset is enabled but every call fails,
-# so install it here rather than leaving agents to rediscover it (#223).
-# No credentials are written into the image; anything needing a key is passed
-# at runtime via -e.
-RUN npm install -g agent-browser \
-    && agent-browser install --with-deps \
-    && npm cache clean --force
 
 
 
@@ -88,7 +90,7 @@ COPY plugins /violin/plugins/
 COPY skills /violin/skills/
 COPY scripts /violin/scripts/
 COPY assets /violin/assets/
-COPY benchmark/run.py /violin/benchmark/run.py
+COPY benchmark/run.py benchmark/engagement.py /violin/benchmark/
 COPY benchmark/targets/duck-store/scope.yaml benchmark/targets/duck-store/engage.md /violin/benchmark/targets/duck-store/
 
 # The image has no tests/ tree (whitelist above), so pytest must not be

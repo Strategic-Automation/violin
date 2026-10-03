@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from ..core.engagement import ptt, state
@@ -16,6 +17,24 @@ from .base import (
 )
 
 _MAX_COMMAND_FILE_BYTES = 64 * 1024
+
+
+def _foreground_deadline() -> float | None:
+    """Leave time for termination and receipts before Hermes abandons dispatch."""
+    try:
+        from agent.deadline import resolve_timeout
+    except ImportError:
+        deadlines = [420.0]  # Standalone administrative CLI has no Hermes runtime.
+    else:
+        concurrent = resolve_timeout(
+            "tools.concurrent_batch", default=420.0, env_var="HERMES_CONCURRENT_TOOL_TIMEOUT_S"
+        )
+        deadlines = [
+            concurrent,
+            resolve_timeout("tools.sequential_call", default=concurrent),
+        ]
+    finite = [deadline for deadline in deadlines if deadline is not None]
+    return time.monotonic() + min(finite) - 30 if finite else None
 
 
 def _commands_from_file(eng_dir: str, value: str) -> list[str]:
@@ -59,6 +78,21 @@ def _execution_allowed(exit_code: int) -> bool:
 
 @_serialize_errors
 def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, **kwargs):
+    background = (
+        bool(args.get("background", False))
+        if _internal_background is None
+        else bool(_internal_background)
+    )
+    if not background:
+        deadline = _foreground_deadline()
+        if (
+            deadline is not None
+            and args.get("timeout_seconds", 180) + 10 >= deadline - time.monotonic()
+        ):
+            raise ValueError(
+                "foreground timeout exceeds Hermes' tool deadline; use violin_exec with "
+                "background=true and violin_exec_status/violin_exec_cancel for long commands"
+            )
     result = _check_command_internal(args)
     exit_code = result.exit_code()
     if not _execution_allowed(exit_code):
@@ -86,18 +120,21 @@ def handle_exec(args: dict, *, _internal_argv=None, _internal_background=None, *
             evidence_outputs=args.get("evidence_outputs", []),
             ptt_task_id=active_task.id if active_task else "",
             argv=_internal_argv,
-            background=(
-                bool(args.get("background", False))
-                if _internal_background is None
-                else bool(_internal_background)
-            ),
+            background=background,
         )
         execution_status = res.pop("status", None)
-        if not res.get("executed"):
+        if (
+            not res.get("executed")
+            or res.get("accounting_pending")
+            or res.get("finalization_error")
+        ):
             return _json(
                 "execution_failed",
                 execution_status=execution_status,
-                error=res.get("stderr_preview") or "process failed to start",
+                error=res.get("accounting_error")
+                or res.get("finalization_error")
+                or res.get("stderr_preview")
+                or "process failed to start",
                 **res,
             )
         hint = (
@@ -126,6 +163,7 @@ def handle_exec_cancel(args: dict, **kwargs):
 @_serialize_errors
 def handle_exec_burst(args: dict, **kwargs):
     """Authorize the complete bounded batch before executing any command."""
+    deadline = _foreground_deadline()
     eng_dir = args.get("eng_dir", "")
     phase = args.get("phase", "")
     scope = args.get("scope", "")
@@ -236,18 +274,35 @@ def handle_exec_burst(args: dict, **kwargs):
 
     results = []
     executed = 0
+    stopped_after_index = None
     try:
         for item in preflight:
             idx = item["index"]
             cmd = item["command"]
             review_warnings = item["review_warnings"]
+            remaining = (
+                timeout_seconds if deadline is None else int(deadline - time.monotonic()) - 10
+            )
+            if remaining <= 0:
+                pending = state.get_pending_sync(eng_dir)
+                return _json(
+                    "batch_stopped",
+                    executed=executed,
+                    results=results,
+                    review_required=bool(pending)
+                    or any(item.get("review_required") for item in results),
+                    pending_batch_id=(pending or {}).get("batch_id"),
+                    stopped_after_index=idx - 1,
+                    skipped=len(preflight) - len(results),
+                    reason="Hermes foreground budget exhausted; use tracked background execution for long commands",
+                )
             try:
                 res = execution.execute(
                     command=cmd,
                     eng_dir=eng_dir,
                     phase=phase,
                     backend=backend,
-                    timeout_seconds=timeout_seconds,
+                    timeout_seconds=min(timeout_seconds, remaining),
                     cwd=cwd,
                     label=label,
                     evidence_outputs=burst_evidence_outputs,
@@ -268,23 +323,40 @@ def handle_exec_burst(args: dict, **kwargs):
                 if res.get("executed"):
                     executed += 1
                 if res.get("exit_code", 0) != 0 and not continue_on_error:
+                    stopped_after_index = idx
                     break
             except Exception as exc:  # noqa: BLE001
                 if not continue_on_error:
+                    pending = state.get_pending_sync(eng_dir)
                     return _json(
                         "execution_failed",
                         executed=executed,
                         results=results + [{"index": idx, "command": cmd, "error": str(exc)}],
                         error=str(exc),
+                        review_required=bool(pending)
+                        or any(item.get("review_required") for item in results),
+                        pending_batch_id=(pending or {}).get("batch_id"),
+                        stopped_after_index=idx,
+                        skipped=len(preflight) - idx,
                     )
                 results.append({"index": idx, "command": cmd, "error": str(exc)})
     finally:
         if reservation_id:
             state.release_reserved_sync_credit(eng_dir, reservation_id)
 
+    pending = state.get_pending_sync(eng_dir)
     return _json(
-        "batch_complete",
+        "batch_stopped" if stopped_after_index is not None else "batch_complete",
         executed=executed,
         results=results,
-        review_required=any(item.get("review_required") for item in results),
+        review_required=bool(pending) or any(item.get("review_required") for item in results),
+        pending_batch_id=(pending or {}).get("batch_id"),
+        **(
+            {
+                "stopped_after_index": stopped_after_index,
+                "skipped": len(preflight) - len(results),
+            }
+            if stopped_after_index is not None
+            else {}
+        ),
     )

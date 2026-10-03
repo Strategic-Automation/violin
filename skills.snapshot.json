@@ -1,5 +1,5 @@
 {
-  "hermes_version": "0.18.0",
+  "hermes_version": "0.21.5",
   "skills": [
     {
       "identifier": "bundled:skills/pentest",

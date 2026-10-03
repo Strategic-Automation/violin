@@ -76,3 +76,19 @@ def test_coverage_close_error_keeps_the_exact_key_rule(tmp_path: Path) -> None:
     message = str(failure.value)
     assert "EXACT lowercased obligation strings" in message
     assert "First missing:" in message
+
+
+def test_invalid_existing_coverage_cells_are_reported_once(tmp_path: Path) -> None:
+    engagement = _engagement(tmp_path)
+    cells = "".join(f"  '{item.lower()}': {{status: pending}}\n" for item in OBLIGATIONS)
+    (engagement / "state" / "coverage-matrix.yaml").write_text(
+        "coverage:\n" + cells, encoding="utf-8"
+    )
+    with pytest.raises(ValueError) as failure:
+        _validate_phase_exit(engagement, "PT-030", "[x]")
+
+    message = str(failure.value)
+    assert "no coverage-matrix cell" not in message
+    assert "First missing:" not in message
+    assert "+3 more" in message
+    assert "status in {tested, not_applicable, blocked} + reason" in message
