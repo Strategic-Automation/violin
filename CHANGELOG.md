@@ -27,7 +27,7 @@
 - Bound foreground execution to Hermes deadlines and report commands skipped after a burst stops.
 - Reject malformed task and hypothesis bindings before mutation, preserve inline hypothesis placeholders, and reset no-progress streaks after productive reviews.
 - Keep proof preflight consistent with execution normalization and explain coverage and scope-denial remedies.
-- Narrow remote-shell deny patterns so read-only tool discovery remains usable while curl and wget shell pipelines stay blocked.
+
 - Initialize the documented reconnaissance technology evidence directory before benchmark execution.
 
 ### Changed

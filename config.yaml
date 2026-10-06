@@ -137,10 +137,16 @@ approvals:
     - "*dd if=* of=/dev/*"
     - "*:(){ :|& };:*"
     - "*chmod -R 777 /*"
-    - "*curl*|*sh[ ]*"
-    - "*curl*|*sh"
-    - "*wget*|*sh[ ]*"
-    - "*wget*|*sh"
+    # Conservative remote-shell floor: deny any curl/wget pipeline whose text
+    # contains a shell invocation, including alternate shells (powershell,
+    # pwsh, ksh93, zsh) and wrapped sh/bash. The broad globs cost a known class
+    # of false positives on benign read-only discovery that happens to contain
+    # "sh" after the pipe (e.g. `... | grep -i shop`); command-position-aware
+    # matching is deferred to v4.1.0 (issue #252). Do not narrow these globs
+    # without replacing the unconditional floor with a verified native
+    # pre-deny boundary.
+    - "*curl*|*sh*"
+    - "*wget*|*sh*"
 
 security:
   redact_secrets: true
