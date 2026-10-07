@@ -70,8 +70,17 @@ comparison with autonomous pentest-agent designs.
 
 ```bash
 hermes profile install https://github.com/Strategic-Automation/violin
+hermes -p violin plugins enable violin-guard
 hermes -p violin
 ```
+
+Complete Hermes' dependency installation and consent prompts when enabling the
+plugin. Guard dependencies are declared in `plugins/violin_guard/plugin.yaml`;
+installing them into a profile's development `.venv` does not install them into
+the Hermes plugin runtime. Restart Hermes after installation and confirm that
+`violin_status` is available before starting an engagement. If loading fails,
+inspect Hermes' `logs/errors.log` for the missing dependency and rerun the plugin
+enable step in that profile.
 
 Then start with an authorized target and let Violin collect the scope before
 any target interaction:
