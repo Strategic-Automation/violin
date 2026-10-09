@@ -32,6 +32,11 @@ from benchmark.score import _protocol_alignment, load_golden_manifest
             "escape-duck-store-2026-04:sha256:" + "a" * 64,
             True,
         ),
+        ("localhost:8080", "escape-duck-store-2026-04:reset-42", True),
+        ("127.0.0.1", "escape-duck-store-2026-04:reset-42", True),
+        ("example.test", "escape-duck-store-2026-04:reset-42", True),
+        ("duck-store.escape.tech", "escape-duck-store-2026-04:reset-42", False),
+        ("", "escape-duck-store-2026-04:reset-42", False),
         ("http://[invalid", "escape-duck-store-2026-04:reset-42", False),
     ],
 )

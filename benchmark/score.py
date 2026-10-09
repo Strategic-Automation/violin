@@ -122,7 +122,9 @@ def _protocol_alignment(
     isolation = manifest.get("target_isolation") or {}
     isolation_id = str(isolation.get("snapshot_or_reset_id") or "").strip()
     try:
-        target_host = (urlsplit(str(manifest.get("target") or "")).hostname or "").casefold()
+        raw_target = str(manifest.get("target") or "").strip()
+        target_url = raw_target if "://" in raw_target else f"https://{raw_target}"
+        target_host = (urlsplit(target_url).hostname or "").casefold()
     except ValueError:
         target_host = ""
     contract_target = str(contract.get("target") or "").casefold()
