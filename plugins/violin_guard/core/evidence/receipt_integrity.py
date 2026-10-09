@@ -122,11 +122,20 @@ def seal_execution_receipt(
         path.relative_to(root).as_posix(): file_digest(path)
         for path in _evidence_paths(sealed, root)
     }
+    return _sign_receipt(sealed, secret, signer_bytes)
+
+
+def _sign_receipt(
+    record: dict[str, Any], secret: bytes | None, signer_bytes: bytes | None
+) -> dict[str, Any]:
+    sealed = dict(record)
+    sealed.pop(SIGNATURE_FIELD, None)
+    sealed.pop(PUBLIC_SIGNATURE_FIELD, None)
     if signer_bytes is not None:
         signer = Ed25519PrivateKey.from_private_bytes(signer_bytes)
         signature = signer.sign(_canonical_receipt(sealed))
         sealed[PUBLIC_SIGNATURE_FIELD] = f"ed25519:{b64encode(signature).decode('ascii')}"
-    else:
+    elif secret is not None:
         signature = hmac.new(secret, _canonical_receipt(sealed), hashlib.sha256).hexdigest()
         sealed[SIGNATURE_FIELD] = f"hmac-sha256:{signature}"
     return sealed
@@ -218,16 +227,32 @@ def verified_evidence_paths(
     return state.authenticated or None
 
 
-def verify_runtime_receipt(record: dict[str, Any], engagement: Path) -> EvidenceState:
-    """Verify a receipt inside the guard process without exposing signing material."""
+def _runtime_public_key() -> bytes | None:
     if _RUNTIME_SIGNING_KEY is not None:
         try:
             private_key = Ed25519PrivateKey.from_private_bytes(_RUNTIME_SIGNING_KEY)
         except ValueError as exc:
             raise ValueError("receipt is unsigned or foreign") from exc
-        public_key = private_key.public_key().public_bytes_raw()
-        return _evidence_state(record, engagement, public_key=public_key)
-    return _evidence_state(record, engagement, key=_RUNTIME_KEY)
+        return private_key.public_key().public_bytes_raw()
+    return None
+
+
+def complete_execution_accounting(record: dict[str, Any]) -> dict[str, Any]:
+    """Authenticate an accounting retry and preserve its sealed evidence identity."""
+    if (
+        _RUNTIME_KEY is not None
+        or _RUNTIME_SIGNING_KEY is not None
+        or any(field in record for field in (SIGNATURE_FIELD, PUBLIC_SIGNATURE_FIELD))
+    ):
+        _signed_digests(record, key=_RUNTIME_KEY, public_key=_runtime_public_key())
+    updated = {**record, "accounting_pending": False}
+    updated.pop("accounting_error", None)
+    return _sign_receipt(updated, _RUNTIME_KEY, _RUNTIME_SIGNING_KEY)
+
+
+def verify_runtime_receipt(record: dict[str, Any], engagement: Path) -> EvidenceState:
+    """Verify a receipt inside the guard process without exposing signing material."""
+    return _evidence_state(record, engagement, key=_RUNTIME_KEY, public_key=_runtime_public_key())
 
 
 __all__ = [
@@ -238,6 +263,7 @@ __all__ = [
     "SIGNATURE_FIELD",
     "EvidenceState",
     "file_digest",
+    "complete_execution_accounting",
     "seal_execution_receipt",
     "verify_runtime_receipt",
     "verified_evidence_paths",

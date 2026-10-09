@@ -191,6 +191,10 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
     review_lock = engagement / "state" / "review-batch.json"
     try:
         with state.workflow_lock(engagement), state.lock_file(review_lock):
+            if state.has_reserved_sync_credit(engagement):
+                raise ValueError(
+                    "sync reservation still awaiting execution accounting; recover it with violin_exec_status before review"
+                )
             pending = state.get_pending_sync(engagement)
             if not pending:
                 return _json(

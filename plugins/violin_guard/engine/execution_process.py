@@ -248,6 +248,8 @@ def _execute(
         )
     except Exception as exc:
         receipt = {**record, "status": "failed_to_finalize", "finalization_error": str(exc)}
+        if accounting_error:
+            receipt.update(accounting_pending=True, accounting_error=accounting_error)
     output_locks.release()
     remaining, consumed = (
         (accounting[0], accounting[1])

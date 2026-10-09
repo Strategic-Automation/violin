@@ -48,9 +48,8 @@ def test_exec_burst_denial_reports_its_own_slot_accounting(eng, monkeypatch):
     round trips instead of probes.
     """
     _patch_burst(monkeypatch, str(eng))
-    limit = state.sync_credit_limit("recon")
     commands = [f"nmap -sV -p {port} 10.10.10.10" for port in range(1, 4)]
-    reservation = state.reserve_sync_credit(eng, "recon", limit - 1)
+    state._mutate_runtime(eng, lambda runtime: setattr(runtime.sync, "credit", 1))
 
     data = json.loads(
         service.handle_exec_burst(
@@ -70,4 +69,3 @@ def test_exec_burst_denial_reports_its_own_slot_accounting(eng, monkeypatch):
     assert f"need {len(commands)}" in reason, reason
     assert f"{len(commands)} command(s)" in reason, reason
     assert "violin_review_batch" in reason, reason
-    state.release_reserved_sync_credit(eng, reservation)

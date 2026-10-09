@@ -275,6 +275,7 @@ def handle_exec_burst(args: dict, **kwargs):
     results = []
     executed = 0
     stopped_after_index = None
+    unstarted_count = required_slots
     try:
         for item in preflight:
             idx = item["index"]
@@ -296,6 +297,8 @@ def handle_exec_burst(args: dict, **kwargs):
                     skipped=len(preflight) - len(results),
                     reason="Hermes foreground budget exhausted; use tracked background execution for long commands",
                 )
+            if not item["local"]:
+                unstarted_count -= 1
             try:
                 res = execution.execute(
                     command=cmd,
@@ -309,6 +312,10 @@ def handle_exec_burst(args: dict, **kwargs):
                     ptt_task_id=active_task_id,
                     sync_reservation=None if item["local"] else reservation_id,
                 )
+                if not item["local"] and not res.get("executed"):
+                    unstarted_count += 1
+                if res.get("accounting_pending") or res.get("finalization_error"):
+                    res["review_required"] = True
                 execution_status = res.pop("status", None)
                 entry = {
                     "index": idx,
@@ -322,18 +329,23 @@ def handle_exec_burst(args: dict, **kwargs):
                 results.append(entry)
                 if res.get("executed"):
                     executed += 1
-                if res.get("exit_code", 0) != 0 and not continue_on_error:
+                if (
+                    res.get("accounting_pending")
+                    or res.get("finalization_error")
+                    or (res.get("exit_code", 0) != 0 and not continue_on_error)
+                ):
                     stopped_after_index = idx
                     break
             except Exception as exc:  # noqa: BLE001
-                if not continue_on_error:
+                if not continue_on_error or not item["local"]:
                     pending = state.get_pending_sync(eng_dir)
                     return _json(
                         "execution_failed",
                         executed=executed,
                         results=results + [{"index": idx, "command": cmd, "error": str(exc)}],
                         error=str(exc),
-                        review_required=bool(pending)
+                        review_required=not item["local"]
+                        or bool(pending)
                         or any(item.get("review_required") for item in results),
                         pending_batch_id=(pending or {}).get("batch_id"),
                         stopped_after_index=idx,
@@ -342,7 +354,9 @@ def handle_exec_burst(args: dict, **kwargs):
                 results.append({"index": idx, "command": cmd, "error": str(exc)})
     finally:
         if reservation_id:
-            state.release_reserved_sync_credit(eng_dir, reservation_id)
+            state.release_reserved_sync_credit(
+                eng_dir, reservation_id, unstarted_count=unstarted_count
+            )
 
     pending = state.get_pending_sync(eng_dir)
     return _json(

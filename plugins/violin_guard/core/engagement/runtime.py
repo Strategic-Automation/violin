@@ -77,6 +77,10 @@ def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
         credit = max(0, current if current is not None else sync_credit_limit(phase))
         if credit < count:
             raise ValueError(f"insufficient sync credit for burst: need {count}, have {credit}")
+        if runtime.sync.reservations:
+            raise ValueError(
+                "sync reservation still awaiting execution accounting; recover it before another burst"
+            )
         reservation_id = f"burst-{uuid.uuid4().hex}"
         runtime.sync.credit = credit - count
         runtime.sync.reservations[reservation_id] = Reservation(
@@ -87,16 +91,36 @@ def reserve_sync_credit(eng_dir: str | Path, phase: str, count: int) -> str:
     return _mutate_runtime(eng_dir, reserve)
 
 
-def release_reserved_sync_credit(eng_dir: str | Path, reservation_id: str) -> int:
-    """Return every unconsumed slot in a reservation to the sync window."""
+def release_reserved_sync_credit(
+    eng_dir: str | Path, reservation_id: str, *, unstarted_count: int | None = None
+) -> int:
+    """Refund unstarted commands while retaining slots awaiting launch accounting."""
+    if unstarted_count is not None and unstarted_count < 0:
+        raise ValueError("unstarted_count must be nonnegative")
 
     def release(runtime: RuntimeState) -> int:
-        reservation = runtime.sync.reservations.pop(reservation_id, None)
+        reservation = runtime.sync.reservations.get(reservation_id)
         if reservation is not None:
-            runtime.sync.credit = (runtime.sync.credit or 0) + reservation.remaining
+            refund = (
+                reservation.remaining
+                if unstarted_count is None
+                else min(unstarted_count, reservation.remaining)
+            )
+            remaining = reservation.remaining - refund
+            if remaining:
+                runtime.sync.reservations[reservation_id] = reservation.model_copy(
+                    update={"remaining": remaining}
+                )
+            else:
+                del runtime.sync.reservations[reservation_id]
+            runtime.sync.credit = (runtime.sync.credit or 0) + refund
         return max(0, runtime.sync.credit or 0)
 
     return _mutate_runtime(eng_dir, release)
+
+
+def has_reserved_sync_credit(eng_dir: str | Path) -> bool:
+    return bool(_read_runtime(eng_dir).sync.reservations)
 
 
 def commit_execution_start(
@@ -132,6 +156,8 @@ def commit_execution_start(
                 remaining = max(0, runtime.sync.credit or 0)
                 consumed = True
             else:
+                if runtime.sync.reservations:
+                    raise ValueError("sync reservation still awaiting execution accounting")
                 credit = runtime.sync.credit
                 remaining = max(
                     0,
@@ -197,9 +223,10 @@ def commit_execution_start(
 
 def clear_pending_sync(eng_dir: str | Path) -> None:
     def clear(runtime: RuntimeState) -> None:
+        if runtime.sync.reservations:
+            raise ValueError("sync reservation still awaiting execution accounting")
         runtime.sync.pending = None
         runtime.sync.credit = None
-        runtime.sync.reservations.clear()
 
     _mutate_runtime(eng_dir, clear)
 

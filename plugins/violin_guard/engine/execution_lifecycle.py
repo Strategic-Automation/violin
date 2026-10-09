@@ -13,7 +13,14 @@ from typing import Any
 
 from ..core.engagement import state
 from ..core.evidence.history import append_history
-from ..core.evidence.receipt_integrity import seal_execution_receipt
+from ..core.evidence.receipt_integrity import (
+    DIGESTS_FIELD,
+    PUBLIC_SIGNATURE_FIELD,
+    SIGNATURE_FIELD,
+    complete_execution_accounting,
+    seal_execution_receipt,
+    verify_runtime_receipt,
+)
 from .execution_support import (
     MAX_OUTPUT_BYTES,
     _deadline_expired,
@@ -51,6 +58,10 @@ def _finalize_execution(
         record = state.read_json(manifest_path)
         if record.get("history_recorded"):
             return record
+        if record.get("receipt_kind") == "execution" or any(
+            field in record for field in (SIGNATURE_FIELD, PUBLIC_SIGNATURE_FIELD, DIGESTS_FIELD)
+        ):
+            verify_runtime_receipt(record, engagement)
         if accounting_error:
             record["accounting_pending"] = True
             record["accounting_error"] = accounting_error
@@ -238,28 +249,31 @@ def status(eng_dir: str, execution_id: str) -> dict[str, Any]:
         record = state.read_json(manifest_path)
     if not record:
         raise ValueError("execution not found")
-    if record.get("accounting_pending"):
-        try:
-            _reconcile_execution_accounting(engagement, record)
-        except Exception as exc:
-            return {**record, "accounting_error": str(exc)}
-        with state.lock_file(manifest_path):
-            record = state.read_json(manifest_path)
-            record["accounting_pending"] = False
-            record.pop("accounting_error", None)
-            record = seal_execution_receipt(record, engagement)
-            state.atomic_json(manifest_path, record)
     if record.get("status") == "finalizing":
         terminal = record.get("terminal") or {}
-        return _finalize_execution(
-            engagement=engagement,
-            manifest_path=manifest_path,
-            exit_code=int(terminal.get("exit_code", -1)),
-            status_name=str(terminal.get("status") or "lost"),
-            timed_out=bool(terminal.get("timed_out")),
-            cancelled=bool(terminal.get("cancelled")),
-            output_limited=bool(terminal.get("output_limited")),
-        )
+        try:
+            record = _finalize_execution(
+                engagement=engagement,
+                manifest_path=manifest_path,
+                exit_code=int(terminal.get("exit_code", -1)),
+                status_name=str(terminal.get("status") or "lost"),
+                timed_out=bool(terminal.get("timed_out")),
+                cancelled=bool(terminal.get("cancelled")),
+                output_limited=bool(terminal.get("output_limited")),
+            )
+        except ValueError as exc:
+            return {**record, "accounting_error": str(exc)}
+    if record.get("accounting_pending"):
+        with state.lock_file(manifest_path):
+            record = state.read_json(manifest_path)
+            if record.get("accounting_pending"):
+                try:
+                    updated = complete_execution_accounting(record)
+                    _reconcile_execution_accounting(engagement, record)
+                    state.atomic_json(manifest_path, updated)
+                except (OSError, ValueError) as exc:
+                    return {**record, "accounting_error": str(exc)}
+                record = updated
     if record.get("status") == "starting":
         # A persisted intent without a process identity is ambiguous after a
         # short launch window. Charge it conservatively before recording lost.

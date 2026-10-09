@@ -17,7 +17,9 @@ def test_burst_reports_unattempted_commands(tmp_path, monkeypatch, continue_on_e
     monkeypatch.setattr(exec_handlers.state, "is_local_bookkeeping_command", lambda command: False)
     monkeypatch.setattr(exec_handlers.state, "reserve_sync_credit", lambda *args: "reservation")
     monkeypatch.setattr(
-        exec_handlers.state, "release_reserved_sync_credit", lambda *args: released.append(args)
+        exec_handlers.state,
+        "release_reserved_sync_credit",
+        lambda *args, **kwargs: released.append((args, kwargs)),
     )
 
     def execute(**kwargs):
@@ -49,7 +51,8 @@ def test_burst_reports_unattempted_commands(tmp_path, monkeypatch, continue_on_e
     )
 
     assert len(released) == 1
-    if continue_on_error:
+    assert released[0][1]["unstarted_count"] == len(commands) - len(launched)
+    if continue_on_error and failure == "nonzero":
         assert launched == commands
         assert data["status"] == "batch_complete"
         assert len(data["results"]) == 3
@@ -62,6 +65,9 @@ def test_burst_reports_unattempted_commands(tmp_path, monkeypatch, continue_on_e
         assert data["skipped"] == 2
         assert len(data["results"]) == 1
         assert data["executed"] == (0 if failure == "exception" else 1)
+        if failure == "exception":
+            assert data["review_required"] is True
         if failure == "finalization":
+            assert data["review_required"] is True
             assert data["results"][0]["executed"] is True
             assert data["results"][0]["finalization_error"] == "history unavailable"

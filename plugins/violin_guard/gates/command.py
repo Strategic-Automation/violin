@@ -211,6 +211,10 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     # 7-8. Target execution accounting.
     if args.account_sync:
+        if state.has_reserved_sync_credit(eng_dir):
+            result.add_error(
+                "sync reservation still awaiting execution accounting; finish the burst or recover it with violin_exec_status"
+            )
         sync_pending = state.get_pending_sync(str(eng_dir))
         if sync_pending:
             credit = state.sync_credit_remaining(str(eng_dir), phase.value)
