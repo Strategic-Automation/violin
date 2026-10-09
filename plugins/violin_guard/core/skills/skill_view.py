@@ -42,8 +42,6 @@ class SkillViewReservation:
     owner: bool
     status: str
     owner_token: str = ""
-    delivery_id: str = ""
-    content_digest: str = ""
 
 
 class HermesSkillViewAdapter:

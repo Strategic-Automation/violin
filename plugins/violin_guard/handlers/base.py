@@ -115,25 +115,14 @@ def _prepare_skill_reservation_payload(
         candidate_source=candidate_source or None,
     )
     if not view_reservation.owner:
-        if view_reservation.status == "preparing":
-            early_resp = _json(
-                "skill_preparing",
-                transition_applied=False,
-                next_step=_REPEAT_CALL_NOTE,
-                **(extra_fields or {}),
-                skill={"name": skill, "digest": None},
-            )
-            return None, None, early_resp
-        reservation = prepare_delivery(
-            eng_dir,
-            session_id=session_id,
-            skill=skill,
-            content_digest=view_reservation.content_digest,
-            phase=phase,
-            vulnerability_class=vulnerability_class or None,
-            candidate_source=candidate_source or None,
+        early_resp = _json(
+            "skill_preparing",
+            transition_applied=False,
+            next_step=_REPEAT_CALL_NOTE,
+            **(extra_fields or {}),
+            skill={"name": skill, "digest": None},
         )
-        return reservation, reservation.content_digest, None
+        return None, None, early_resp
 
     slot_open = True
     try:
