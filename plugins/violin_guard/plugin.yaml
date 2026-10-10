@@ -1,8 +1,18 @@
-name: violin-guard
-version: 3.3.4
+name: violin_guard
+version: 4.0.0
 description: Typed scope guards and an execute-and-record boundary with bounded synchronization
   windows.
 kind: standalone
+pip_dependencies:
+  - bashlex>=0.18,<1
+  - cryptography>=45,<51
+  - filelock>=4.0.1,<5
+  - pydantic>=2.0,<3
+  - psutil>=6.0.0,<9
+  - netaddr>=1.3.0,<2
+  - yarl>=1.9,<2
+  - pyyaml>=6.0,<7
+  - markdown-it-py>=3.0,<5
 provides_tools:
 - violin_record_ptt
 - violin_record_hypothesis

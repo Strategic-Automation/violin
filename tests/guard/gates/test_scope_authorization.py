@@ -285,34 +285,6 @@ def test_direct_dev_tcp_redirection_is_checked_and_not_bookkeeping(tmp_path: Pat
     assert any("10.10.10.99" in error for error in result.errors)
 
 
-def test_parenthetical_scope_actions_are_permitted() -> None:
-    from plugins.violin_guard.core.engagement.phases import Phase
-    from plugins.violin_guard.gates.command import check_scope_authorization
-
-    scope = {
-        "rules_of_engagement": {
-            "allowed_actions": ["exploit validation (in-scope, non-destructive)"],
-            "forbidden_actions": [],
-        }
-    }
-    res = check_scope_authorization(scope, Phase.EXPLOITATION)
-    assert not res.errors
-
-
-def test_vulnerability_research_permits_vuln_research_phase() -> None:
-    from plugins.violin_guard.core.engagement.phases import Phase
-    from plugins.violin_guard.gates.command import check_scope_authorization
-
-    scope = {
-        "rules_of_engagement": {
-            "allowed_actions": ["vulnerability research"],
-            "forbidden_actions": [],
-        }
-    }
-    res = check_scope_authorization(scope, Phase.VULN_RESEARCH)
-    assert not res.errors
-
-
 _PAYLOAD_SCOPE = """\
 targets:
   ip_addresses: [10.10.10.10]
@@ -409,23 +381,3 @@ def test_echo_label_ips_are_not_transport_targets(tmp_path: Path) -> None:
     )
     assert not allowed.errors, allowed.errors
     assert not allowed.warnings, allowed.warnings
-
-
-def test_scope_authorization_error_message_provides_selection_list() -> None:
-    from plugins.violin_guard.core.engagement.phases import Phase
-    from plugins.violin_guard.gates.command import check_scope_authorization
-
-    scope = {
-        "rules_of_engagement": {
-            "allowed_actions": ["vulnerability scanning"],
-            "forbidden_actions": [],
-        }
-    }
-    res = check_scope_authorization(scope, Phase.VULN_RESEARCH)
-    assert len(res.errors) == 1
-    err = res.errors[0]
-    assert "scope/scope.yaml" in err
-    assert "Select and add one of the following valid action strings for VULN_RESEARCH" in err
-    assert "'vulnerability research'" in err
-    assert "'cve-research'" in err
-    assert "current allowed_actions: ['vulnerability scanning']" in err

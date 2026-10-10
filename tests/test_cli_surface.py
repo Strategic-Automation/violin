@@ -18,7 +18,6 @@ from scripts.cli_environment import _DEPENDENCY_MODULES, _format_command
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "violin_guard.py"
-SMOKE_SCRIPT = ROOT / "scripts" / "smoke-test.sh"
 
 
 def test_cli_dependency_modules_match_project_dependencies() -> None:
@@ -148,12 +147,7 @@ def test_cli_does_not_advertise_removed_adapter_commands() -> None:
     assert "adapters" not in SCRIPT.read_text(encoding="utf-8")
 
 
-def test_smoke_script_imports_from_owning_modules() -> None:
-    source = SMOKE_SCRIPT.read_text(encoding="utf-8")
-
-    assert "from plugins.violin_guard.core.evidence import history" in source
-    assert "from plugins.violin_guard.core.engagement import state" in source
-
+def test_guard_imports_from_owning_modules() -> None:
     result = subprocess.run(
         [
             sys.executable,

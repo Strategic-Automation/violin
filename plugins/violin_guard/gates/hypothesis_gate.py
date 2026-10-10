@@ -12,6 +12,7 @@ from pathlib import Path
 from ..core.commands.http_proof import has_capture_flag
 from ..core.commands.targets import normalize_target, resolve_command_targets
 from ..core.engagement import hypotheses, state
+from ..core.engagement.hypothesis_record import normalize_hypothesis_id
 from ..core.engagement.phases import Phase, normalize_phase, requires_hypothesis
 from ..core.results import GuardResult
 from ..core.skills.skill_receipts import get_binding
@@ -212,11 +213,7 @@ def check_hypothesis_freshness(
     scope_data = validate_scope(scope_path).scope_data if scope_path.exists() else None
     targets = resolve_command_targets(command, primary_target=primary_target, scope_data=scope_data)
 
-    norm_hyp_id = (
-        hypothesis_id.strip().upper().removeprefix("H-").lstrip("0") or "0"
-        if hypothesis_id
-        else None
-    )
+    norm_hyp_id = normalize_hypothesis_id(hypothesis_id) if hypothesis_id else None
 
     relevant = []
     for hypothesis in hyps:
@@ -236,10 +233,8 @@ def check_hypothesis_freshness(
                 continue
         target = normalize_target(hypothesis.target)
 
-        if norm_hyp_id is not None:
-            h_id = hypothesis.id.strip().upper().removeprefix("H-").lstrip("0") or "0"
-            if h_id != norm_hyp_id:
-                continue
+        if norm_hyp_id is not None and hypothesis.id != norm_hyp_id:
+            continue
 
         if hypothesis_phase in acceptable_phases and (
             not match_command_target or not targets or target in targets

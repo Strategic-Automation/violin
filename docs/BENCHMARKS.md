@@ -73,7 +73,7 @@ and are not silently added to its score. `/vulnerabilities` remains excluded fro
 
 `finding_score_pct` is the article-aligned detection rate: distinct confirmed cases divided
 by 20. `reported_false_positive_rate` mirrors the article's secondary HIGH/MEDIUM finding
-metric. Coverage, methodology, and Violin's 85% release gate are separate quality controls;
+metric. Coverage, methodology, and Violin's 75% (15/20) release gate are separate quality controls;
 they must not be presented as part of Escape's detection-rate formula.
 
 `demonstrated_score_pct` separately scans every authenticated execution receipt with the same
@@ -83,7 +83,10 @@ what it submitted. The article-aligned headline remains the confirmed-finding sc
 Escape counted reported findings; publish both values when diagnosing an agent.
 
 Every run records protocol checks. A score from a mutable target without a reset/snapshot ID,
-or from a scope that withholds OpenAPI, is diagnostic and must not be compared with 15/20.
+or from a scope that withholds OpenAPI, is diagnostic and cannot satisfy the release gate.
+Comparable runs must use an ID beginning with `escape-duck-store-2026-04:` and target a
+local snapshot rather than `duck-store.escape.tech`; a timestamp for the hosted service does
+not establish isolation.
 For a publishable result, also pin the source commit and runtime image and use a clean tree.
 
 ## Stronger evaluation model
@@ -123,7 +126,10 @@ files are included in the signed receipt digest set.
 
 Run both fixtures before trusting a scorer revision:
 
-```powershell
+Run scorer calibration and aggregation inside the separate `Dockerfile.test` image
+with `--network none`. The commands in those sections run inside that container.
+
+```bash
 uv run python -m benchmark.score --calibrate known-good
 uv run python -m benchmark.score --calibrate known-bad
 ```
@@ -133,13 +139,16 @@ checks the evaluator only; it is not a live benchmark result.
 
 ## Live run
 
-```powershell
-uv run python -m benchmark.run \
-  --target http://localhost:<published-port> \
-  --provider <provider> \
-  --api-base <openai-compatible-base-url> \
-  --model <model-id> \
-  --target-isolation-id escape-duck-store-2026-04:<image-digest-or-reset-id>
+Run Hermes in the runtime Docker image. Build from a clean checkout, record its
+commit, and obtain the immutable image ID with `docker image inspect`. Supply the
+existing provenance fields explicitly because the image intentionally excludes Git.
+Set `OPENROUTER_API_KEY` in the launch environment; `--env` passes it without baking
+it into the image. Replace the quoted placeholders below; the single line works in
+PowerShell and Bash. The target must be a fresh authorized snapshot on the selected
+Docker network, and the run directory must already exist.
+
+```text
+docker run --rm --network "<benchmark-network>" --env OPENROUTER_API_KEY --env "VIOLIN_SOURCE_COMMIT=<clean-source-commit>" --env VIOLIN_SOURCE_DIRTY=false --env "VIOLIN_BENCHMARK_IMAGE_DIGEST=<immutable-runtime-image-id>" --mount "type=bind,source=<absolute-run-directory>,target=/violin/engagements/run" "<immutable-runtime-image-id>" uv run --no-dev python -m benchmark.run --eng-dir /violin/engagements/run --target "http://<isolated-target-host>:<port>" --provider openrouter --api-base https://openrouter.ai/api/v1 --model "<model-id>" --target-isolation-id "escape-duck-store-2026-04:<target-image-digest-or-reset-id>"
 ```
 
 A publishable run needs an immutable target identity, signed receipts, structured findings,
@@ -155,7 +164,7 @@ run-to-run — agentic benchmarks show pass@1 swings of several points even at
 temperature 0 (On Randomness in Agentic Evals, arXiv 2602.07150). A one-off score is
 therefore not a capability measure; report the distribution instead:
 
-```powershell
+```bash
 uv run python -m benchmark.aggregate --glob "engagements/benchmark-run-*" \
   --json-out benchmark/results/aggregate.json \
   --markdown-out benchmark/results/aggregate.md

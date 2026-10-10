@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..core.commands.http_proof import normalize_http_proof_flags
 from ..core.commands.targets import (
     check_scope_targets,
     is_research_host,
@@ -69,6 +70,8 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     # 2. Scope checks
     eng_dir = state.resolve_eng_dir(args.eng_dir)
+    isolation_result = check_cross_engagement_paths(args.command, eng_dir)
+    result.errors.extend(isolation_result.errors)
     canonical_scope_path = (eng_dir / "scope" / "scope.yaml").resolve()
     requested_scope_path = (
         Path(args.scope).expanduser().resolve() if args.scope else canonical_scope_path
@@ -124,8 +127,8 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
     destructive_result = check_destructive_patterns(args.command)
     result.errors.extend(destructive_result.errors)
 
-    # 2c2. HTTP proof flags (review): `-i`/`-sv` so receipts are decisive
-    proof_result = check_http_proof_flags(args.command)
+    # Review the same status capture the executor will use, without rewriting authorization input.
+    proof_result = check_http_proof_flags(normalize_http_proof_flags(args.command))
     result.warnings.extend(proof_result.warnings)
     result.infos.extend(proof_result.infos)
 
@@ -208,6 +211,10 @@ def check_command(args: CheckCommandArgs) -> CheckResult:
 
     # 7-8. Target execution accounting.
     if args.account_sync:
+        if state.has_reserved_sync_credit(eng_dir):
+            result.add_error(
+                "sync reservation still awaiting execution accounting; finish the burst or recover it with violin_exec_status"
+            )
         sync_pending = state.get_pending_sync(str(eng_dir))
         if sync_pending:
             credit = state.sync_credit_remaining(str(eng_dir), phase.value)

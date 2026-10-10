@@ -9,6 +9,7 @@ from plugins.violin_guard.core.skills.skill_receipts import (
     bind_task,
     complete_delivery,
     prepare_delivery,
+    skill_content_digest,
 )
 
 
@@ -84,7 +85,7 @@ def test_batch_review_succeeds_for_multiline_pending_command(tmp_path: Path) -> 
         eng,
         session_id="multiline-session",
         skill="pentest",
-        bundle_digest="sha256:" + "a" * 64,
+        content_digest=skill_content_digest("pentest"),
         phase="RECON",
     )
     if reservation.owner:
@@ -93,7 +94,7 @@ def test_batch_review_succeeds_for_multiline_pending_command(tmp_path: Path) -> 
     multiline_cmd = "cd /app\n  curl -i http://eloquia.htb/\n  wc -l index.html"
 
     # Mark pending sync with multiline command
-    state.mark_pending_sync(eng, multiline_cmd, "RECON", "PT-010")
+    state.commit_execution_start(eng, multiline_cmd, "RECON", "PT-010", "multiline-execution")
     pending = state.get_pending_sync(eng)
     assert pending is not None
 

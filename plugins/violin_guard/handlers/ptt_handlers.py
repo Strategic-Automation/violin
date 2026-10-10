@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ..core.engagement import ptt, state
+from ..core.engagement import hypotheses, ptt, state
 from ..core.engagement.phases import requires_hypothesis
-from ..core.skills.skill_receipts import HermesSkillViewAdapter, bind_task
+from ..core.skills.skill_policy import routable_context
+from ..core.skills.skill_receipts import bind_task
+from ..core.skills.skill_view import HermesSkillViewAdapter
 from .base import (
     _eng_path,
-    _hypothesis_route_context,
     _json,
     _prepare_skill_reservation_payload,
     _serialize_errors,
@@ -59,6 +60,7 @@ def _start_ptt_task(
         resolved_dir = ptt_path.parent.parent if eng_dir is None else Path(eng_dir)
         if state.has_pending_sync(resolved_dir):
             raise ValueError("an active PTT task already exists; review its pending batch first")
+        _validate_phase_exit(resolved_dir, active.id, "[x]")
         superseded_note = f"{active.note} [superseded-by:{task_id}]".strip()
         updates[active.id] = ("[x]", superseded_note)
     ptt.update_tasks(ptt_path, updates)
@@ -80,8 +82,12 @@ def _validate_record_ptt_inputs(
         raise ValueError("skill and technique are required before a PTT update")
     if pending:
         raise ValueError(
-            "a target batch is pending; use violin_review_batch instead of violin_record_ptt"
+            f"target batch {pending.get('batch_id')} is pending; "
+            "use violin_review_batch instead of violin_record_ptt"
         )
+    active = ptt.find_active_task(doc)
+    if (args.get("status") or "[~]").strip() == "[~]" and active and active.id != task:
+        _validate_phase_exit(_eng_path(args["eng_dir"]), active.id, "[x]")
     selected = next((item for item in doc if item.id == task), None)
     selected_phase = selected.phase if selected else str(args.get("phase") or "")
     if not selected_phase:
@@ -100,8 +106,14 @@ def _validate_record_ptt_inputs(
     vulnerability_class = ""
     candidate_source = ""
     if hypothesis_id:
-        vulnerability_class, candidate_source = _hypothesis_route_context(
-            args["eng_dir"], hypothesis_id
+        record = hypotheses.find_by_id(_eng_path(args["eng_dir"]) / "hypotheses.md", hypothesis_id)
+        if record is None:
+            raise ValueError(
+                f"hypothesis {hypothesis_id!r} does not exist; create it with "
+                "violin_record_hypothesis before binding the PTT task"
+            )
+        vulnerability_class, candidate_source = routable_context(
+            record.vuln_class, record.candidate_source
         )
 
     return task, note, skill, technique, phase, hypothesis_id, vulnerability_class, candidate_source

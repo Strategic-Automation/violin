@@ -19,9 +19,8 @@ permissions:
 
 # ---------------------------------------------------------------------------
 # Tier 1: Scorer Calibration (fast, deterministic, no Hermes/LLM needed)
-#   Runs on every push/PR via the main ci.yml workflow (pytest includes
-#   tests/benchmark/test_benchmark_runner.py which exercises known-good and
-#   known-bad calibration fixtures).
+#   Runs on every push/PR via the main ci.yml workflow. This manual workflow
+#   repeats benchmark tests and both scorer calibration fixtures in Docker.
 #
 # Tier 2: Live LLM Benchmark (manual trigger, needs Hermes + OpenRouter key)
 #   This workflow — triggered via workflow_dispatch only.
@@ -36,69 +35,68 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.11'
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Sync Dependencies
-        run: uv sync --dev
-
-      - name: Install Hermes
-        run: uv tool install 'hermes-agent>=0.18.0,<0.20'
-
       # ── Tier 1 gate: scorer calibration must pass before live run ──
+      - name: Build Test Image
+        run: docker build --file Dockerfile.test --tag violin-tests:${GITHUB_SHA} .
+
       - name: Scorer Calibration Gate
         run: |
-          uv run pytest tests/benchmark/test_benchmark_runner.py -v
+          docker run --rm --network none \
+            --name "violin-calibration-${GITHUB_RUN_ID}" \
+            "violin-tests:${GITHUB_SHA}"
 
-      # ── Tier 2: live LLM benchmark (only if Hermes is available) ──
-      - name: Check Hermes Availability
-        id: hermes_check
+      # ── Tier 2: live LLM benchmark in the pinned Violin runtime image ──
+      - name: Build Violin Runtime Image
         run: |
-          if command -v hermes &>/dev/null; then
-            echo "available=true" >> $GITHUB_OUTPUT
-          else
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "::warning::Hermes not installed. Skipping live benchmark. Scorer calibration passed."
-          fi
+          test -z "$(git status --porcelain)"
+          docker build --tag violin-benchmark:${GITHUB_SHA} .
 
-      - name: Run Live Benchmark
-        if: steps.hermes_check.outputs.available == 'true'
+      - name: Run Live Benchmark in Docker
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODEL_ID: ${{ inputs.model }}
+          TARGET_URL: ${{ inputs.target_url }}
+          TARGET_ISOLATION_ID: ${{ inputs.target_isolation_id }}
         run: |
-          MODEL_ID="${{ github.event.inputs.model }}"
-          TARGET_URL="${{ github.event.inputs.target_url }}"
-          TARGET_ISOLATION_ID="${{ github.event.inputs.target_isolation_id }}"
-
-          uv run python benchmark/run.py \
+          mkdir -p engagements
+          RUNTIME_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "violin-benchmark:${GITHUB_SHA}")
+          docker run --rm \
+            --name "violin-benchmark-${GITHUB_RUN_ID}" \
+            --env OPENROUTER_API_KEY \
+            --env "VIOLIN_SOURCE_COMMIT=${GITHUB_SHA}" \
+            --env VIOLIN_SOURCE_DIRTY=false \
+            --env "VIOLIN_BENCHMARK_IMAGE_DIGEST=${RUNTIME_IMAGE_ID}" \
+            --mount "type=bind,source=$PWD/engagements,target=/violin/engagements" \
+            "$RUNTIME_IMAGE_ID" \
+            uv run --no-dev python -m benchmark.run \
+            --eng-dir "/violin/engagements/benchmark-run-${GITHUB_RUN_ID}" \
             --model "$MODEL_ID" \
             --provider openrouter \
             --api-base https://openrouter.ai/api/v1 \
             --target "$TARGET_URL" \
             --target-isolation-id "$TARGET_ISOLATION_ID" \
-            --json-out benchmark_results.json \
-            --markdown-out benchmark_summary.md
-
-      - name: Score-Only Fallback (No Hermes)
-        if: steps.hermes_check.outputs.available == 'false'
+            --json-out "/violin/engagements/benchmark_results.json" \
+            --markdown-out "/violin/engagements/benchmark_summary.md"
+      - name: Evaluate and Gate Live Benchmark in Docker
         run: |
-          uv run python -m benchmark.score \
-            --calibrate known-good \
-            --json-out benchmark_results.json \
-            --markdown-out benchmark_summary.md
+          docker run --rm --network none \
+            --env GITHUB_RUN_ID \
+            --mount "type=bind,source=$PWD/engagements,target=/results" \
+            "violin-tests:${GITHUB_SHA}" \
+            /bin/sh -lc '
+              jq -e ".runner.valid == true" "/results/benchmark-run-${GITHUB_RUN_ID}/results.json" >/dev/null &&
+              uv run python -m benchmark.score \
+                "/results/benchmark-run-${GITHUB_RUN_ID}" \
+                --json-out /results/benchmark_results.json \
+                --markdown-out /results/benchmark_summary.md >/dev/null &&
+              jq -e ".benchmark_pass == true" /results/benchmark_results.json
+            '
 
       - name: Publish Step Summary
         if: always()
         run: |
-          if [ -f benchmark_summary.md ]; then
-            cat benchmark_summary.md >> $GITHUB_STEP_SUMMARY
+          if [ -f engagements/benchmark_summary.md ]; then
+            cat engagements/benchmark_summary.md >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload Benchmark Artifacts
@@ -106,7 +104,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: hermes-benchmark-results-${{ github.run_id }}
-          path: |
-            benchmark_results.json
-            benchmark_summary.md
-            engagements/benchmark-run-*/
+          path: engagements/benchmark_summary.md

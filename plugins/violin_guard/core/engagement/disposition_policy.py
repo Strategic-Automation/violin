@@ -72,9 +72,8 @@ def evaluate_dispositions(
 ) -> DispositionEvaluation:
     """Evaluate a flat disposition mapping against its applicable domain rules.
 
-    Obligation matching intentionally follows the established close-gate contract:
-    each lowercased obligation may appear in either a cell key or its evidence text,
-    and every cell must refer to at least one declared obligation.
+    Coverage keys must equal a normalized obligation. Evidence text explains the
+    disposition but cannot establish the identity of a coverage obligation.
     """
 
     if not isinstance(entries, dict):
@@ -101,41 +100,27 @@ def evaluate_dispositions(
     entry_errors: list[str] = []
     unrecognized_entries: list[str] = []
     invalid_entries: set[str] = set()
-    valid_cells: list[tuple[str, str]] = []
+    valid_names: set[str] = set()
     for name, entry in entries.items():
         normalized_name = str(name).strip().lower()
-        reason = (
-            str(entry.get("evidence_or_reason") or "").strip().lower()
-            if isinstance(entry, dict)
-            else ""
-        )
-        cell_text = f"{normalized_name} {reason}"
         cell_errors = disposition_entry_errors(name, entry)
         entry_errors.extend(cell_errors)
         if cell_errors:
             invalid_entries.add(normalized_name)
-        if normalized_obligations and not any(
-            obligation in cell_text for obligation in normalized_obligations
-        ):
+        if normalized_obligations and normalized_name not in normalized_obligations:
             unrecognized_entries.append(
                 f"{name} (unrecognised obligation key; accepted keys: "
                 f"{', '.join(sorted(normalized_obligations))})"
             )
             invalid_entries.add(normalized_name)
         if not cell_errors:
-            valid_cells.append((cell_text, normalized_name))
+            valid_names.add(normalized_name)
 
     missing_obligations = tuple(
-        obligation
-        for obligation in normalized_obligations
-        if not any(obligation in cell_text for cell_text, _ in valid_cells)
+        obligation for obligation in normalized_obligations if obligation not in valid_names
     )
-    valid_names = {name for _, name in valid_cells}
     if normalized_obligations:
-        completed = sum(
-            any(obligation in cell_text for cell_text, _ in valid_cells)
-            for obligation in normalized_obligations
-        )
+        completed = sum(obligation in valid_names for obligation in normalized_obligations)
         total = len(normalized_obligations) + len(invalid_entries)
     else:
         valid_count = sum(

@@ -9,7 +9,8 @@ from typing import Any
 from ..core.engagement import ptt, state
 from ..core.engagement.phases import requires_hypothesis
 from ..core.evidence.history import history_contains
-from ..core.skills.skill_receipts import HermesSkillViewAdapter, get_binding
+from ..core.skills.skill_receipts import get_binding
+from ..core.skills.skill_view import HermesSkillViewAdapter
 from .base import (
     _eng_path,
     _json,
@@ -167,7 +168,6 @@ def _execute_batch_review(
         evidence_paths=evidence_paths,
         next_action=str(args.get("next_action") or "review evidence"),
         next_technique=str(args.get("next_technique") or ""),
-        research_attempted=bool(args.get("research_attempted")),
     )
     state.clear_pending_sync(engagement)
     return _json(
@@ -191,6 +191,10 @@ def handle_review_batch(args: dict[str, Any], **kwargs: Any) -> str:
     review_lock = engagement / "state" / "review-batch.json"
     try:
         with state.workflow_lock(engagement), state.lock_file(review_lock):
+            if state.has_reserved_sync_credit(engagement):
+                raise ValueError(
+                    "sync reservation still awaiting execution accounting; recover it with violin_exec_status before review"
+                )
             pending = state.get_pending_sync(engagement)
             if not pending:
                 return _json(

@@ -44,7 +44,9 @@ def test_sync_credit_reservation_consumes_and_releases_atomically(tmp_path: Path
     before = state.sync_credit_remaining(eng, "recon")
     reservation = state.reserve_sync_credit(eng, "recon", 2)
     assert state.sync_credit_remaining(eng, "recon") == before - 2
-    state.consume_reserved_sync_credit(eng, reservation)
+    state.commit_execution_start(
+        eng, "nmap -p 80 10.10.10.10", "RECON", "PT-010", "reserved-execution", reservation
+    )
     state.release_reserved_sync_credit(eng, reservation)
     assert state.sync_credit_remaining(eng, "recon") == before - 1
 

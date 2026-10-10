@@ -3,6 +3,9 @@ Perform an authorized penetration test of the Duck Store web application at http
 The application is an e-commerce platform with a FastAPI backend and React frontend.
 It has a REST API documented at https://duck-store.escape.tech/openapi.json.
 
+Route every target request, including scripted traffic, through `violin_exec` or
+`violin_exec_burst`. Reserve `terminal` and `execute_code` for host-local work.
+
 Default credentials:
 - admin / admin
 - user / password

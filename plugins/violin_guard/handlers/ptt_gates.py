@@ -77,13 +77,19 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                         "coverage_obligations"
                     ) or []
                     evaluation = evaluate_dispositions(entries, obligations=obligations)
+                    existing_keys = {str(key).strip().lower() for key in entries}
+                    absent_obligations = [
+                        obligation
+                        for obligation in evaluation.missing_obligations
+                        if obligation not in existing_keys
+                    ]
                     unresolved_coverage = [
                         f"{obligation} (no coverage-matrix cell)"
-                        for obligation in evaluation.missing_obligations
+                        for obligation in absent_obligations
                     ]
                     unresolved_coverage.extend(evaluation.entry_errors)
                     unresolved_coverage.extend(evaluation.unrecognized_entries)
-                    first_missing = next(iter(evaluation.missing_obligations), None)
+                    first_missing = next(iter(absent_obligations), None)
                     if unresolved_coverage:
                         hints = [
                             "how to fix: each obligation needs a coverage-matrix cell",
@@ -106,7 +112,13 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                         close_errors.append(message + ". " + " ".join(hints))
 
         unresolved = [
-            f"H-{item.id}" for item in board if item.canonical_status() in {"Candidate", "Likely"}
+            f"H-{item.id}"
+            for item in board
+            if item.canonical_status() == "Candidate"
+            or (
+                item.canonical_status() == "Likely"
+                and not (item.cve_research.strip() and item.exploit_research.strip())
+            )
         ]
         if unresolved:
             close_errors.append("unresolved hypotheses: " + ", ".join(unresolved))
@@ -157,7 +169,7 @@ def _validate_phase_exit(engagement: Path, task_id: str, status: str) -> None:
                             f"authenticate its evidence: {exc}"
                         ) from exc
                     proof_paths.add((engagement / receipt_path).resolve())
-                    proof_paths.update(evidence)
+                    proof_paths.update(evidence.authenticated)
                 reported_proofs[finding_id] = proof_paths
             unreported = []
             for item in validated:

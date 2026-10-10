@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /violin
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git jq \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir uv
+
+COPY . /violin/
+
+RUN uv sync --dev
+
+CMD ["sh", "-c", "uv run pytest tests/benchmark -q && uv run python -m benchmark.score --calibrate known-good && uv run python -m benchmark.score --calibrate known-bad"]

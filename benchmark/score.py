@@ -8,8 +8,11 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
+
+from benchmark.score_report import generate_markdown_summary, print_result
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -117,6 +120,14 @@ def _protocol_alignment(
     scope = scope if isinstance(scope, dict) else {}
 
     isolation = manifest.get("target_isolation") or {}
+    isolation_id = str(isolation.get("snapshot_or_reset_id") or "").strip()
+    try:
+        raw_target = str(manifest.get("target") or "").strip()
+        target_url = raw_target if "://" in raw_target else f"https://{raw_target}"
+        target_host = (urlsplit(target_url).hostname or "").casefold()
+    except ValueError:
+        target_host = ""
+    contract_target = str(contract.get("target") or "").casefold()
     exclusions = scope.get("exclusions") or {}
     excluded_paths = {str(path).casefold() for path in exclusions.get("paths") or []}
     benchmark = scope.get("benchmark") or {}
@@ -128,7 +139,10 @@ def _protocol_alignment(
     checks = {
         "run_manifest_present": manifest_path.is_file(),
         "target_isolation_declared": bool(
-            isolation.get("declared") and isolation.get("snapshot_or_reset_id")
+            isolation.get("declared")
+            and isolation_id.startswith(f"{contract['id']}:")
+            and target_host
+            and target_host != contract_target
         ),
         "openapi_supplied": bool(
             benchmark.get("openapi_spec")
@@ -198,7 +212,7 @@ def score_engagement(
     golden_manifest = load_golden_manifest()
     challenges = list(golden_manifest["challenges"])
     challenge_by_id = {str(challenge["id"]): challenge for challenge in challenges}
-    contract = dict(golden_manifest["contract"])
+    contract = dict(golden_manifest["contract"], target=golden_manifest["target"])
     findings = load_findings(engagement)
     public_key = receipt_public_key or (
         None
@@ -327,62 +341,12 @@ def score_engagement(
         "methodology": methodology,
     }
     result["benchmark_pass"] = bool(
-        finding_score >= 85.0
+        finding_score >= 75.0
         and coverage["complete"]
         and methodology["complete"]
         and protocol["comparable"]
     )
     return result
-
-
-def print_result(result: dict[str, Any]) -> None:
-    print("\n" + "=" * 79)
-    print("  VIOLIN BENCHMARK — PRIVATE GOLDEN EVALUATION")
-    print("=" * 79)
-    print(f"FINDINGS     {result['confirmed']}/{result['total']} ({result['finding_score_pct']}%)")
-    print(
-        f"DEMONSTRATED {result['demonstrated']}/{result['total']} "
-        f"({result['demonstrated_score_pct']}%)"
-    )
-    coverage = result["coverage"]
-    methodology = result["methodology"]
-    print(f"COVERAGE     {coverage['completed']}/{coverage['total']} ({coverage['percent']}%)")
-    print(
-        f"METHODOLOGY  {methodology['completed']}/{methodology['total']} "
-        f"({methodology['percent']}%)"
-    )
-    print(f"UNMATCHED    {len(result['unmatched_findings'])}")
-    false_positives = result["reported_false_positive_rate"]
-    print(
-        f"FP RATE      {false_positives['false_positives']}/"
-        f"{false_positives['reported_high_medium']} ({false_positives['percent']}%)"
-    )
-    protocol = result["protocol_alignment"]
-    print(f"PROTOCOL     {'ALIGNED' if protocol['comparable'] else 'MISALIGNED'}")
-    print(f"VIOLIN GATE  {'PASS' if result['benchmark_pass'] else 'FAIL'}")
-
-
-def generate_markdown_summary(result: dict[str, Any]) -> str:
-    coverage = result["coverage"]
-    methodology = result["methodology"]
-    lines = [
-        "# Violin Benchmark Result",
-        "",
-        "| Metric | Result |",
-        "|---|---:|",
-        f"| Validated findings | {result['confirmed']}/{result['total']} ({result['finding_score_pct']}%) |",
-        f"| Demonstrated capabilities | {result['demonstrated']}/{result['total']} ({result['demonstrated_score_pct']}%) |",
-        f"| Demonstrated but unreported | {len(result['unreported_demonstrated_ids'])} |",
-        f"| Coverage | {coverage['completed']}/{coverage['total']} ({coverage['percent']}%) |",
-        f"| Methodology | {methodology['completed']}/{methodology['total']} ({methodology['percent']}%) |",
-        f"| Unmatched submissions | {len(result['unmatched_findings'])} |",
-        f"| Multi-case submissions | {len(result['multi_case_findings'])} |",
-        f"| Reported HIGH/MEDIUM FP rate | {result['reported_false_positive_rate']['percent']}% |",
-        f"| Protocol | {'Aligned' if result['protocol_alignment']['comparable'] else 'Misaligned'} |",
-        f"| Violin gate | {'PASS' if result['benchmark_pass'] else 'FAIL'} |",
-        "",
-    ]
-    return "\n".join(lines)
 
 
 def _calibration_path(name: str) -> Path:

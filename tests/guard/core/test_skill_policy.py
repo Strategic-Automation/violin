@@ -1,4 +1,4 @@
-"""Pure tests for the v3 skill selection policy."""
+"""Skill catalog integrity and selection policy tests."""
 
 from __future__ import annotations
 
@@ -9,12 +9,14 @@ from pathlib import Path
 import pytest
 
 from plugins.violin_guard.core.engagement.phases import Phase
-from plugins.violin_guard.core.skills.skill_policy import (
+from plugins.violin_guard.core.skills.skill_catalog import (
     CATALOG,
     SkillSpec,
     catalog_snapshot,
-    resolve_skill_route,
     validate_catalog,
+)
+from plugins.violin_guard.core.skills.skill_policy import (
+    resolve_skill_route,
     validate_skill_selection,
 )
 

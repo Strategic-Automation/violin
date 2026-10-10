@@ -1,8 +1,17 @@
 .git
 .venv
+.env
+.env.*
+auth.json
+**/.env
+**/.env.*
+**/auth.json
 node_modules
 __pycache__
 .pytest_cache
+.pytest-*
 .ruff_cache
 cache
 engagements
+.benchmark-live
+.benchmark-live/**

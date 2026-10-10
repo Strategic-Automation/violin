@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 from base64 import b64decode, b64encode
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,21 @@ RECEIPT_SIGNING_KEY_ENV = "VIOLIN_RECEIPT_SIGNING_KEY"
 SIGNATURE_FIELD = "receipt_hmac_sha256"
 PUBLIC_SIGNATURE_FIELD = "receipt_ed25519"
 DIGESTS_FIELD = "evidence_sha256"
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceState:
+    """What a receipt authenticates today, and the sealed files that have gone stale.
+
+    ``authenticated`` holds resolved absolute paths. ``stale`` holds the
+    engagement-relative POSIX paths of sealed files the receipt can no longer
+    vouch for: their bytes changed, the file was removed, or it is not a
+    regular file any more. Attribute access is deliberate — a bare tuple would
+    let an old ``for path in verify_receipt(...)`` silently iterate the groups.
+    """
+
+    authenticated: tuple[Path, ...]
+    stale: tuple[str, ...]
 
 
 def _decode_key(value: str | bytes | None) -> bytes | None:
@@ -52,7 +68,8 @@ def _canonical_receipt(record: dict[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def _file_digest(path: Path) -> str:
+def file_digest(path: Path) -> str:
+    """sha256 of one file's bytes."""
     with path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
@@ -71,13 +88,13 @@ def _evidence_paths(record: dict[str, Any], engagement: Path) -> list[Path]:
     paths: list[Path] = []
     for value in values:
         declared = Path(value)
-        candidate = (
-            declared.resolve() if declared.is_absolute() else (engagement / declared).resolve()
-        )
+        raw = declared if declared.is_absolute() else engagement / declared
+        if raw.is_symlink():
+            continue
+        candidate = raw.resolve()
         if (
             candidate.is_relative_to(evidence_root)
             and candidate.is_file()
-            and not candidate.is_symlink()
             and candidate not in paths
         ):
             paths.append(candidate)
@@ -102,14 +119,23 @@ def seal_execution_receipt(
         return sealed
     root = engagement.resolve()
     sealed[DIGESTS_FIELD] = {
-        path.relative_to(root).as_posix(): _file_digest(path)
+        path.relative_to(root).as_posix(): file_digest(path)
         for path in _evidence_paths(sealed, root)
     }
+    return _sign_receipt(sealed, secret, signer_bytes)
+
+
+def _sign_receipt(
+    record: dict[str, Any], secret: bytes | None, signer_bytes: bytes | None
+) -> dict[str, Any]:
+    sealed = dict(record)
+    sealed.pop(SIGNATURE_FIELD, None)
+    sealed.pop(PUBLIC_SIGNATURE_FIELD, None)
     if signer_bytes is not None:
         signer = Ed25519PrivateKey.from_private_bytes(signer_bytes)
         signature = signer.sign(_canonical_receipt(sealed))
         sealed[PUBLIC_SIGNATURE_FIELD] = f"ed25519:{b64encode(signature).decode('ascii')}"
-    else:
+    elif secret is not None:
         signature = hmac.new(secret, _canonical_receipt(sealed), hashlib.sha256).hexdigest()
         sealed[SIGNATURE_FIELD] = f"hmac-sha256:{signature}"
     return sealed
@@ -150,36 +176,36 @@ def _signed_digests(
     return {str(value): str(digest) for value, digest in digests.items()}
 
 
-def _authenticate_evidence(
+def _evidence_state(
     record: dict[str, Any],
     engagement: Path,
     *,
     key: str | bytes | None = None,
     public_key: str | bytes | None = None,
-) -> tuple[Path, ...]:
-    """Return the evidence a receipt authenticates, or explain the conflict."""
+) -> EvidenceState:
+    """Split a receipt's sealed evidence into what it authenticates and what changed.
+
+    Evidence is authenticated file by file: a sealed artifact whose bytes changed
+    is stale, but it never disqualifies the siblings its own command produced.
+    Callers reject a stale file only when their work relies on it, naming the file.
+    """
     digests = _signed_digests(record, key=key, public_key=public_key)
     evidence_root = (engagement / "evidence").resolve()
-    verified: list[Path] = []
+    authenticated: list[Path] = []
+    stale: list[str] = []
     for value, expected_digest in digests.items():
         relative = Path(str(value))
-        candidate = (engagement / relative).resolve()
-        if (
-            relative.is_absolute()
-            or not candidate.is_relative_to(evidence_root)
-            or not candidate.is_file()
-            or candidate.is_symlink()
-        ):
-            raise ValueError(f"evidence is missing or outside evidence/: {value}")
-        current = _file_digest(candidate)
-        if not hmac.compare_digest(current, str(expected_digest)):
-            raise ValueError(
-                f"has changed evidence: {relative.as_posix()} no longer matches the digest "
-                "in this receipt. Existing signatures are preserved; re-run the probe to "
-                "produce evidence and a receipt that authenticate the current bytes."
-            )
-        verified.append(candidate)
-    return tuple(verified)
+        raw = engagement / relative
+        if relative.is_absolute() or not raw.resolve().is_relative_to(evidence_root):
+            raise ValueError(f"sealed evidence path escapes evidence/: {value}")
+        candidate = raw.resolve()
+        if raw.is_symlink() or not candidate.is_file():
+            stale.append(relative.as_posix())
+        elif hmac.compare_digest(file_digest(candidate), str(expected_digest)):
+            authenticated.append(candidate)
+        else:
+            stale.append(relative.as_posix())
+    return EvidenceState(tuple(authenticated), tuple(stale))
 
 
 def verified_evidence_paths(
@@ -189,23 +215,44 @@ def verified_evidence_paths(
     key: str | bytes | None = None,
     public_key: str | bytes | None = None,
 ) -> tuple[Path, ...] | None:
-    """Return authenticated, unchanged evidence paths or fail closed."""
+    """Return the evidence a receipt still authenticates, or None if it authenticates none.
+
+    Stale artifacts are excluded instead of disqualifying the receipt: one rewritten
+    file must not cost a receipt the rest of the evidence its own command produced.
+    """
     try:
-        return _authenticate_evidence(record, engagement, key=key, public_key=public_key)
+        state = _evidence_state(record, engagement, key=key, public_key=public_key)
     except ValueError:
         return None
+    return state.authenticated or None
 
 
-def verify_runtime_receipt(record: dict[str, Any], engagement: Path) -> tuple[Path, ...]:
-    """Verify a receipt inside the guard process without exposing signing material."""
+def _runtime_public_key() -> bytes | None:
     if _RUNTIME_SIGNING_KEY is not None:
         try:
             private_key = Ed25519PrivateKey.from_private_bytes(_RUNTIME_SIGNING_KEY)
         except ValueError as exc:
             raise ValueError("receipt is unsigned or foreign") from exc
-        public_key = private_key.public_key().public_bytes_raw()
-        return _authenticate_evidence(record, engagement, public_key=public_key)
-    return _authenticate_evidence(record, engagement, key=_RUNTIME_KEY)
+        return private_key.public_key().public_bytes_raw()
+    return None
+
+
+def complete_execution_accounting(record: dict[str, Any]) -> dict[str, Any]:
+    """Authenticate an accounting retry and preserve its sealed evidence identity."""
+    if (
+        _RUNTIME_KEY is not None
+        or _RUNTIME_SIGNING_KEY is not None
+        or any(field in record for field in (SIGNATURE_FIELD, PUBLIC_SIGNATURE_FIELD))
+    ):
+        _signed_digests(record, key=_RUNTIME_KEY, public_key=_runtime_public_key())
+    updated = {**record, "accounting_pending": False}
+    updated.pop("accounting_error", None)
+    return _sign_receipt(updated, _RUNTIME_KEY, _RUNTIME_SIGNING_KEY)
+
+
+def verify_runtime_receipt(record: dict[str, Any], engagement: Path) -> EvidenceState:
+    """Verify a receipt inside the guard process without exposing signing material."""
+    return _evidence_state(record, engagement, key=_RUNTIME_KEY, public_key=_runtime_public_key())
 
 
 __all__ = [
@@ -214,6 +261,9 @@ __all__ = [
     "RECEIPT_SIGNING_KEY_ENV",
     "PUBLIC_SIGNATURE_FIELD",
     "SIGNATURE_FIELD",
+    "EvidenceState",
+    "file_digest",
+    "complete_execution_accounting",
     "seal_execution_receipt",
     "verify_runtime_receipt",
     "verified_evidence_paths",
