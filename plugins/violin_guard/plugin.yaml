@@ -1,4 +1,4 @@
-name: violin-guard
+name: violin_guard
 version: 4.0.0
 description: Typed scope guards and an execute-and-record boundary with bounded synchronization
   windows.
@@ -8,7 +8,7 @@ pip_dependencies:
   - cryptography>=45,<51
   - filelock>=4.0.1,<5
   - pydantic>=2.0,<3
-  - psutil>=6.0.0,<8
+  - psutil>=6.0.0,<9
   - netaddr>=1.3.0,<2
   - yarl>=1.9,<2
   - pyyaml>=6.0,<7

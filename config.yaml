@@ -188,7 +188,7 @@ platform_toolsets:
 
 plugins:
   enabled:
-    - violin-guard
+    - violin_guard
 
 known_plugin_toolsets:
   cli:

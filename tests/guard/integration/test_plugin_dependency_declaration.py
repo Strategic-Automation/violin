@@ -26,3 +26,26 @@ def test_plugin_declares_imported_runtime_dependencies():
     required = {distributions.get(name, name) for name in imports} & development.keys()
     assert required <= declared.keys()
     assert all(spec == development[name] for name, spec in declared.items())
+
+
+def test_plugin_allows_hermes_android_psutil_source_version():
+    # Hermes resolves all platform branches, including its Android Git build.
+    root = Path(__file__).resolve().parents[3]
+    manifest = yaml.safe_load(
+        (root / "plugins/violin_guard/plugin.yaml").read_text(encoding="utf-8")
+    )
+    requirement = next(
+        Requirement(spec)
+        for spec in manifest["pip_dependencies"]
+        if Requirement(spec).name == "psutil"
+    )
+    assert requirement.specifier.contains("8.0.0")
+
+
+def test_packaged_plugin_identity_matches_dependency_discovery_directory():
+    root = Path(__file__).resolve().parents[3]
+    plugin = root / "plugins" / "violin_guard"
+    manifest = yaml.safe_load((plugin / "plugin.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
+    assert manifest["name"] == plugin.name
+    assert manifest["name"] in config["plugins"]["enabled"]

@@ -18,7 +18,7 @@
   <b>35 playbooks · 19 references · 14 templates · required execution guard · Hermes-native</b>
 </p>
 
-Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, seven routed skills, and the required `violin-guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
+Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, seven routed skills, and the required `violin_guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
@@ -70,17 +70,25 @@ comparison with autonomous pentest-agent designs.
 
 ```bash
 hermes profile install https://github.com/Strategic-Automation/violin
-hermes -p violin plugins enable violin-guard
+hermes -p violin plugins enable violin_guard
 hermes -p violin
 ```
 
-Complete Hermes' dependency installation and consent prompts when enabling the
-plugin. Guard dependencies are declared in `plugins/violin_guard/plugin.yaml`;
-installing them into a profile's development `.venv` does not install them into
-the Hermes plugin runtime. Restart Hermes after installation and confirm that
-`violin_status` is available before starting an engagement. If loading fails,
-inspect Hermes' `logs/errors.log` for the missing dependency and rerun the plugin
-enable step in that profile.
+Guard dependencies are declared in `plugins/violin_guard/plugin.yaml`. The
+plugin name, directory, and enabled configuration all use `violin_guard`, so
+Hermes can resolve its dependencies without a directory workaround. Installing
+dependencies into the development `.venv` does not install them into Hermes.
+After installation, reconcile the runtime and verify registration:
+
+```bash
+hermes -p violin pm install
+hermes -p violin plugins doctor ~/.hermes/profiles/violin/plugins/violin_guard --ci
+hermes -p violin tools list
+```
+
+Plugin Doctor should report 12 tools and 5 hooks, and `violin_guard` should appear
+as an enabled toolset. Restart Hermes after installation before starting an
+engagement. Reinstall the profile to migrate an older `violin-guard` installation.
 
 Then start with an authorized target and let Violin collect the scope before
 any target interaction:

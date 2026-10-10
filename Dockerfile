@@ -103,7 +103,9 @@ RUN sed -i '/^\[tool\.pytest\.ini_options\]/,$d' /violin/pyproject.toml \
     && ! grep -q 'tool\.pytest' /violin/pyproject.toml
 
 # Install the violin profile into Hermes per official distribution.yaml spec
-RUN hermes profile install /violin --name violin -y
+RUN hermes profile install /violin --name violin -y \
+    && hermes -p violin pm install \
+    && hermes -p violin plugins doctor /root/.hermes/profiles/violin/plugins/violin_guard --ci
 
 # Create home profile link so script paths resolve consistently under Hermes profile execution
 RUN mkdir -p /root/.hermes/profiles/violin/home \

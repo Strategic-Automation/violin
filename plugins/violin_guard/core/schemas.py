@@ -1,4 +1,4 @@
-"""Typed tool schemas for the violin-guard plugin using Pydantic v2."""
+"""Typed tool schemas for the violin_guard plugin using Pydantic v2."""
 
 from __future__ import annotations
 
