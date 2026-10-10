@@ -292,11 +292,14 @@ else
     fail "profile show failed"
   fi
 
-  # ── Tools summary ──
-  if hermes -p "$SMOKE_PROFILE" tools --summary 2>&1; then
-    pass "tools --summary succeeded"
+  # ── Noninteractive tool discovery ──
+  if tools_output=$(hermes -p "$SMOKE_PROFILE" tools list 2>&1) \
+    && printf '%s\n' "$tools_output" | grep -Eq 'enabled[[:space:]]+violin_guard'; then
+    printf '%s\n' "$tools_output"
+    pass "tools list confirms the enabled violin_guard toolset"
   else
-    fail "tools --summary failed"
+    printf '%s\n' "$tools_output"
+    fail "tools list did not expose the enabled guard toolset"
   fi
 
   # ── Smoke chat ──
@@ -318,6 +321,8 @@ else
   echo "    Cleaning up profile..."
   if hermes profile delete "$SMOKE_PROFILE" -y 2>&1; then
     pass "Profile deleted: $SMOKE_PROFILE"
+  elif hermes profile purge-identity "$SMOKE_PROFILE" 2>&1; then
+    pass "Profile deleted and routing identity settled: $SMOKE_PROFILE"
   else
     fail "Profile cleanup failed"
   fi
