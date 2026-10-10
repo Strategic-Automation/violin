@@ -245,13 +245,20 @@ else
 
   # ── Install ──
   echo "    Installing profile as '$SMOKE_PROFILE'..."
-  # Under Windows git-bash, REPO_ROOT is a /c/... path that Python's pathlib
-  # mangles into \c\... — convert to a native Windows path so `hermes` (Python)
-  # resolves distribution.yaml at the repo root. No-op on native Linux/Kali.
+  # Install tracked payload only; development .venv contains symlinks that
+  # Hermes intentionally refuses in distribution sources.
+  if [ -n "$(git status --porcelain)" ]; then
+    fail "Full install smoke requires a clean committed source tree"
+    summary
+    exit 1
+  fi
+  INSTALL_STAGE=$(mktemp -d)
+  trap 'rm -rf "$INSTALL_STAGE"' EXIT
+  git archive HEAD | tar -x -C "$INSTALL_STAGE"
   if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "cygwin"* ]]; then
-    INSTALL_SRC="$(cygpath -w "$REPO_ROOT" 2>/dev/null || echo "$REPO_ROOT")"
+    INSTALL_SRC="$(cygpath -w "$INSTALL_STAGE")"
   else
-    INSTALL_SRC="$REPO_ROOT"
+    INSTALL_SRC="$INSTALL_STAGE"
   fi
   if hermes profile install "$INSTALL_SRC" --name "$SMOKE_PROFILE" -y 2>&1; then
     pass "Profile installed: $SMOKE_PROFILE"
@@ -261,6 +268,13 @@ else
     hermes profile delete "$SMOKE_PROFILE" -y 2>/dev/null || true
     summary
     exit 1
+  fi
+
+  if hermes -p "$SMOKE_PROFILE" pm install \
+    && hermes -p "$SMOKE_PROFILE" plugins doctor violin_guard --ci; then
+    pass "Guard runtime dependencies and registration verified"
+  else
+    fail "Guard runtime dependency or registration validation failed"
   fi
 
   # ── Show profile info ──
