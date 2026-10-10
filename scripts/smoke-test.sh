@@ -260,7 +260,13 @@ else
   else
     INSTALL_SRC="$INSTALL_STAGE"
   fi
-  if hermes profile install "$INSTALL_SRC" --name "$SMOKE_PROFILE" -y 2>&1; then
+  # Inherit the configured provider privately; profile install preserves .env.
+  if ! hermes profile create "$SMOKE_PROFILE" --clone-from default --no-alias; then
+    fail "Smoke profile creation failed"
+    summary
+    exit 1
+  fi
+  if hermes profile install "$INSTALL_SRC" --name "$SMOKE_PROFILE" --force -y 2>&1; then
     pass "Profile installed: $SMOKE_PROFILE"
   else
     fail "Profile install failed"
