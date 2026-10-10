@@ -70,7 +70,8 @@ comparison with autonomous pentest-agent designs.
 
 ```bash
 hermes profile install https://github.com/Strategic-Automation/violin
-hermes -p violin plugins enable violin_guard
+hermes -p violin plugins disable violin_guard
+hermes -p violin plugins enable violin_guard --no-allow-tool-override
 hermes -p violin
 ```
 
@@ -78,10 +79,10 @@ Guard dependencies are declared in `plugins/violin_guard/plugin.yaml`. The
 plugin name, directory, and enabled configuration all use `violin_guard`, so
 Hermes can resolve its dependencies without a directory workaround. Installing
 dependencies into the development `.venv` does not install them into Hermes.
-After installation, reconcile the runtime and verify registration:
+The disable/enable cycle above forces dependency admission even when the profile
+configuration already enables the plugin. Verify registration after installation:
 
 ```bash
-hermes -p violin pm install
 hermes -p violin plugins doctor ~/.hermes/profiles/violin/plugins/violin_guard --ci
 hermes -p violin tools list
 ```

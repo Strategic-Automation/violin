@@ -270,7 +270,8 @@ else
     exit 1
   fi
 
-  if hermes -p "$SMOKE_PROFILE" pm install \
+  if hermes -p "$SMOKE_PROFILE" plugins disable violin_guard \
+    && hermes -p "$SMOKE_PROFILE" plugins enable violin_guard --no-allow-tool-override \
     && hermes -p "$SMOKE_PROFILE" plugins doctor violin_guard --ci; then
     pass "Guard runtime dependencies and registration verified"
   else
