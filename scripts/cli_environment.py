@@ -7,6 +7,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NoReturn
 
 # Import names for the runtime dependencies declared in pyproject.toml.
 _DEPENDENCY_MODULES = {
@@ -31,6 +32,28 @@ def _format_command(arguments: list[str], *, powershell: bool) -> str:
     return shlex.join(arguments)
 
 
+def _dependency_exit(profile_root: Path, headline: str) -> NoReturn:
+    powershell = sys.platform == "win32"
+    command = _format_command(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(profile_root),
+            "python",
+            str(Path(sys.argv[0]).resolve()),
+            *sys.argv[1:],
+        ],
+        powershell=powershell,
+    )
+    shell_hint = " in PowerShell" if powershell else ""
+    raise SystemExit(
+        f"{headline}\n"
+        f"Current interpreter: {sys.executable}\n"
+        f"Run{shell_hint} with the project environment instead:\n  {command}"
+    )
+
+
 @contextmanager
 def project_imports(profile_root: Path) -> Iterator[None]:
     """Explain dependency failures without hiding internal project import errors."""
@@ -39,25 +62,7 @@ def project_imports(profile_root: Path) -> Iterator[None]:
     except ImportError as exc:
         if not exc.name or exc.name.split(".")[0] not in _DEPENDENCY_MODULES:
             raise
-        powershell = sys.platform == "win32"
-        command = _format_command(
-            [
-                "uv",
-                "run",
-                "--project",
-                str(profile_root),
-                "python",
-                str(Path(sys.argv[0]).resolve()),
-                *sys.argv[1:],
-            ],
-            powershell=powershell,
-        )
-        shell_hint = " in PowerShell" if powershell else ""
-        raise SystemExit(
-            f"Cannot import a Violin dependency: {exc}\n"
-            f"Current interpreter: {sys.executable}\n"
-            f"Run{shell_hint} with the project environment instead:\n  {command}"
-        ) from None
+        _dependency_exit(profile_root, f"Cannot import a Violin dependency: {exc}")
 
 
 def ensure_venv(profile_root: Path) -> None:
@@ -67,25 +72,10 @@ def ensure_venv(profile_root: Path) -> None:
 
         return
     except ImportError as exc:
-        powershell = sys.platform == "win32"
-        command = _format_command(
-            [
-                "uv",
-                "run",
-                "--project",
-                str(profile_root),
-                "python",
-                str(Path(sys.argv[0]).resolve()),
-                *sys.argv[1:],
-            ],
-            powershell=powershell,
+        _dependency_exit(
+            profile_root,
+            f"Cannot import Violin runtime dependency {exc.name!r}.",
         )
-        shell_hint = " in PowerShell" if powershell else ""
-        raise SystemExit(
-            f"Cannot import Violin runtime dependency {exc.name!r}.\n"
-            f"Current interpreter: {sys.executable}\n"
-            f"Run{shell_hint} with the project environment instead:\n  {command}"
-        ) from None
 
 
 @contextmanager

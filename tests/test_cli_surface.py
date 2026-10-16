@@ -208,3 +208,38 @@ def test_cli_module_entry_points(module):
     )
     assert result.returncode == 0, result.stderr
     assert "usage:" in result.stdout
+
+
+def test_project_imports_diagnostic_message(tmp_path: Path) -> None:
+    from scripts.cli_environment import project_imports
+
+    with pytest.raises(SystemExit) as exc_info, project_imports(tmp_path):
+        raise ImportError("No module named 'yaml'", name="yaml")
+
+    message = str(exc_info.value)
+    assert message.startswith("Cannot import a Violin dependency: No module named 'yaml'\n")
+    assert f"Current interpreter: {sys.executable}\n" in message
+    assert "with the project environment instead:\n" in message
+
+
+def test_ensure_venv_diagnostic_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins
+
+    from scripts.cli_environment import ensure_venv
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "pydantic":
+            raise ModuleNotFoundError("No module named 'pydantic'", name="pydantic")
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    with pytest.raises(SystemExit) as exc_info:
+        ensure_venv(tmp_path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Cannot import Violin runtime dependency 'pydantic'.\n")
+    assert f"Current interpreter: {sys.executable}\n" in message
+    assert "with the project environment instead:\n" in message
