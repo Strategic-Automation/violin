@@ -44,10 +44,10 @@ def _start_ptt_task(
     selected = next((item for item in tasks if item.id == task_id), None)
     if selected is None:
         raise ValueError(f"PTT task {task_id!r} not found")
-    if selected.status not in {"[ ]", "[~]", "[x]", "[-]"}:
+    if selected.status not in {"[ ]", "[~]", "[x]", "[!]", "[-]"}:
         raise ValueError(
             f"PTT task {task_id!r} has status {selected.status!r}; "
-            "it must be [ ], [~], [x], or [-] before it can be started"
+            "it must be [ ], [~], [x], [!], or [-] before it can be started"
         )
     try:
         phase = ptt.normalize_phase(selected.phase)
@@ -173,10 +173,20 @@ def _apply_ptt_task_transition(
         ptt.update_task(ptt_file, task, "[~]", note)
         return _json("ok", task_id=task, task_refreshed=True, binding=binding)
 
+    # A blocked disposition stops target execution while keeping the task
+    # resumable through the normal [~] start transition.
+    if status == "[!]":
+        if existing.status != "[~]":
+            raise ValueError("only the active [~] task may be marked blocked")
+        ptt.update_task(ptt_file, task, "[!]", note)
+        return _json("ok", task_id=task, task_blocked=True)
+
     # Closing an active task outside of a batch
     if status in {"[x]", "[-]"}:
         if existing.status != "[~]":
-            raise ValueError("only the active [~] task may be closed outside a batch")
+            phase = ptt.normalize_phase(existing.phase)
+            if phase is not ptt.Phase.SCOPING or existing.status != "[ ]":
+                raise ValueError("only the active [~] task may be closed outside a batch")
         _validate_phase_exit(_eng_path(eng_dir), task, status)
         ptt.update_task(ptt_file, task, status, note)
         return _json("ok", task_id=task, task_closed=True)
@@ -213,12 +223,23 @@ def handle_record_ptt(args: dict[str, Any], **kwargs: Any) -> str:
         doc = ptt.parse_ptt(_eng_path(eng_dir) / "state" / "ptt.md")
         pending = state.get_pending_sync(eng_dir)
         _validate_record_ptt_inputs(args, doc, pending)
-        binding = bind_task(
-            eng_dir,
-            task_id=task,
-            delivery_id=reservation.id,
-            hypothesis_id=hypothesis_id,
-            technique=technique,
+        selected = next((item for item in doc if item.id == task), None)
+        closes_unstarted_scoping = (
+            selected is not None
+            and selected.phase == ptt.Phase.SCOPING.value
+            and selected.status == "[ ]"
+            and status in {"[x]", "[-]"}
+        )
+        binding = (
+            {}
+            if closes_unstarted_scoping
+            else bind_task(
+                eng_dir,
+                task_id=task,
+                delivery_id=reservation.id,
+                hypothesis_id=hypothesis_id,
+                technique=technique,
+            )
         )
         note = _with_skill_token(note, skill, digest)
         return _apply_ptt_task_transition(

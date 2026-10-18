@@ -65,3 +65,14 @@ def test_scope_hosts_keeps_url_exclusions_path_scoped():
 
     assert "app.target.example" in target_hosts
     assert excluded_hosts == {"critical-admin.target.example"}
+
+
+def test_cidr_host_membership_honors_excluded_addresses():
+    scope_data = {
+        "targets": {"cidrs": ["10.0.2.0/24"]},
+        "exclusions": {"ranges": ["10.0.2.10-10.0.2.20"]},
+    }
+
+    assert targets._host_in_scope_data(scope_data, "10.0.2.2")
+    assert not targets._host_in_scope_data(scope_data, "10.0.2.15")
+    assert not targets._host_in_scope_data(scope_data, "10.0.3.2")

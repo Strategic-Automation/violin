@@ -79,6 +79,11 @@ Guard dependencies are declared in `plugins/violin_guard/plugin.yaml`. The
 plugin name, directory, and enabled configuration all use `violin_guard`, so
 Hermes can resolve its dependencies without a directory workaround. Installing
 dependencies into the development `.venv` does not install them into Hermes.
+The guard in a Hermes profile automatically creates a persistent Ed25519 receipt
+signing key under that profile's `state/` directory the first time the receipt
+code loads. Keep that profile state with the installation: replacing the key
+makes earlier receipts unverifiable. The benchmark runner supplies its own
+isolated key when it launches a benchmark.
 The disable/enable cycle above forces dependency admission even when the profile
 configuration already enables the plugin. Verify registration after installation:
 

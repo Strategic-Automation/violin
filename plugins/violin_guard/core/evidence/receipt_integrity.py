@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from filelock import FileLock
 
 RECEIPT_KEY_ENV = "VIOLIN_RECEIPT_KEY"
 RECEIPT_SIGNING_KEY_ENV = "VIOLIN_RECEIPT_SIGNING_KEY"
@@ -48,10 +50,67 @@ def _decode_key(value: str | bytes | None) -> bytes | None:
     return decoded if len(decoded) >= 32 else None
 
 
-# The runner injects this only into the Hermes process. Remove it from the
-# process environment as the plugin loads so target commands cannot inherit it.
-_RUNTIME_KEY = _decode_key(os.environ.pop(RECEIPT_KEY_ENV, None))
-_RUNTIME_SIGNING_KEY = _decode_key(os.environ.pop(RECEIPT_SIGNING_KEY_ENV, None))
+def _load_or_create_profile_signing_key(key_path: Path) -> bytes:
+    """Load a stable native-profile signer, creating it once with private permissions."""
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(key_path) + ".lock", timeout=20):
+        if key_path.is_symlink():
+            raise ValueError(f"native receipt signing key must not be a symlink: {key_path}")
+        if key_path.exists():
+            metadata = key_path.stat()
+            if not key_path.is_file():
+                raise ValueError(f"native receipt signing key must be a regular file: {key_path}")
+            if os.name != "nt" and metadata.st_mode & 0o077:
+                raise ValueError(f"native receipt signing key permissions must be 0600: {key_path}")
+            if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+                raise ValueError(
+                    f"native receipt signing key must be owned by this user: {key_path}"
+                )
+            key = key_path.read_bytes()
+            if len(key) != 32:
+                raise ValueError(f"native receipt signing key must contain 32 bytes: {key_path}")
+            return key
+        key = secrets.token_bytes(32)
+        descriptor = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(key)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except BaseException:
+            key_path.unlink(missing_ok=True)
+            raise
+        return key
+
+
+def _native_profile_signing_key(profile_root: Path | None = None) -> bytes | None:
+    """Use profile-local signing only from an installed Hermes profile tree."""
+    profile_root = profile_root or Path(__file__).resolve().parents[4]
+    path_parts = {part.casefold() for part in profile_root.parts}
+    if not {".hermes", "profiles"}.issubset(path_parts):
+        return None
+    if not (profile_root / "config.yaml").is_file():
+        return None
+    if not (profile_root / "plugins" / "violin_guard" / "plugin.yaml").is_file():
+        return None
+    return _load_or_create_profile_signing_key(profile_root / "state" / "receipt-signing-key")
+
+
+# Runner keys take precedence and are removed as the plugin loads so target
+# child processes cannot inherit signing material. Ordinary installed Hermes
+# profiles use a persistent key held under their private profile state.
+_injected_hmac_key = os.environ.pop(RECEIPT_KEY_ENV, None)
+_injected_signing_key = os.environ.pop(RECEIPT_SIGNING_KEY_ENV, None)
+_RUNTIME_KEY = _decode_key(_injected_hmac_key)
+_RUNTIME_SIGNING_KEY = _decode_key(_injected_signing_key)
+if _injected_hmac_key is not None and _RUNTIME_KEY is None:
+    raise ValueError(f"{RECEIPT_KEY_ENV} must contain at least 32 bytes of hex key material")
+if _injected_signing_key is not None and (
+    _RUNTIME_SIGNING_KEY is None or len(_RUNTIME_SIGNING_KEY) != 32
+):
+    raise ValueError(f"{RECEIPT_SIGNING_KEY_ENV} must contain exactly 32 bytes of hex key material")
+if _RUNTIME_KEY is None and _RUNTIME_SIGNING_KEY is None:
+    _RUNTIME_SIGNING_KEY = _native_profile_signing_key()
 
 
 def _canonical_receipt(record: dict[str, Any]) -> bytes:

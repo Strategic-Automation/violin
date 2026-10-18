@@ -1,8 +1,12 @@
 """Target resolution regression tests."""
 
+import json
+
 import pytest
+import yaml
 
 from plugins.violin_guard.core.commands.targets import resolve_target
+from plugins.violin_guard.handlers.hypothesis_handlers import handle_record_hypothesis
 from tests.guard.handlers._burst_helpers import (
     _run,
 )
@@ -40,6 +44,17 @@ def test_target_resolution_rejects_conflicting_and_ambiguous_selectors():
         resolve_target(scope, role="database", host_query=None, field="host")
 
 
+def test_target_resolution_accepts_cidr_member_and_rejects_exclusions():
+    scope = {
+        "targets": {"cidrs": ["10.0.2.0/24"]},
+        "exclusions": {"ip_addresses": ["10.0.2.15"]},
+    }
+
+    assert resolve_target(scope, role=None, host_query="10.0.2.2") == "10.0.2.2"
+    with pytest.raises(ValueError, match="not present in scope"):
+        resolve_target(scope, role=None, host_query="10.0.2.15")
+
+
 def test_target_role_url(eng):
     """handle_target returns the first in-scope IP (canonical IP form)."""
     r = _run("target", "--eng-dir", str(eng), "--role", "web", "--field", "url")
@@ -63,6 +78,31 @@ def test_target_host_ip(eng):
     r = _run("target", "--eng-dir", str(eng), "--host", "10.10.10.10", "--field", "ip")
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "10.10.10.10"
+
+
+def test_hypothesis_accepts_cidr_member_and_rejects_excluded_member(eng):
+    scope_path = eng / "scope" / "scope.yaml"
+    scope = yaml.safe_load(scope_path.read_text(encoding="utf-8"))
+    scope["targets"]["ip_addresses"] = []
+    scope["targets"]["cidrs"] = ["10.10.10.0/24"]
+    scope["exclusions"]["ip_addresses"] = ["10.10.10.15"]
+    scope_path.write_text(yaml.safe_dump(scope), encoding="utf-8")
+
+    result = json.loads(
+        handle_record_hypothesis(
+            {"eng_dir": str(eng), "target": "10.10.10.11", "service": "http", "port": "80"}
+        )
+    )
+    assert result["status"] == "ok"
+    assert result["hypothesis"]["target"] == "10.10.10.11"
+
+    rejected = json.loads(
+        handle_record_hypothesis(
+            {"eng_dir": str(eng), "target": "10.10.10.15", "service": "http", "port": "80"}
+        )
+    )
+    assert rejected["status"] == "error"
+    assert "not in scope" in rejected["error"]
 
 
 def test_target_rejects_unauthorized_ip(eng):

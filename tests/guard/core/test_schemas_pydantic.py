@@ -213,10 +213,14 @@ def test_ptt_payload_rejects_batch_review_fields():
         "id": "PT-001",
         "skill": "pentest",
         "technique": "recon",
-        "note": "started",
+        "note": "start recon",
     }
     model = schemas.RecordPttArgsModel.model_validate(required)
     assert model.status == ""
+    with pytest.raises(ValidationError):
+        schemas.RecordPttArgsModel.model_validate(
+            {key: value for key, value in required.items() if key != "note"}
+        )
     for field in (
         "outcome",
         "evidence_paths",

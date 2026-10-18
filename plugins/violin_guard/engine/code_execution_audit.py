@@ -174,6 +174,11 @@ def parse_metadata(source: object) -> tuple[dict[str, str] | None, str | None]:
     first_line = source.splitlines()[0] if source.splitlines() else ""
     match = _HEADER.fullmatch(first_line)
     if not match:
+        if "# violin:" in first_line and (r"\"" in first_line or r"\n" in first_line):
+            return None, (
+                "execute_code metadata appears escaped inside the code string; use ordinary "
+                "JSON quotes and a physical newline after the header, for example: " + _HEADER_FORM
+            )
         return None, "execute_code requires first-line metadata: " + _HEADER_FORM
     try:
         raw = json.loads(match.group(1))
@@ -185,11 +190,25 @@ def parse_metadata(source: object) -> tuple[dict[str, str] | None, str | None]:
         try:
             target = _resolve_target(raw["eng_dir"])
             session_id = state.resolve_session_id(raw["eng_dir"])
-        except Exception as exc:
-            cause = str(exc).strip()
-            return None, _HEADER_ERROR + (f" Cause: {cause}" if cause else "")
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+            if "no single declared target in scope" in str(exc):
+                return None, (
+                    "execute_code first-line metadata is valid, but scope.yaml does not declare "
+                    "one exact target to infer: no single declared target in scope (for example, a "
+                    "CIDR-only scope); provide target and session_id explicitly in the header"
+                )
+            return None, f"execute_code metadata could not resolve engagement state: {exc}"
         if not target or not session_id:
-            return None, _HEADER_ERROR
+            missing = [
+                name
+                for name, value in (("target", target), ("session_id", session_id))
+                if not value
+            ]
+            return None, (
+                "execute_code could not infer "
+                + " and ".join(missing)
+                + " from engagement state; provide all four metadata fields explicitly"
+            )
         raw["target"] = target
         raw["session_id"] = session_id
     elif set(raw) != _REQUIRED_FIELDS:

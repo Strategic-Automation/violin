@@ -9,7 +9,7 @@ from plugins.violin_guard.core.engagement import bootstrap, ptt, state
 from plugins.violin_guard.handlers.ptt_gates import (
     _redact_sensitive_note,
 )
-from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
+from plugins.violin_guard.handlers.ptt_handlers import _apply_ptt_task_transition, _start_ptt_task
 
 
 def test_multi_task_ptt_update_validates_before_atomic_replace(tmp_path: Path) -> None:
@@ -66,3 +66,27 @@ def test_ptt_notes_redact_credentials_before_persisting() -> None:
     assert "[REDACTED_JWT]" in redacted
     assert "Bearer [REDACTED_TOKEN]" in redacted
     assert "[REDACTED_API_KEY]" in redacted
+
+
+def test_blocked_active_task_can_resume_and_unstarted_scoping_task_can_close(tmp_path):
+    assert bootstrap.init_engagement(tmp_path, host="10.10.10.10") == 0
+    path = tmp_path / "state" / "ptt.md"
+    ptt.update_task(path, "PT-010", "[~]", "start recon")
+    doc = ptt.parse_ptt(path)
+    active = next(task for task in doc if task.status == "[~]")
+    response = _apply_ptt_task_transition(
+        str(tmp_path), doc, active.id, "[!]", "blocked pending approval", {}
+    )
+    assert '"task_blocked": true' in response
+    blocked_doc = ptt.parse_ptt(path)
+    blocked = next(task for task in blocked_doc if task.id == active.id)
+    assert blocked.status == "[!]"
+    _start_ptt_task(path, blocked_doc, active.id, "[~]", "resume after approval", tmp_path)
+    assert next(task for task in ptt.parse_ptt(path) if task.id == active.id).status == "[~]"
+
+    doc = ptt.parse_ptt(path)
+    scoping = next(task for task in doc if task.phase == "SCOPING" and task.status == "[ ]")
+    _apply_ptt_task_transition(str(tmp_path), doc, scoping.id, "[x]", "scope confirmed", {})
+    current = ptt.parse_ptt(path)
+    assert next(task for task in current if task.id == scoping.id).status == "[x]"
+    assert next(task for task in current if task.id == active.id).status == "[~]"
