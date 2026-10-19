@@ -91,6 +91,7 @@ COPY skills /violin/skills/
 COPY scripts /violin/scripts/
 COPY assets /violin/assets/
 COPY benchmark/run.py benchmark/engagement.py /violin/benchmark/
+COPY benchmark/photoview/__init__.py benchmark/photoview/run.py benchmark/photoview/usage.py /violin/benchmark/photoview/
 COPY benchmark/targets/duck-store/scope.yaml benchmark/targets/duck-store/engage.md /violin/benchmark/targets/duck-store/
 
 # The image has no tests/ tree (whitelist above), so pytest must not be
