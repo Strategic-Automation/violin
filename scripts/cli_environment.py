@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -32,11 +34,32 @@ def _format_command(arguments: list[str], *, powershell: bool) -> str:
     return shlex.join(arguments)
 
 
+def _uv_command() -> str:
+    """Find uv even when Hermes gives the tool shell a profile-local HOME/PATH."""
+    executable = shutil.which("uv")
+    if executable:
+        return executable
+
+    # Hermes can set HOME to <profile>/home. Walk back to the real account home
+    # so uv installed by its standard installer remains discoverable.
+    if sys.platform != "win32":
+        home = Path.home()
+        for directory in (home, *home.parents):
+            for candidate in (
+                directory / ".local" / "bin" / "uv",
+                directory / ".cargo" / "bin" / "uv",
+            ):
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return str(candidate)
+    return "uv"
+
+
 def _dependency_exit(profile_root: Path, headline: str) -> NoReturn:
     powershell = sys.platform == "win32"
+    uv = _uv_command()
     command = _format_command(
         [
-            "uv",
+            uv,
             "run",
             "--project",
             str(profile_root),
@@ -47,10 +70,13 @@ def _dependency_exit(profile_root: Path, headline: str) -> NoReturn:
         powershell=powershell,
     )
     shell_hint = " in PowerShell" if powershell else ""
+    uv_hint = (
+        "\nInstall uv or add its install directory to PATH before retrying." if uv == "uv" else ""
+    )
     raise SystemExit(
         f"{headline}\n"
         f"Current interpreter: {sys.executable}\n"
-        f"Run{shell_hint} with the project environment instead:\n  {command}"
+        f"Run{shell_hint} with the project environment instead:\n  {command}{uv_hint}"
     )
 
 

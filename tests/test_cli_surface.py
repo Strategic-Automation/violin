@@ -14,7 +14,7 @@ import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-from scripts.cli_environment import _DEPENDENCY_MODULES, _format_command
+from scripts.cli_environment import _DEPENDENCY_MODULES, _format_command, _uv_command
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "violin_guard.py"
@@ -29,6 +29,13 @@ def test_cli_dependency_modules_match_project_dependencies() -> None:
         expected_modules.add(import_aliases.get(package_name, package_name.replace("-", "_")))
 
     assert expected_modules == _DEPENDENCY_MODULES
+
+
+def test_readme_documents_native_cli_environment_setup() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "uv python install 3.11" in readme
+    assert 'uv sync --project "$HOME/.hermes/profiles/violin" --no-dev' in readme
+    assert "profile-local `HOME`" in readme
 
 
 @pytest.mark.parametrize("script_name", ["violin_guard.py", "generate-closeout.py"])
@@ -71,9 +78,9 @@ runpy.run_path(script, run_name="__main__")
         assert "Traceback" not in result.stderr
         assert sys.executable in result.stderr
         assert (
-            "'uv' 'run' '--project'" in result.stderr
+            _format_command([_uv_command(), "run", "--project"], powershell=True) in result.stderr
             if sys.platform == "win32"
-            else "uv run --project" in result.stderr
+            else shlex.join([_uv_command(), "run", "--project"]) in result.stderr
         )
         assert str(script) in result.stderr
         assert "--help" in result.stderr
@@ -105,7 +112,7 @@ def test_cli_without_virtualenv_prints_copyable_command(tmp_path: Path, script_n
     assert "Traceback" not in result.stderr
     assert sys.executable in result.stderr
     expected_arguments = [
-        "uv",
+        _uv_command(),
         "run",
         "--project",
         str(checkout),
@@ -131,6 +138,46 @@ def test_recovery_command_quotes_powershell_arguments() -> None:
 def test_recovery_command_preserves_posix_arguments() -> None:
     arguments = ["uv", "run", "--project", "/O'Brien/my project", "", "a&b", "$name"]
     assert shlex.split(_format_command(arguments, powershell=False)) == arguments
+
+
+def test_uv_recovery_finds_installer_path_above_hermes_profile_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    account_home = tmp_path / "account"
+    profile_home = account_home / ".hermes" / "profiles" / "violin" / "home"
+    uv = account_home / ".local" / "bin" / "uv"
+    uv.parent.mkdir(parents=True)
+    uv.touch()
+    uv.chmod(0o755)
+    profile_home.mkdir(parents=True)
+
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: profile_home))
+    monkeypatch.setattr("scripts.cli_environment.shutil.which", lambda _: None)
+    monkeypatch.setattr("scripts.cli_environment.sys.platform", "linux")
+
+    assert _uv_command() == str(uv)
+
+
+def test_missing_uv_diagnostic_explains_path_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    from scripts.cli_environment import ensure_venv
+
+    original_import = builtins.__import__
+
+    def missing_pydantic(name, *args, **kwargs):
+        if name == "pydantic":
+            raise ModuleNotFoundError("No module named 'pydantic'", name=name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_pydantic)
+    monkeypatch.setattr("scripts.cli_environment.shutil.which", lambda _: None)
+    monkeypatch.setattr("scripts.cli_environment.sys.platform", "win32")
+
+    with pytest.raises(SystemExit, match="Install uv or add its install directory to PATH"):
+        ensure_venv(ROOT)
 
 
 def test_cli_does_not_advertise_removed_adapter_commands() -> None:
@@ -168,12 +215,14 @@ def test_guard_imports_from_owning_modules() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_generate_closeout_script_surface() -> None:
+def test_generate_closeout_script_surface(tmp_path: Path) -> None:
     closeout_script = ROOT / "scripts" / "generate-closeout.py"
     assert closeout_script.is_file()
 
     result = subprocess.run(
         [sys.executable, str(closeout_script), "--help"],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": ""},
         capture_output=True,
         text=True,
         check=False,
