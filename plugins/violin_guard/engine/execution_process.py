@@ -59,10 +59,10 @@ def _execute(
     output_locks: _EvidenceOutputLocks,
 ) -> dict[str, Any]:
     """Execute one already-authorized command and persist its complete receipt."""
-    # Rewrite curl/wget HTTP probes to capture the response status line (add -i)
-    # so saved evidence always carries a literal HTTP/1.x status line. Lives in
-    # core.commands.http_proof; applied before the receipt is sealed and before the
-    # process runs so both the manifest and the executed argv record the fix.
+    # Rewrite curl/wget HTTP probes to capture response status while preserving
+    # consumer-facing bodies. Lives in core.commands.http_proof; applied before
+    # the receipt is sealed and before the process runs so the manifest and
+    # executed argv record the same instrumentation.
     requested_command = command
     command = normalize_http_proof_flags(command)
     engagement = resolved_engagement

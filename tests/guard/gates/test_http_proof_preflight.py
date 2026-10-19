@@ -12,8 +12,8 @@ from plugins.violin_guard.gates import command
         ("curl -sS https://example.test/schema.json -o evidence/schema.json", False),
         ("curl -sS https://example.test/schema.json", False),
         ("curl -sS -i https://example.test/schema.json", False),
-        ("curl -sS https://example.test/schema.json | python3 -c 'print(input())'", True),
-        ("printf '%s' $( curl -sS https://example.test/schema.json )", True),
+        ("curl -sS https://example.test/schema.json | python3 -c 'print(input())'", False),
+        ("printf '%s' $( curl -sS https://example.test/schema.json )", False),
     ],
 )
 def test_http_preflight_preserves_authorization_input(tmp_path, monkeypatch, probe, warns):

@@ -226,18 +226,16 @@ def test_reopen_closed_ptt_task_allowed(ctf_eng):
     assert "PT-002" in res
 
 
-def test_invalid_ptt_start_status_error_message(ctf_eng):
-    """Verify starting a blocked task gives an accurate error message."""
+def test_blocked_ptt_task_can_be_resumed(ctf_eng):
+    """A blocked task can resume through the ordinary start transition."""
     ptt_path = ctf_eng / "state" / "ptt.md"
     ptt.update_task(ptt_path, "PT-002", "[!]", "blocked task")
     updated_tasks = ptt.parse_ptt(ptt_path)
 
     from plugins.violin_guard.handlers.ptt_handlers import _start_ptt_task
 
-    with pytest.raises(ValueError, match=r"has status '\[!\]'"):
-        _start_ptt_task(
-            ptt_path, updated_tasks, "PT-002", "[~]", "Attempt restart", eng_dir=ctf_eng
-        )
+    _start_ptt_task(ptt_path, updated_tasks, "PT-002", "[~]", "Resume task", eng_dir=ctf_eng)
+    assert ptt.find_active_task(ptt.parse_ptt(ptt_path)).id == "PT-002"
 
 
 def test_parse_target_token_ipv6_url():

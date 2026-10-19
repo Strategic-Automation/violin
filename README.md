@@ -79,6 +79,11 @@ Guard dependencies are declared in `plugins/violin_guard/plugin.yaml`. The
 plugin name, directory, and enabled configuration all use `violin_guard`, so
 Hermes can resolve its dependencies without a directory workaround. Installing
 dependencies into the development `.venv` does not install them into Hermes.
+The guard in a Hermes profile automatically creates a persistent Ed25519 receipt
+signing key under that profile's `state/` directory the first time the receipt
+code loads. Keep that profile state with the installation: replacing the key
+makes earlier receipts unverifiable. The benchmark runner supplies its own
+isolated key when it launches a benchmark.
 The disable/enable cycle above forces dependency admission even when the profile
 configuration already enables the plugin. Verify registration after installation:
 
@@ -90,6 +95,28 @@ hermes -p violin tools list
 Plugin Doctor should report 12 tools and 5 hooks, and `violin_guard` should appear
 as an enabled toolset. Restart Hermes after installation before starting an
 engagement. Reinstall the profile to migrate an older `violin-guard` installation.
+
+The Hermes plugin install provisions dependencies for guard tools. The standalone
+administrative CLI uses the project's Python 3.11 environment separately. On a
+fresh native Kali/Parrot account, prepare it from a regular login shell after
+installing the profile and before starting Hermes:
+
+```bash
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+uv python install 3.11
+uv sync --project "$HOME/.hermes/profiles/violin" --no-dev
+```
+
+Hermes tool shells may set `HOME` to the profile's `home/` directory and omit
+uv's install directory from `PATH`. The pentest playbooks derive `VIOLIN_ROOT`
+from that profile layout and use an absolute script path, so CLI calls work from
+an engagement directory. If the standalone CLI reports a missing dependency,
+its recovery command searches the ancestors of profile-local `HOME` for uv in
+the standard `.local/bin` and `.cargo/bin` locations. The benchmark container
+already installs uv on `PATH` and syncs the Python 3.11 project environment.
 
 Then start with an authorized target and let Violin collect the scope before
 any target interaction:

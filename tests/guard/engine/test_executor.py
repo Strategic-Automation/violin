@@ -1,9 +1,13 @@
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import psutil
 import pytest
@@ -92,6 +96,90 @@ def test_unchanged_command_carries_no_rewrite_note(tmp_path):
 
     assert "requested_command" not in receipt
     assert "command_note" not in receipt
+
+
+@pytest.mark.parametrize("capture_mode", ["pipeline", "substitution"])
+def test_http_status_capture_preserves_consumed_body(tmp_path, monkeypatch, capture_mode):
+    """A live local response stays parseable while its status reaches the receipt."""
+    if os.name == "nt":
+        shell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if shell is None:
+            pytest.skip("PowerShell is required to exercise the HTTP shell expressions")
+
+        def launch(command):
+            return [shell, "-NoProfile", "-Command", command]
+
+        curl = "curl.exe"
+    else:
+        shell = shutil.which("bash")
+        if shell is None:
+            pytest.skip("bash is required to exercise POSIX pipeline and substitution syntax")
+
+        def launch(command):
+            return [shell, "-lc", command]
+
+        curl = "curl"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b'{"access_token":"fixture-token"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(
+        execution_process,
+        "_command_argv",
+        lambda command, *_args, **_kwargs: launch(command),
+    )
+    try:
+        url = f"http://127.0.0.1:{server.server_port}/token"
+        if capture_mode == "pipeline":
+            if os.name == "nt":
+                command = (
+                    f"{curl} -sS {url} | ConvertFrom-Json | ForEach-Object {{ $_.access_token }}"
+                )
+            else:
+                parser = (
+                    "python3 -c 'import json,sys; print(json.load(sys.stdin)[\"access_token\"])'"
+                )
+                command = f"{curl} -sS {shlex.quote(url)} | {parser}"
+        elif os.name == "nt":
+            command = (
+                f"$token = $({curl} -sS {url} | ConvertFrom-Json).access_token; Write-Output $token"
+            )
+        else:
+            parser = "python3 -c 'import json,sys; print(json.load(sys.stdin)[\"access_token\"])'"
+            command = f"TOKEN=$({curl} -sS {shlex.quote(url)} | {parser}); printf '%s' \"$TOKEN\""
+
+        receipt = execution.execute(
+            command,
+            eng_dir=str(_engagement(tmp_path)),
+            phase="recon",
+            backend="local",
+            timeout_seconds=10,
+            ptt_task_id="PT-LOCAL-001",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+    assert receipt["exit_code"] == 0, (
+        receipt["exit_code"],
+        receipt["stdout_preview"],
+        receipt["stderr_preview"],
+    )
+    assert receipt["stdout_preview"].strip() == "fixture-token"
+    assert "HTTP/1 200" in receipt["stderr_preview"]
 
 
 def test_failed_to_start_is_audited_without_execution_credit(tmp_path, monkeypatch):

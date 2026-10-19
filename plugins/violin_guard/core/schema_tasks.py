@@ -24,12 +24,14 @@ class RecordPttArgsModel(BaseModel):
     status: str = Field(
         "",
         description=(
-            "Task lifecycle status token: '[~]' (active/start), '[x]' (completed), "
-            "'[-]' (cancelled), '[!]' (blocked). Must be a literal bracket token (not 'in_progress')."
+            "Task lifecycle token: '[~]' starts or resumes a task; '[x]' completes it; "
+            "'[-]' skips it; '[!]' blocks the active task. Must be a literal bracket token."
         ),
     )
     note: str = Field(
-        ..., description="Non-empty lifecycle note describing this start, review, or close"
+        ...,
+        min_length=1,
+        description="Non-empty lifecycle note describing this start, review, or close",
     )
     skill: str = Field(..., description="Selected Violin skill required before task activation")
     technique: str = Field(..., description="Concrete technique required before task activation")

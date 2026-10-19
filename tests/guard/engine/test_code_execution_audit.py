@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import yaml
+
 from plugins.violin_guard.core.engagement import state
 from plugins.violin_guard.core.evidence import history as execution_history
 from plugins.violin_guard.engine import code_execution_audit
@@ -100,6 +102,33 @@ def test_execute_code_accepts_documented_two_field_header(tmp_path) -> None:
     assert intent["target"] == "10.10.10.10"
     assert intent["session_id"] == "test"
     assert intent["execution_class"] == "local_analysis"
+
+
+def test_execute_code_reports_escaped_header_without_rewriting_code():
+    source = r"# violin: {\"eng_dir\":\"/engagement\",\"phase\":\"recon\"}\nprint(1)"
+
+    metadata, error = code_execution_audit.parse_metadata(source)
+
+    assert metadata is None
+    assert "appears escaped" in error
+    assert "physical newline" in error
+
+
+def test_execute_code_accepts_cidr_only_scope_header(tmp_path):
+    eng = _engagement(tmp_path)
+    scope_path = eng / "scope" / "scope.yaml"
+    scope = yaml.safe_load(scope_path.read_text(encoding="utf-8"))
+    scope["targets"]["ip_addresses"] = []
+    scope["targets"]["cidrs"] = ["10.10.10.0/24"]
+    scope_path.write_text(yaml.safe_dump(scope), encoding="utf-8")
+    source = (
+        '# violin: {"eng_dir":"' + str(eng).replace("\\", "\\\\") + '","phase":"recon"}\nprint(1)'
+    )
+
+    metadata, error = code_execution_audit.parse_metadata(source)
+
+    assert error is None
+    assert metadata["target"] == "10.10.10.0/24"
 
 
 def test_execute_code_is_validated_and_recorded(tmp_path) -> None:
