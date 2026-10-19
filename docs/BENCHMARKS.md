@@ -1,5 +1,9 @@
 # Benchmark methodology
 
+The [Photoview comparison benchmark](PHOTOVIEW_BENCHMARK.md) is a separate
+source-assisted protocol with its own fixture and human review. The Duck Store
+golden cases and passing threshold described below do not apply to Photoview.
+
 Violin evaluates the same artifact the agent creates during an assessment: a typed,
 receipt-backed finding. It does not reconstruct intent from Markdown, hypotheses, or report
 formatting.
