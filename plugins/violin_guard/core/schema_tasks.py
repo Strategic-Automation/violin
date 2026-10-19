@@ -24,16 +24,23 @@ class RecordPttArgsModel(BaseModel):
     status: str = Field(
         "",
         description=(
-            "Task lifecycle status token: '[~]' (active/start), '[x]' (completed), "
-            "'[-]' (cancelled), '[!]' (blocked). Must be a literal bracket token (not 'in_progress')."
+            "Task lifecycle token: '[~]' starts a task; '[x]' completes it; '[-]' skips it; "
+            "'[!]' marks it blocked during review/close, not start. Outside batch review, "
+            "only the active '[~]' task may be closed. Use a literal bracket token (not 'in_progress')."
         ),
     )
     note: str = Field(
         ..., description="Non-empty lifecycle note describing this start, review, or close"
     )
-    skill: str = Field(..., description="Selected Violin skill required before task activation")
-    technique: str = Field(..., description="Concrete technique required before task activation")
-    hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
+    skill: str = Field(..., description="Selected Violin skill required on every PTT update")
+    technique: str = Field(..., description="Concrete technique required on every PTT update")
+    hypothesis_id: str = Field(
+        "",
+        description=(
+            "Canonical hypothesis ID required on every lifecycle transition "
+            "in hypothesis-driven phases"
+        ),
+    )
     title: str = Field("", description="Required when explicitly creating a new PTT task")
     phase: str = Field("", description="Phase for an explicitly created PTT task")
 
