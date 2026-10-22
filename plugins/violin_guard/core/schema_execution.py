@@ -68,7 +68,7 @@ class ExecArgsModel(BaseModel):
 
 
 class ExecBurstArgsModel(BaseModel):
-    """Bounded command batch. Preflight denies the whole batch before execution when any command requires review, unless HERMES_YOLO_MODE=1; hard blocks are always denied. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Sync credit limits per phase apply (Recon: 10, Vuln Research: 10, Exploitation/Post-Exploitation/PRIVESC/FLAGS: 20 per sync window) and are shared across execution tools. If a burst is denied with 'insufficient sync credit for burst: need N, have M', split the command set into smaller bursts (size <= M) and review the batch via violin_review_batch to refresh sync credit. A burst is denied with 'skill receipt binding belongs to a different session' when session_id does not match the session that viewed the skill, so read the value from violin_status.skill.session_id instead of inventing a label. Use for recon and exploit/race batches; never raw terminal for targets."""
+    """Bounded command batch. Each command runs in a separate process; shell variables, exports, and directory changes do not carry to the next entry. Put dependent shell steps in one command. Preflight denies the whole batch before execution when any command requires review, unless HERMES_YOLO_MODE=1; hard blocks are always denied. Requires one unambiguous [~] PTT task. Every completed command is appended to history automatically, but the executor never updates PTT progress. Review the batch once with violin_review_batch. Sync credit limits per phase apply (Recon: 10, Vuln Research: 10, Exploitation/Post-Exploitation/PRIVESC/FLAGS: 20 per sync window) and are shared across execution tools. If a burst is denied with 'insufficient sync credit for burst: need N, have M', split the command set into smaller bursts (size <= M) and review the batch via violin_review_batch to refresh sync credit. A burst is denied with 'skill receipt binding belongs to a different session' when session_id does not match the session that viewed the skill, so read the value from violin_status.skill.session_id instead of inventing a label. Use for recon and exploit/race batches; never raw terminal for targets."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -114,10 +114,12 @@ class ExecBurstArgsModel(BaseModel):
     evidence_outputs: list[str] = Field(
         default_factory=list,
         description=(
-            "engagement-relative evidence files this batch writes (same paths you would pass "
-            "to violin_exec). Bursts are approved as one batch, so declare the union of the "
-            "files the batch produces; each command's receipt then seals only the files that "
-            "command itself wrote, so violin_submit_finding can authenticate them."
+            "engagement-relative evidence files this batch may write (same paths you would "
+            "pass to violin_exec). Bursts are approved as one batch, so declare the union of "
+            "requested outputs; each command's evidence_paths.manifest and receipt identify "
+            "only files that command actually wrote and sealed. Pair each cited file with "
+            "that command's receipt when calling violin_submit_finding; a requested output "
+            "that was not written is not authenticated evidence."
         ),
     )
 
@@ -155,10 +157,10 @@ class TargetArgsModel(BaseModel):
 
 
 class StatusArgsModel(BaseModel):
-    """Cheap one-shot explanation of the current task and phase, per-phase command requirements, pending batch commands, blockers, exact next actions, skill-load state, heartbeat state, and phase-aware sync credit. Mutates no state."""
+    """Read-only status for the required engagement directory (pass ``eng_dir``), current task and phase, command requirements, pending commands, blockers, exact next actions, skill-load and heartbeat state, and phase-aware sync credit."""
 
     model_config = ConfigDict(extra="forbid")
 
     eng_dir: str = Field(
-        ..., description="engagement dir ($ENG_DIR / $VIOLIN_ENG_ROOT env also honoured)"
+        ..., description="Required engagement directory, e.g. violin_status(eng_dir='$ENG_DIR')"
     )

@@ -28,6 +28,7 @@ On-demand skill for web application input-validation and client-side vulnerabili
 | SQL Injection | `playbooks/sqli.md` |
 | Cross-Site Scripting | `playbooks/xss.md` |
 | Command Injection | `playbooks/command-injection.md` |
+| Process argument / option injection | `playbooks/argument-injection.md` |
 | Server-Side Request Forgery | `playbooks/ssrf.md` |
 | Path Traversal / LFI | `playbooks/path-traversal.md` |
 | Server-Side Template Injection | `playbooks/ssti.md` |
@@ -38,6 +39,7 @@ On-demand skill for web application input-validation and client-side vulnerabili
 | Prototype Pollution | `playbooks/prototype-pollution.md` |
 | Insecure Deserialization | `playbooks/deserialization.md` |
 | Improper Input Validation | `playbooks/input-validation.md` |
+| Upload processing and derived-artifact authorization | `playbooks/file-processing.md` |
 
 ## Common Pitfalls
 

@@ -62,7 +62,7 @@ def test_playbook_grid_is_rendered_on_load() -> None:
     """The inventory is available without JavaScript and enhanced with live filtering."""
     rendered = page("coverage")
     cards = WebsiteDocument(rendered).playbooks
-    assert len(cards) == 35
+    assert len(cards) == 44
     assert all("hidden" not in card for card in cards)
     assert 'src="assets/coverage.js"' in rendered
     script = (PAGE.parent / "assets" / "coverage.js").read_text(encoding="utf-8")

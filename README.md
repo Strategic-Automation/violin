@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <b>35 playbooks · 19 references · 14 templates · required execution guard · Hermes-native</b>
+  <b>44 playbooks · 23 references · 14 templates · required execution guard · Hermes-native</b>
 </p>
 
 Violin is a **Hermes-native agentic pentest profile** for supervised, authorised penetration tests — from reconnaissance through safe exploit validation to reporting. It uses Hermes' built-in toolsets, seven routed skills, and the required `violin_guard` plugin at the target-execution boundary. The standalone CLI supports release checks, diagnostics, and administrative recovery; target commands run through the plugin. Violin adds no profile-specific credentials and inherits the provider and tool backends already configured in Hermes.
@@ -240,6 +240,11 @@ Marker files such as `.skill-loaded-*` do not prove skill delivery.
 | `business-logic` | Workflow, pricing, coupon, quota, referral, race conditions |
 | `llm-security` | Prompt injection, MCP, JSON-RPC |
 | `misconfig` | Deployment, error handling, observability, obscurity |
+
+Additional OAuth/OIDC, SAML, file-processing, WebSocket, cache/proxy, and
+configuration review playbooks are loaded only when their corresponding
+authorized surface is discovered. Framework, directory-service, and Firebase
+references are similarly on-demand; they do not add runtime tools or scope.
 
 The orchestrator loads only the phase material and specialist playbook needed
 for the current task.

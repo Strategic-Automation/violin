@@ -45,7 +45,11 @@ def test_generate_findings_yaml_roundtrip(tmp_path: Path) -> None:
 def test_generate_closeout_requires_validated_findings(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no validated findings"):
         generate_findings_yaml(tmp_path)
-    with pytest.raises(ValueError, match="no validated findings"):
+    with pytest.raises(ValueError, match="no validated findings") as exc_info:
+        generate_report_md(tmp_path, target="https://example.test")
+    assert "violin_submit_finding" in str(exc_info.value)
+    assert "required dispositions" in str(exc_info.value)
+    with pytest.raises(ValueError, match="violin_submit_finding.*required dispositions"):
         generate_report_md(tmp_path, target="https://example.test")
 
 
@@ -164,4 +168,7 @@ def test_closeout_cli_success_refusal_and_force(tmp_path, entry_point):
     (engagement / "evidence" / "findings.jsonl").unlink()
     result = run("--force")
     assert result.returncode == 1
-    assert result.stdout == "BLOCK: no validated findings in evidence/findings.jsonl\n"
+    assert result.stdout == (
+        "BLOCK: no validated findings in evidence/findings.jsonl; submit confirmed findings "
+        "with violin_submit_finding, or record tested negative results with the required dispositions\n"
+    )

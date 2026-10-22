@@ -12,8 +12,10 @@ from plugins.violin_guard.handlers.ptt_gates import (
 )
 
 
-def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> None:
-    """#124: the warning must say the finding still counts as proof and name the remedy."""
+def test_proof_byte_warning_names_response_head_remedy_without_claiming_status_proves_impact(
+    tmp_path: Path,
+) -> None:
+    """A status-only receipt gets a shell-specific, actionable response-byte remedy."""
     engagement = tmp_path / "engagement"
     proof = engagement / "evidence" / "executions" / "probe.txt"
     proof.parent.mkdir(parents=True)
@@ -27,8 +29,18 @@ def test_proof_byte_warning_states_acceptance_and_the_remedy(tmp_path: Path) -> 
     proof.write_text("HTTP/1.1 401 Unauthorized\n", encoding="utf-8")
     warnings = findings._proof_byte_warnings(engagement, relative, [])
     assert warnings
-    assert "still accepted as proof" in warnings[0]
-    assert "violin_exec" in warnings[0]
+    assert "status-only output does not establish the claim" in warnings[0]
+    assert "curl -i" in warnings[0]
+    assert "supported shell HTTP clients" in warnings[0]
+    assert "not arbitrary Python" in warnings[0]
+
+
+def test_proof_byte_warning_accepts_literal_response_head_from_saved_file(
+    tmp_path: Path,
+) -> None:
+    response = tmp_path / "response.txt"
+    response.write_text("HTTP/1.1 200 OK\nContent-Type: application/json\n", encoding="utf-8")
+    assert findings._proof_byte_warnings(tmp_path, ["response.txt"], []) == []
 
 
 def test_submit_finding_accepts_receipt_authenticated_json_response(

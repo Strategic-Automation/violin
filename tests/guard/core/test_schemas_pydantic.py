@@ -35,6 +35,23 @@ def test_schema_exports_structure():
     assert schemas.TARGET_SCHEMA["name"] == "violin_target"
 
 
+def test_status_and_burst_schemas_explain_inputs_and_process_boundaries() -> None:
+    status_description = schemas.STATUS_SCHEMA["description"]
+    assert "eng_dir" in status_description
+    assert (
+        "Required engagement directory"
+        in schemas.StatusArgsModel.model_fields["eng_dir"].description
+    )
+
+    burst_description = schemas.EXEC_BURST_SCHEMA["description"]
+    assert "separate process" in burst_description
+    assert "do not carry" in burst_description
+    assert "Put dependent shell steps in one command" in burst_description
+    outputs = schemas.ExecBurstArgsModel.model_fields["evidence_outputs"].description
+    assert "evidence_paths.manifest" in outputs
+    assert "actually wrote and sealed" in outputs
+
+
 def test_review_batch_keeps_the_active_task_by_default():
     model = schemas.validate_args(
         schemas.ReviewBatchArgsModel,

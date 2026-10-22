@@ -28,6 +28,13 @@ On-demand skill for weaknesses that arise from how an application is deployed an
 | Security misconfiguration | `playbooks/security-misconfiguration.md` |
 | Security through obscurity | `playbooks/security-through-obscurity.md` |
 | Observability failures | `playbooks/observability-failures.md` |
+| HTTP cache and forwarded-header trust | `playbooks/http-cache-proxy.md` |
+| Supplied AWS IAM and storage policies | `playbooks/cloud-policy-review.md` |
+| Supplied Kubernetes configuration | `playbooks/kubernetes-review.md` |
+
+For host/domain services already within scope, load
+`skills/pentest/references/directory-services.md` only when supplied
+configuration or an authorized read-only observation supports it.
 
 ## Common Pitfalls
 

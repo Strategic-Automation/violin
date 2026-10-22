@@ -17,7 +17,10 @@ def generate_findings_yaml(
 ) -> Path:
     """Render a machine-readable finding summary from validated records."""
     if not records:
-        raise ValueError("no validated findings in evidence/findings.jsonl")
+        raise ValueError(
+            "no validated findings in evidence/findings.jsonl; submit confirmed findings "
+            "with violin_submit_finding, or record tested negative results with the required dispositions"
+        )
     output = engagement / "evidence" / "reporting" / "findings.yaml"
     if output.exists() and not force:
         raise ValueError("findings.yaml exists; pass force=True to regenerate")
@@ -80,7 +83,10 @@ def generate_report_md(
 ) -> Path:
     """Render the human report from validated structured finding records."""
     if not records:
-        raise ValueError("no validated findings in evidence/findings.jsonl")
+        raise ValueError(
+            "no validated findings in evidence/findings.jsonl; submit confirmed findings "
+            "with violin_submit_finding, or record tested negative results with the required dispositions"
+        )
     output = engagement / "reporting" / "report.md"
     if output.exists() and not force:
         raise ValueError("report.md exists; pass force=True to regenerate")

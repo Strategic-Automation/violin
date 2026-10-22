@@ -31,6 +31,8 @@ On-demand skill for identity-management, authentication, authorization, session,
 | CSRF | `playbooks/csrf.md` |
 | Unvalidated Redirect | `playbooks/redirects-unvalidated.md` |
 | Cryptographic Issues | `playbooks/cryptographic-issues.md` |
+| OAuth / OIDC federation and account linking | `playbooks/oauth-oidc.md` |
+| SAML assertion and relying-party validation | `playbooks/saml.md` |
 
 ## Common Pitfalls
 

@@ -172,17 +172,14 @@ Content-Type: application/json
 
 ### Race Condition Testing
 
-Send multiple concurrent requests to the same state-changing endpoint:
-
-```bash
-# Using parallel curl — fire off simultaneous coupon applications
-for i in {1..10}; do
-  curl -s -X POST "https://shop.example.com/api/coupon/apply" \
-    -H "Cookie: session=..." \
-    -d "coupon=SAVE50&orderId=123" &
-done
-wait
-```
+Start with a disposable fixture and an authoritative read of its initial state.
+Submit the operation once sequentially and read authoritative state again. Only
+if the question remains unresolved and the Rules of Engagement explicitly
+permit concurrency, make the smallest authorized concurrent comparison. Re-read
+state afterward. For idempotency, check whether a repeated key returns the
+original response without repeating the effect. A duplicate response or timing
+difference alone is not proof. Keep every target request inside registered
+`violin_*` tools and stop on an unexpected effect or degradation.
 
 ### Workflow Bypass Testing
 
@@ -226,26 +223,18 @@ ffuf -w /usr/share/wordlists/params.txt \
 ```
 
 ### Turbo Intruder — Race Conditions
-A Python Turbo Intruder script for race condition testing:
-```python
-def queueRequests(target, wordlists):
-    engine = RequestEngine(
-        endpoint=target.endpoint, concurrentConnections=20, requestsPerConnection=10, pipeline=True
-    )
+Do not use a high-speed race harness as a default. First capture the initial
+state, execute one sequential request, and re-read authoritative state. Only
+test concurrency when the Rules of Engagement explicitly allow it, using the
+smallest authorized concurrency against a disposable fixture. Afterward, read
+the authoritative state again and determine whether an idempotency key replayed
+the original response without repeating the effect. A duplicate response or
+timing difference alone is not proof. Stop on unexpected state, throttling,
+degradation, or any effect outside the fixture.
 
-    for i in range(20):
-        engine.queue(target.req, [])
-        engine.queue(target.req, [])
-        engine.queue(target.req, [])
-
-
-def handleResponse(req, interesting):
-    table.add(req)
-```
-Save the above to a file and load it in Burp Suite's Turbo Intruder extension.
-
-### Python — Concurrent Requests (code_execution)
-Use `delegate_task(tasks=[...])` to dispatch concurrent request agents. Each agent operates independently on a separate race window (same timestamp, varied payloads), returning structured results that you analyze for race-condition candidates.
+Target-touching requests must remain under the registered `violin_*` guard
+tools. Delegates may analyze saved request/response artifacts only; they must
+not issue concurrent requests to the target.
 
 > Manual `curl` PoC payloads (price/negative/qty, workflow-skip) are in §Detection and §Safe Proof of Concept — reuse those rather than duplicating.
 
@@ -264,7 +253,7 @@ Use `delegate_task(tasks=[...])` to dispatch concurrent request agents. Each age
 
 ### Reference Resources
 - [PortSwigger — Business Logic Vulnerabilities](https://portswigger.net/web-security/logic-flaws)
-- [OWASP — Testing Business Logic](https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/10-Business_Logic_Testing/README)
+- [OWASP WSTG v4.2 — Business Logic Testing](https://wstg.owasp.org/v4.2/4-Web_Application_Security_Testing/10-Business_Logic_Testing/README)
 - [HackerOne Hacktivity](https://hackerone.com/hacktivity) — Filter for "logic" or "business logic"
 - [Turbo Intruder](https://portswigger.net/bappstore/9abaa233088242ea8b252c90a4f9c5c5) — Burp extension for race conditions
 
@@ -284,20 +273,14 @@ curl -v "https://target.com/api/cart/preview" \
 ```
 **Expected evidence:** Show that `total` in the response reflects the modified price.
 
-### Race Condition PoC (Safe)
-```bash
-# Apply a single-use coupon twice — if both succeed before validation,
-# show both applied without completing the order
-for i in {1..2}; do
-  curl -s "https://target.com/api/coupon/apply" \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -H "Cookie: session=..." \
-    -d '{"coupon":"WELCOME10","orderId":101}' &
-done
-wait
-```
-**Expected evidence:** Response shows coupon applied twice or redis count incremented beyond expected.
+### Race Condition Validation
+
+First capture the initial fixture state, make one sequential request, then read
+the state again. If and only if concurrency is explicitly authorized, compare
+using the smallest permitted concurrency against the disposable fixture and
+read state authoritatively afterward. Preserve the idempotency key and
+determine whether the server replayed the original response or applied a second
+effect. Do not infer success from response status or timing alone.
 
 ### Workflow Bypass PoC (Safe)
 ```bash
@@ -314,7 +297,9 @@ Capture for each finding:
 
 1. **Full HTTP request** — including headers, body, cookies
 2. **Full HTTP response** — showing the logic flaw (e.g., price changed, coupon applied twice)
-3. **For race conditions**: timestamps showing concurrent requests, logs showing double-application
+3. **For race conditions**: the initial state, sequential control, exact
+   authorized concurrency and ordered responses, and authoritative state after
+   the comparison. Include idempotency-key behavior and stop conditions.
 4. **Before/after state** — demonstrate the state change was unintended
 
 **Evidence template:**

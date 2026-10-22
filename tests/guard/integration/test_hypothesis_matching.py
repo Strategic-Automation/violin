@@ -98,9 +98,8 @@ def test_rejected_hypothesis_testable_when_explicitly_linked(tmp_path):
     assert not result.errors, f"Rejected-but-linked hypothesis should be testable: {result.errors}"
 
 
-def test_unphased_hypothesis_defaults_to_current_phase_when_linked(tmp_path):
-    """An unphased hypothesis explicitly linked during VULN_RESEARCH defaults
-    to the current phase so it can be dispositioned (empty-phase deadlock fix)."""
+def test_unphased_hypothesis_is_denied_with_binding_remedy_when_linked(tmp_path):
+    """An explicitly linked hypothesis still needs a canonical phase binding."""
     (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
     (tmp_path / "scope" / "scope.yaml").write_text(
         "targets:\n  in_scope_urls: [https://duck-store.escape.tech]\n"
@@ -125,15 +124,13 @@ def test_unphased_hypothesis_defaults_to_current_phase_when_linked(tmp_path):
         "curl -i https://duck-store.escape.tech/api/v1/products",
         hypothesis_id="H-001",
     )
-    assert not result.errors, (
-        f"Unphased-but-linked hypothesis should default to current phase: {result.errors}"
-    )
+    assert result.errors
+    assert "incomplete bindings: H-001 (missing phase)" in result.errors[0]
+    assert "explicit target and phase values" in result.errors[0]
 
 
-def test_unphased_hypothesis_defaults_to_current_phase_unlinked(tmp_path):
-    """A hypothesis recorded without an explicit phase is acceptable to the
-    gate without needing to be explicitly linked: the empty phase defaults to
-    the phase in effect at the gate (empty-phase deadlock fix, #176)."""
+def test_unphased_hypothesis_is_denied_with_binding_remedy_when_unlinked(tmp_path):
+    """Unphased candidates cannot be silently assigned to the active phase."""
     (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
     (tmp_path / "scope" / "scope.yaml").write_text(
         "targets:\n  in_scope_urls: [https://duck-store.escape.tech]\n"
@@ -157,6 +154,35 @@ def test_unphased_hypothesis_defaults_to_current_phase_unlinked(tmp_path):
         command.Phase.VULN_RESEARCH,
         "curl -i https://duck-store.escape.tech/api/v1/products",
     )
-    assert not result.errors, (
-        f"Unphased hypothesis should be admitted against the current phase: {result.errors}"
+    assert result.errors
+    assert "incomplete bindings: H-001 (missing phase)" in result.errors[0]
+    assert "explicit target and phase values" in result.errors[0]
+
+
+def test_missing_target_hypothesis_is_denied_with_binding_remedy(tmp_path):
+    (tmp_path / "scope").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "scope" / "scope.yaml").write_text(
+        "targets:\n  in_scope_urls: [https://duck-store.escape.tech]\n"
+        "rules_of_engagement:\n  allowed_actions: [RECON, VULN_RESEARCH]\n"
+        "engagement:\n  name: Test\n"
+        "authorized_parties: [Tester]\n"
+        "authorisation:\n  confirmed: true\n",
+        encoding="utf-8",
     )
+    (tmp_path / "hypotheses.md").write_text(
+        "# Hypothesis Board\n\n## Active Theories\n\n"
+        "### H-001: API surface\n"
+        "- **Status:** Candidate\n"
+        "- **Phase:** VULN_RESEARCH\n",
+        encoding="utf-8",
+    )
+
+    result = command.check_hypothesis_freshness(
+        tmp_path,
+        command.Phase.VULN_RESEARCH,
+        "curl -i https://duck-store.escape.tech/api/v1/products",
+        hypothesis_id="H-001",
+    )
+    assert result.errors
+    assert "incomplete bindings: H-001 (missing target)" in result.errors[0]
+    assert "explicit target and phase values" in result.errors[0]
