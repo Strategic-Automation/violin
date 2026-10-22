@@ -130,6 +130,16 @@ def test_injects_i_into_every_client_in_compound_command():
     assert "curl -i -s https://duck-store.escape.tech/b" in out
 
 
+def test_injects_i_for_each_supported_posix_loop_probe():
+    for command in (
+        "for path in /a /b; do curl -sS https://example.test$path; done",
+        "while read path; do curl -sS https://example.test$path; done < paths.txt",
+    ):
+        normalized = normalize_http_proof_flags(command)
+        assert "curl -i" in normalized
+        assert normalized.count("curl -i") == 1
+
+
 def test_injects_i_into_mixed_clients_in_compound_command():
     cmd = "curl -s https://duck-store.escape.tech/a && wget -q https://duck-store.escape.tech/b"
     out = normalize_http_proof_flags(cmd)

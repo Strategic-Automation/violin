@@ -255,7 +255,10 @@ def _methodology_gate_errors(engagement: Path, scope_data: dict[str, Any]) -> li
     if not gates_path.is_file():
         return [
             "state/methodology-gates.yaml exists (disposition each WSTG category: "
-            "tested / not_applicable / blocked with evidence). Minimal valid file:\n"
+            "tested / not_applicable / blocked with evidence). The following is a partial "
+            "illustration only; every category in EXPECTED_METHODOLOGY_GATES is required. "
+            "Start from skills/pentest/templates/methodology-gates.yaml and disposition each "
+            "canonical category before closure:\n"
             "  gates:\n"
             "    authentication-session:\n"
             "      status: tested\n"

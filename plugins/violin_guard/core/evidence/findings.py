@@ -193,11 +193,12 @@ def _proof_byte_warnings(
         if _head_has_http_bytes(head):
             return []
     return [
-        "finding proof carries no literal HTTP response bytes, but it is still "
-        "accepted as proof - this warning does not block submission. Attach the "
-        "decisive evidence file(s) via evidence_paths, or re-run the probe through "
-        "violin_exec (which injects the status-capture flag -i) and cite that "
-        "receipt so the decisive status line is captured"
+        "finding proof carries status codes but no literal HTTP response/status "
+        "line or headers; status-only output does not establish the claim. This "
+        "warning does not block submission. Attach an authenticated saved response "
+        "file via evidence_paths, or make one decisive curl -i request through "
+        "violin_exec and cite its receipt. Automatic -i capture applies only to "
+        "supported shell HTTP clients, not arbitrary Python or other scripts."
     ]
 
 

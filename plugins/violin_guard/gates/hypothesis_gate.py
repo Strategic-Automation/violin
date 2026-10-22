@@ -224,13 +224,9 @@ def check_hypothesis_freshness(
         try:
             hypothesis_phase = normalize_phase(hypothesis.phase)
         except ValueError:
-            # An unphased hypothesis defaults to the phase in effect at the
-            # gate, so a hypothesis recorded without an explicit phase is
-            # never stranded with an empty phase that the gate cannot match.
-            if not str(hypothesis.phase or "").strip():
-                hypothesis_phase = phase
-            else:
-                continue
+            # Incomplete phase bindings are not admitted; the denial below
+            # names the missing field and the explicit repair path.
+            continue
         target = normalize_target(hypothesis.target)
 
         if norm_hyp_id is not None and hypothesis.id != norm_hyp_id:
@@ -251,6 +247,15 @@ def check_hypothesis_freshness(
             for hypothesis in hyps
             if hypothesis.canonical_status() != "Rejected" and hypothesis.target
         ]
+        incomplete = []
+        for hypothesis in hyps:
+            missing_fields = [
+                field
+                for field, value in (("target", hypothesis.target), ("phase", hypothesis.phase))
+                if not str(value or "").strip()
+            ]
+            if missing_fields and hypothesis.canonical_status() != "Rejected":
+                incomplete.append(f"H-{hypothesis.id} (missing {', '.join(missing_fields)})")
         msg = (
             f"phase {phase.value} requires a non-rejected hypothesis matching the command target and acceptable phase "
             f"(acceptable phases for {phase.value}: {', '.join(phase_item.value for phase_item in sorted(acceptable_phases, key=lambda phase_candidate: phase_candidate.value))})"
@@ -259,8 +264,10 @@ def check_hypothesis_freshness(
             msg += f" (linked H-{norm_hyp_id.zfill(3)})"
         msg += (
             f"; parsed target(s): {', '.join(sorted(targets)) or 'none'}; "
-            f"available hypotheses: {', '.join(eligible) or 'none'}. "
-            f"To update a hypothesis's phase or status, use violin_record_hypothesis or edit hypotheses.md."
+            f"available hypotheses: {', '.join(eligible) or 'none'}; "
+            f"incomplete bindings: {', '.join(incomplete) or 'none'}. "
+            f"Use violin_record_hypothesis with explicit target and phase values to bind "
+            f"incomplete records; do not infer a target or hypothesis."
         )
         result.add_error(msg)
         return result

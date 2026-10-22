@@ -9,7 +9,10 @@ from plugins.violin_guard.handlers import ptt_handlers
 
 
 @pytest.mark.parametrize("task_id", ["PT-010", "PT-030"])
-def test_missing_hypothesis_rejected_before_ptt_or_binding_mutation(tmp_path, monkeypatch, task_id):
+@pytest.mark.parametrize("status", ["[~]", "[x]", "[-]"])
+def test_missing_hypothesis_rejected_before_ptt_or_binding_mutation(
+    tmp_path, monkeypatch, task_id, status
+):
     assert bootstrap.init_engagement(tmp_path, host="10.10.10.10") == 0
     state.get_pending_sync(tmp_path)  # Acquire the normal read lock before the snapshot.
     before = {
@@ -28,7 +31,7 @@ def test_missing_hypothesis_rejected_before_ptt_or_binding_mutation(tmp_path, mo
             {
                 "eng_dir": str(tmp_path),
                 "id": task_id,
-                "status": "[~]",
+                "status": status,
                 "note": "Begin probe",
                 "skill": "pentest",
                 "technique": "probe",

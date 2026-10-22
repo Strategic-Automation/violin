@@ -27,6 +27,7 @@ On-demand skill for AI/LLM application attack surfaces: prompt injection, jailbr
 |---|---|
 | LLM prompt injection, jailbreak, indirect injection | `playbooks/llm-prompt-injection.md` |
 | MCP / JSON-RPC tool, resource, and session testing | `playbooks/mcp-api-testing.md` |
+| Retrieval ACLs, tenant/session memory, or tool authority | `playbooks/retrieval-and-tool-authority.md` |
 
 ## Common Pitfalls
 

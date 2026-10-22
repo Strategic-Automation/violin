@@ -40,5 +40,8 @@ def test_vuln_research_exit_batches_all_preconditions_in_one_error(tmp_path: Pat
     msg = str(exc.value)
     # All three preconditions appear in the SAME error.
     assert "methodology-gates.yaml exists" in msg
+    assert "partial illustration only" in msg
+    assert "EXPECTED_METHODOLOGY_GATES" in msg
+    assert "skills/pentest/templates/methodology-gates.yaml" in msg
     assert "undispositioned coverage" in msg
     assert "unresolved hypotheses: H-001" in msg

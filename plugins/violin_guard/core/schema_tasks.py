@@ -24,16 +24,19 @@ class RecordPttArgsModel(BaseModel):
     status: str = Field(
         "",
         description=(
-            "Task lifecycle status token: '[~]' (active/start), '[x]' (completed), "
-            "'[-]' (cancelled), '[!]' (blocked). Must be a literal bracket token (not 'in_progress')."
+            "Starting an untouched task requires '[~]'. '[x]' means completed, '[-]' "
+            "cancelled, and '[!]' blocked; those tokens are for review/close transitions, "
+            "not starting a task. Must be a literal bracket token (not 'in_progress')."
         ),
     )
     note: str = Field(
         ..., description="Non-empty lifecycle note describing this start, review, or close"
     )
-    skill: str = Field(..., description="Selected Violin skill required before task activation")
-    technique: str = Field(..., description="Concrete technique required before task activation")
-    hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
+    skill: str = Field(..., description="Selected Violin skill required on every PTT update")
+    technique: str = Field(..., description="Concrete technique required on every PTT update")
+    hypothesis_id: str = Field(
+        "", description="Required for every VULN_RESEARCH PTT start, update, or close"
+    )
     title: str = Field("", description="Required when explicitly creating a new PTT task")
     phase: str = Field("", description="Phase for an explicitly created PTT task")
 
@@ -201,12 +204,16 @@ class ReviewBatchArgsModel(BaseModel):
         "[~]",
         description=(
             "PTT status after review. Defaults to '[~]' so continued same-phase work keeps the "
-            "same task; use '[x]' only when deliberately closing it."
+            "same task. Only the active '[~]' task can be closed outside a batch; use '[x]' "
+            "to complete it or '[-]' to cancel it. '[!]' marks a blocked task during review, "
+            "not when starting one."
         ),
     )
     note: str = Field(..., description="Truthful result/evidence review")
     skill: str = Field(
         "",
-        description="Review skill; defaults to the active execution binding (or fp-check if specified)",
+        description="Required on every update; defaults to the active execution binding (or fp-check if specified)",
     )
-    hypothesis_id: str = Field("", description="Required for hypothesis-driven phases")
+    hypothesis_id: str = Field(
+        "", description="Required for every VULN_RESEARCH PTT start, update, or close"
+    )

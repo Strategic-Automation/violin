@@ -25,7 +25,12 @@ On-demand skill for API protocol, inventory, schema, and machine-to-machine atta
 
 | Surface | Playbook |
 |---|---|
-| REST / SOAP / GraphQL / WebSocket API security | `playbooks/api-security.md` |
+| REST / SOAP / GraphQL API security | `playbooks/api-security.md` |
+| WebSocket session and message authorization | `playbooks/websocket-security.md` |
+
+For supplied Firebase Security Rules and explicitly scoped application APIs,
+load `skills/pentest/references/firebase-authorization.md` on demand. Do not
+infer project-wide authorization from an API URL or public client configuration.
 
 ## Common Pitfalls
 

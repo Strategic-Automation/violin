@@ -99,7 +99,7 @@ def _validate_record_ptt_inputs(
     hypothesis_id = str(args.get("hypothesis_id") or "").strip()
     if requires_hypothesis(phase) and not hypothesis_id:
         raise ValueError(
-            f"hypothesis_id is required for {phase.value} PTT work; create or select a canonical "
+            f"hypothesis_id is required to start, update, or close {phase.value} PTT work; create or select a canonical "
             "H-XXX hypothesis first and pass hypothesis_id='H-XXX'"
         )
 

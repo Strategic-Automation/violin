@@ -26,3 +26,16 @@ def test_model_rejects_a_blank_lifecycle_note() -> None:
         schemas.RecordPttArgsModel.model_validate({**base})
     with pytest.raises(ValidationError):
         schemas.RecordPttArgsModel.model_validate({**base, "note": "   "})
+
+
+def test_ptt_schema_explains_lifecycle_transition_requirements() -> None:
+    status = schemas.RecordPttArgsModel.model_fields["status"].description or ""
+    assert "Starting an untouched task requires '[~]'" in status
+    assert "'[!]' blocked" in status
+    assert "review/close transitions" in status
+    assert "on every PTT update" in schemas.RecordPttArgsModel.model_fields["skill"].description
+    assert "on every PTT update" in schemas.RecordPttArgsModel.model_fields["technique"].description
+    assert (
+        "start, update, or close"
+        in schemas.RecordPttArgsModel.model_fields["hypothesis_id"].description
+    )
